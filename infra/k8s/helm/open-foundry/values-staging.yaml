@@ -1,0 +1,25 @@
+services:
+	gateway:
+		autoscaling:
+			minReplicas: 2
+			maxReplicas: 5
+	query-service:
+		env:
+			DISTRIBUTED_QUERY_WORKERS: "4"
+		autoscaling:
+			minReplicas: 2
+			maxReplicas: 8
+			keda:
+				enabled: true
+	pipeline-service:
+		env:
+			DISTRIBUTED_PIPELINE_WORKERS: "4"
+		autoscaling:
+			minReplicas: 2
+			maxReplicas: 6
+			keda:
+				enabled: true
+	geospatial-service:
+		autoscaling:
+			minReplicas: 2
+			maxReplicas: 4

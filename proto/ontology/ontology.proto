@@ -1,0 +1,142 @@
+syntax = "proto3";
+package open_foundry.ontology;
+
+import "common/types.proto";
+import "google/protobuf/timestamp.proto";
+
+service OntologyService {
+  rpc CreateObjectType(CreateObjectTypeRequest) returns (ObjectType);
+  rpc GetObjectType(GetObjectTypeRequest) returns (ObjectType);
+  rpc ListObjectTypes(ListObjectTypesRequest) returns (ListObjectTypesResponse);
+  rpc UpdateObjectType(UpdateObjectTypeRequest) returns (ObjectType);
+  rpc DeleteObjectType(DeleteObjectTypeRequest) returns (DeleteObjectTypeResponse);
+  rpc CreateProperty(CreatePropertyRequest) returns (Property);
+  rpc ListProperties(ListPropertiesRequest) returns (ListPropertiesResponse);
+  rpc CreateLinkType(CreateLinkTypeRequest) returns (LinkType);
+  rpc ListLinkTypes(ListLinkTypesRequest) returns (ListLinkTypesResponse);
+  rpc DeleteLinkType(DeleteLinkTypeRequest) returns (DeleteLinkTypeResponse);
+}
+
+message ObjectType {
+  open_foundry.common.Uuid id = 1;
+  string name = 2;
+  string display_name = 3;
+  string description = 4;
+  string primary_key_property = 5;
+  string icon = 6;
+  string color = 7;
+  open_foundry.common.Uuid owner_id = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+message Property {
+  open_foundry.common.Uuid id = 1;
+  open_foundry.common.Uuid object_type_id = 2;
+  string name = 3;
+  string display_name = 4;
+  string description = 5;
+  string property_type = 6;
+  bool required = 7;
+  bool unique_constraint = 8;
+  string default_value_json = 9;
+  string validation_rules_json = 10;
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp updated_at = 12;
+}
+
+message LinkType {
+  open_foundry.common.Uuid id = 1;
+  string name = 2;
+  string display_name = 3;
+  string description = 4;
+  open_foundry.common.Uuid source_type_id = 5;
+  open_foundry.common.Uuid target_type_id = 6;
+  string cardinality = 7;
+  open_foundry.common.Uuid owner_id = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+message CreateObjectTypeRequest {
+  string name = 1;
+  string display_name = 2;
+  string description = 3;
+  string primary_key_property = 4;
+  string icon = 5;
+  string color = 6;
+}
+
+message GetObjectTypeRequest {
+  open_foundry.common.Uuid id = 1;
+}
+
+message ListObjectTypesRequest {
+  open_foundry.common.PageRequest pagination = 1;
+  string search = 2;
+}
+
+message ListObjectTypesResponse {
+  repeated ObjectType object_types = 1;
+  open_foundry.common.PageResponse pagination = 2;
+}
+
+message UpdateObjectTypeRequest {
+  open_foundry.common.Uuid id = 1;
+  string display_name = 2;
+  string description = 3;
+  string primary_key_property = 4;
+  string icon = 5;
+  string color = 6;
+}
+
+message DeleteObjectTypeRequest {
+  open_foundry.common.Uuid id = 1;
+}
+
+message DeleteObjectTypeResponse {}
+
+message CreatePropertyRequest {
+  open_foundry.common.Uuid object_type_id = 1;
+  string name = 2;
+  string display_name = 3;
+  string description = 4;
+  string property_type = 5;
+  bool required = 6;
+  bool unique_constraint = 7;
+  string default_value_json = 8;
+  string validation_rules_json = 9;
+}
+
+message ListPropertiesRequest {
+  open_foundry.common.Uuid object_type_id = 1;
+}
+
+message ListPropertiesResponse {
+  repeated Property properties = 1;
+}
+
+message CreateLinkTypeRequest {
+  string name = 1;
+  string display_name = 2;
+  string description = 3;
+  open_foundry.common.Uuid source_type_id = 4;
+  open_foundry.common.Uuid target_type_id = 5;
+  string cardinality = 6;
+}
+
+message ListLinkTypesRequest {
+  open_foundry.common.Uuid object_type_id = 1;
+  open_foundry.common.PageRequest pagination = 2;
+}
+
+message ListLinkTypesResponse {
+  repeated LinkType link_types = 1;
+  open_foundry.common.PageResponse pagination = 2;
+}
+
+message DeleteLinkTypeRequest {
+  open_foundry.common.Uuid id = 1;
+}
+
+message DeleteLinkTypeResponse {}

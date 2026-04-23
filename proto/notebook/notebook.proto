@@ -1,0 +1,56 @@
+syntax = "proto3";
+package notebook;
+
+import "google/protobuf/timestamp.proto";
+
+message Notebook {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string owner_id = 4;
+  string default_kernel = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+message CreateNotebookRequest {
+  string name = 1;
+  string description = 2;
+  string default_kernel = 3;
+}
+
+message UpdateNotebookRequest {
+  string id = 1;
+  optional string name = 2;
+  optional string description = 3;
+  optional string default_kernel = 4;
+}
+
+message GetNotebookRequest {
+  string id = 1;
+}
+
+message ListNotebooksRequest {
+  int32 page = 1;
+  int32 per_page = 2;
+  string search = 3;
+}
+
+message ListNotebooksResponse {
+  repeated Notebook data = 1;
+  int64 total = 2;
+  int32 page = 3;
+  int32 per_page = 4;
+}
+
+message DeleteNotebookRequest {
+  string id = 1;
+}
+
+service NotebookService {
+  rpc CreateNotebook(CreateNotebookRequest) returns (Notebook);
+  rpc GetNotebook(GetNotebookRequest) returns (Notebook);
+  rpc ListNotebooks(ListNotebooksRequest) returns (ListNotebooksResponse);
+  rpc UpdateNotebook(UpdateNotebookRequest) returns (Notebook);
+  rpc DeleteNotebook(DeleteNotebookRequest) returns (Notebook);
+}

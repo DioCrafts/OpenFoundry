@@ -1,0 +1,148 @@
+[workspace]
+resolver = "2"
+members = [
+    # ── Shared Libraries ──
+    "libs/core-models",
+    "libs/auth-middleware",
+    "libs/event-bus",
+    "libs/plugin-sdk",
+    "libs/storage-abstraction",
+    "libs/query-engine",
+    "libs/vector-store",
+    "libs/geospatial-core",
+    "libs/audit-trail",
+    "libs/testing",
+
+    # ── Developer Tooling ──
+    "tools/of-cli",
+
+    # ── Services ──
+    "services/gateway",
+    "services/auth-service",
+    "services/audit-service",
+    "services/data-connector",
+    "services/dataset-service",
+    "services/streaming-service",
+    "services/query-service",
+    "services/pipeline-service",
+    "services/ontology-service",
+    "services/fusion-service",
+    "services/ml-service",
+    "services/ai-service",
+    "services/workflow-service",
+    "services/notebook-service",
+    "services/app-builder-service",
+    "services/report-service",
+    "services/code-repo-service",
+    "services/marketplace-service",
+    "services/nexus-service",
+    "services/geospatial-service",
+    "services/notification-service",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/open-foundry/open-foundry"
+
+[workspace.dependencies]
+# ── Async Runtime ──
+tokio = { version = "1", features = ["full"] }
+
+# ── Web / HTTP ──
+axum = { version = "0.8", features = ["macros", "ws"] }
+axum-extra = { version = "0.10", features = ["typed-header"] }
+tower = { version = "0.5", features = ["full"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "compression-gzip"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+hyper = { version = "1" }
+
+# ── gRPC / Protobuf ──
+tonic = { version = "0.12", features = ["tls"] }
+tonic-build = "0.12"
+prost = "0.13"
+prost-types = "0.13"
+
+# ── Database ──
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "json", "migrate"] }
+
+# ── Serialization ──
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# ── Observability ──
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+opentelemetry = "0.27"
+opentelemetry-otlp = "0.27"
+
+# ── Error Handling ──
+anyhow = "1"
+thiserror = "2"
+
+# ── Identity & Crypto ──
+uuid = { version = "1", features = ["v7", "serde"] }
+jsonwebtoken = "9"
+argon2 = "0.5"
+
+# ── Time ──
+chrono = { version = "0.4", features = ["serde"] }
+
+# ── Config ──
+config = "0.14"
+
+# ── Messaging ──
+async-nats = "0.38"
+
+# ── Object Storage ──
+object_store = { version = "0.11", features = ["aws"] }
+
+# ── Query Engine ──
+datafusion = "44"
+
+# ── Python Integration ──
+pyo3 = { version = "0.22", features = ["auto-initialize"] }
+
+# ── Search ──
+meilisearch-sdk = "0.27"
+
+# ── Redis ──
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+
+# ── Utilities ──
+bytes = "1"
+futures = "0.3"
+async-trait = "0.1"
+rand = "0.8"
+base64 = "0.22"
+url = { version = "2", features = ["serde"] }
+regex = "1"
+
+# ── Testing ──
+testcontainers = "0.23"
+wiremock = "0.6"
+
+# ── Internal Crates ──
+core-models = { path = "libs/core-models" }
+auth-middleware = { path = "libs/auth-middleware" }
+event-bus = { path = "libs/event-bus" }
+storage-abstraction = { path = "libs/storage-abstraction" }
+query-engine = { path = "libs/query-engine" }
+vector-store = { path = "libs/vector-store" }
+geospatial-core = { path = "libs/geospatial-core" }
+audit-trail = { path = "libs/audit-trail" }
+testing = { path = "libs/testing" }
+plugin-sdk = { path = "libs/plugin-sdk" }
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = "symbols"
+codegen-units = 1

@@ -1,0 +1,29 @@
+syntax = "proto3";
+package open_foundry.dataset;
+
+message Schema {
+  repeated Field fields = 1;
+}
+
+message Field {
+  string name = 1;
+  FieldType field_type = 2;
+  bool nullable = 3;
+  map<string, string> metadata = 4;
+}
+
+enum FieldType {
+  FIELD_TYPE_UNSPECIFIED = 0;
+  FIELD_TYPE_BOOLEAN = 1;
+  FIELD_TYPE_INT32 = 2;
+  FIELD_TYPE_INT64 = 3;
+  FIELD_TYPE_FLOAT32 = 4;
+  FIELD_TYPE_FLOAT64 = 5;
+  FIELD_TYPE_STRING = 6;
+  FIELD_TYPE_BINARY = 7;
+  FIELD_TYPE_DATE = 8;
+  FIELD_TYPE_TIMESTAMP = 9;
+  FIELD_TYPE_DECIMAL = 10;
+  FIELD_TYPE_LIST = 11;
+  FIELD_TYPE_STRUCT = 12;
+}

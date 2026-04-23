@@ -1,0 +1,78 @@
+syntax = "proto3";
+package open_foundry.query;
+
+import "common/types.proto";
+import "google/protobuf/timestamp.proto";
+
+service QueryService {
+  rpc ExecuteQuery(ExecuteQueryRequest) returns (QueryResult);
+  rpc ExplainQuery(ExplainQueryRequest) returns (ExplainQueryResponse);
+  rpc SaveQuery(SaveQueryRequest) returns (SavedQuery);
+  rpc ListSavedQueries(ListSavedQueriesRequest) returns (ListSavedQueriesResponse);
+  rpc DeleteSavedQuery(DeleteSavedQueryRequest) returns (DeleteSavedQueryResponse);
+}
+
+message ExecuteQueryRequest {
+  string sql = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+  map<string, string> parameters = 4;
+}
+
+message QueryResult {
+  repeated ColumnMeta columns = 1;
+  repeated RowData rows = 2;
+  int64 total_rows = 3;
+  int64 execution_time_ms = 4;
+  int64 rows_scanned = 5;
+}
+
+message ColumnMeta {
+  string name = 1;
+  string data_type = 2;
+}
+
+message RowData {
+  repeated string values = 1;
+}
+
+message ExplainQueryRequest {
+  string sql = 1;
+}
+
+message ExplainQueryResponse {
+  string logical_plan = 1;
+  string physical_plan = 2;
+}
+
+message SaveQueryRequest {
+  string name = 1;
+  string description = 2;
+  string sql = 3;
+}
+
+message SavedQuery {
+  open_foundry.common.Uuid id = 1;
+  string name = 2;
+  string description = 3;
+  string sql = 4;
+  open_foundry.common.Uuid owner_id = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+message ListSavedQueriesRequest {
+  open_foundry.common.PageRequest pagination = 1;
+  string search = 2;
+}
+
+message ListSavedQueriesResponse {
+  repeated SavedQuery queries = 1;
+  open_foundry.common.PageResponse pagination = 2;
+}
+
+message DeleteSavedQueryRequest {
+  open_foundry.common.Uuid id = 1;
+}
+
+message DeleteSavedQueryResponse {}

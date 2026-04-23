@@ -1,0 +1,70 @@
+{
+  "base_url": "${OPENFOUNDRY_BASE_URL}",
+  "default_headers": {
+    "Authorization": "Bearer ${OPENFOUNDRY_TOKEN}"
+  },
+  "warmup_iterations": 1,
+  "measure_iterations": 5,
+  "scenarios": [
+    {
+      "name": "distributed-query-execution",
+      "method": "POST",
+      "path": "/api/v1/queries/execute",
+      "expected_status": 200,
+      "tags": ["query", "datafusion", "distributed"],
+      "body": {
+        "sql": "SELECT 1 AS value",
+        "limit": 1000,
+        "execution_mode": "distributed",
+        "distributed_worker_count": 4
+      }
+    },
+    {
+      "name": "distributed-pipeline-trigger",
+      "method": "POST",
+      "path": "/api/v1/pipelines/${OPENFOUNDRY_PIPELINE_ID}/run",
+      "expected_status": 201,
+      "tags": ["pipeline", "dag", "distributed"],
+      "body": {
+        "context": {
+          "benchmark": true,
+          "source": "critical-path-suite"
+        }
+      }
+    },
+    {
+      "name": "code-search",
+      "method": "GET",
+      "path": "/api/v1/code-repos/repositories/${OPENFOUNDRY_REPOSITORY_ID}/search?q=widget",
+      "expected_status": 200,
+      "tags": ["code-repo", "search"]
+    },
+    {
+      "name": "audit-event-list",
+      "method": "GET",
+      "path": "/api/v1/audit/events?limit=200",
+      "expected_status": 200,
+      "tags": ["audit", "list"]
+    },
+    {
+      "name": "nexus-federated-query",
+      "method": "POST",
+      "path": "/api/v1/nexus/federation/query",
+      "expected_status": 200,
+      "tags": ["nexus", "federation"],
+      "body": {
+        "share_id": "${OPENFOUNDRY_SHARE_ID}",
+        "sql": "SELECT * FROM shared_dataset LIMIT 25",
+        "purpose": "analytics",
+        "limit": 25
+      }
+    },
+    {
+      "name": "geospatial-tile-fetch",
+      "method": "GET",
+      "path": "/api/v1/geospatial/tiles/${OPENFOUNDRY_TILE_LAYER_ID}",
+      "expected_status": 200,
+      "tags": ["geospatial", "tile", "cdn"]
+    }
+  ]
+}

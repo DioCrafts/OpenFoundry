@@ -1,0 +1,37 @@
+syntax = "proto3";
+package notebook;
+
+import "google/protobuf/timestamp.proto";
+
+message Session {
+  string id = 1;
+  string notebook_id = 2;
+  string kernel = 3;
+  string status = 4;
+  string started_by = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp last_activity = 7;
+}
+
+message CreateSessionRequest {
+  string notebook_id = 1;
+  string kernel = 2;
+}
+
+message StopSessionRequest {
+  string session_id = 1;
+}
+
+message ListSessionsRequest {
+  string notebook_id = 1;
+}
+
+message ListSessionsResponse {
+  repeated Session data = 1;
+}
+
+service KernelService {
+  rpc CreateSession(CreateSessionRequest) returns (Session);
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc StopSession(StopSessionRequest) returns (Session);
+}

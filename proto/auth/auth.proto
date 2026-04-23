@@ -1,0 +1,45 @@
+syntax = "proto3";
+package open_foundry.auth;
+
+import "common/types.proto";
+
+service AuthService {
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  rpc Login(LoginRequest) returns (TokenPair);
+  rpc RefreshToken(RefreshRequest) returns (TokenPair);
+  rpc GetMe(GetMeRequest) returns (UserInfo);
+}
+
+message RegisterRequest {
+  string email = 1;
+  string password = 2;
+  string name = 3;
+}
+
+message RegisterResponse {
+  open_foundry.common.Uuid user_id = 1;
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message TokenPair {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64 expires_in = 3;
+}
+
+message RefreshRequest {
+  string refresh_token = 1;
+}
+
+message GetMeRequest {}
+
+message UserInfo {
+  open_foundry.common.Uuid id = 1;
+  string email = 2;
+  string name = 3;
+  repeated string roles = 4;
+}

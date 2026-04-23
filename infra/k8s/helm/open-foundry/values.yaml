@@ -1,0 +1,131 @@
+namespace: openfoundry
+
+global:
+	imagePullPolicy: IfNotPresent
+	labels:
+		app.kubernetes.io/part-of: openfoundry
+	podAnnotations: {}
+
+services:
+	gateway:
+		enabled: true
+		image:
+			repository: ghcr.io/open-foundry/gateway
+			tag: latest
+		port: 8080
+		replicas: 2
+		env:
+			RUST_LOG: info
+		resources:
+			requests:
+				cpu: 200m
+				memory: 256Mi
+			limits:
+				cpu: "1"
+				memory: 1Gi
+		autoscaling:
+			enabled: true
+			minReplicas: 2
+			maxReplicas: 10
+			targetCPUUtilizationPercentage: 70
+			targetMemoryUtilizationPercentage: 75
+			keda:
+				enabled: false
+				pollingInterval: 15
+				cooldownPeriod: 120
+				triggers: []
+	query-service:
+		enabled: true
+		image:
+			repository: ghcr.io/open-foundry/query-service
+			tag: latest
+		port: 50055
+		replicas: 2
+		env:
+			RUST_LOG: info
+			DISTRIBUTED_QUERY_WORKERS: "4"
+		resources:
+			requests:
+				cpu: 500m
+				memory: 1Gi
+			limits:
+				cpu: "4"
+				memory: 8Gi
+		autoscaling:
+			enabled: true
+			minReplicas: 2
+			maxReplicas: 12
+			targetCPUUtilizationPercentage: 70
+			targetMemoryUtilizationPercentage: 80
+			keda:
+				enabled: true
+				pollingInterval: 15
+				cooldownPeriod: 90
+				triggers:
+					- type: prometheus
+						metadata:
+							serverAddress: http://prometheus-operated.monitoring.svc.cluster.local:9090
+							metricName: query_inflight_requests
+							query: sum(openfoundry_query_inflight_requests)
+							threshold: "40"
+	pipeline-service:
+		enabled: true
+		image:
+			repository: ghcr.io/open-foundry/pipeline-service
+			tag: latest
+		port: 50056
+		replicas: 2
+		env:
+			RUST_LOG: info
+			DISTRIBUTED_PIPELINE_WORKERS: "4"
+		resources:
+			requests:
+				cpu: 500m
+				memory: 1Gi
+			limits:
+				cpu: "4"
+				memory: 6Gi
+		autoscaling:
+			enabled: true
+			minReplicas: 2
+			maxReplicas: 10
+			targetCPUUtilizationPercentage: 75
+			targetMemoryUtilizationPercentage: 80
+			keda:
+				enabled: true
+				pollingInterval: 20
+				cooldownPeriod: 120
+				triggers:
+					- type: prometheus
+						metadata:
+							serverAddress: http://prometheus-operated.monitoring.svc.cluster.local:9090
+							metricName: pipeline_pending_runs
+							query: sum(openfoundry_pipeline_pending_runs)
+							threshold: "20"
+	geospatial-service:
+		enabled: true
+		image:
+			repository: ghcr.io/open-foundry/geospatial-service
+			tag: latest
+		port: 50068
+		replicas: 2
+		env:
+			RUST_LOG: info
+		resources:
+			requests:
+				cpu: 300m
+				memory: 512Mi
+			limits:
+				cpu: "2"
+				memory: 4Gi
+		autoscaling:
+			enabled: true
+			minReplicas: 2
+			maxReplicas: 8
+			targetCPUUtilizationPercentage: 65
+			targetMemoryUtilizationPercentage: 75
+			keda:
+				enabled: false
+				pollingInterval: 15
+				cooldownPeriod: 120
+				triggers: []

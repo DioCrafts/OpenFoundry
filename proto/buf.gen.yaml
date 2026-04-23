@@ -1,0 +1,16 @@
+version: v2
+managed:
+  enabled: true
+plugins:
+  # Rust / Tonic
+  - remote: buf.build/community/neoeinstein-prost
+    out: ../libs/proto-gen/src
+    opt:
+      - compile_well_known_types
+  - remote: buf.build/community/neoeinstein-tonic
+    out: ../libs/proto-gen/src
+    opt:
+      - compile_well_known_types
+  # TypeScript (connect-es)
+  - remote: buf.build/connectrpc/es
+    out: ../apps/web/src/lib/api/gen

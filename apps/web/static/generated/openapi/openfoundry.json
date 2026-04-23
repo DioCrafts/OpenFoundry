@@ -1,0 +1,3140 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "OpenFoundry Proto-Derived API",
+    "version": "0.1.0",
+    "description": "Auto-generated JSON/HTTP contract derived from OpenFoundry proto services."
+  },
+  "paths": {
+    "/api/v1/auth/assign-role": {
+      "post": {
+        "summary": "RbacService AssignRole",
+        "operationId": "open_foundry.auth.RbacService.AssignRole",
+        "tags": [
+          "open_foundry.auth"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignRoleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssignRoleResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/get-me": {
+      "get": {
+        "summary": "AuthService GetMe",
+        "operationId": "open_foundry.auth.AuthService.GetMe",
+        "tags": [
+          "open_foundry.auth"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/list-roles": {
+      "get": {
+        "summary": "RbacService ListRoles",
+        "operationId": "open_foundry.auth.RbacService.ListRoles",
+        "tags": [
+          "open_foundry.auth"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListRolesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "summary": "AuthService Login",
+        "operationId": "open_foundry.auth.AuthService.Login",
+        "tags": [
+          "open_foundry.auth"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPair"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/refresh-token": {
+      "post": {
+        "summary": "AuthService RefreshToken",
+        "operationId": "open_foundry.auth.AuthService.RefreshToken",
+        "tags": [
+          "open_foundry.auth"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPair"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/register": {
+      "post": {
+        "summary": "AuthService Register",
+        "operationId": "open_foundry.auth.AuthService.Register",
+        "tags": [
+          "open_foundry.auth"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisterResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/common/check": {
+      "post": {
+        "summary": "HealthService Check",
+        "operationId": "open_foundry.common.HealthService.Check",
+        "tags": [
+          "open_foundry.common"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HealthCheckRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthCheckResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/data-integration/create-connection": {
+      "post": {
+        "summary": "ConnectorService CreateConnection",
+        "operationId": "open_foundry.data_integration.ConnectorService.CreateConnection",
+        "tags": [
+          "open_foundry.data_integration"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConnectionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Connection"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/data-integration/delete-connection": {
+      "delete": {
+        "summary": "ConnectorService DeleteConnection",
+        "operationId": "open_foundry.data_integration.ConnectorService.DeleteConnection",
+        "tags": [
+          "open_foundry.data_integration"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteConnectionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/data-integration/infer-schema": {
+      "post": {
+        "summary": "ConnectorService InferSchema",
+        "operationId": "open_foundry.data_integration.ConnectorService.InferSchema",
+        "tags": [
+          "open_foundry.data_integration"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InferSchemaRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferSchemaResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/data-integration/list-connections": {
+      "get": {
+        "summary": "ConnectorService ListConnections",
+        "operationId": "open_foundry.data_integration.ConnectorService.ListConnections",
+        "tags": [
+          "open_foundry.data_integration"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListConnectionsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/data-integration/sync-connection": {
+      "post": {
+        "summary": "ConnectorService SyncConnection",
+        "operationId": "open_foundry.data_integration.ConnectorService.SyncConnection",
+        "tags": [
+          "open_foundry.data_integration"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncConnectionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/data-integration/test-connection": {
+      "post": {
+        "summary": "ConnectorService TestConnection",
+        "operationId": "open_foundry.data_integration.ConnectorService.TestConnection",
+        "tags": [
+          "open_foundry.data_integration"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestConnectionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestConnectionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/create-dataset": {
+      "post": {
+        "summary": "DatasetService CreateDataset",
+        "operationId": "open_foundry.dataset.DatasetService.CreateDataset",
+        "tags": [
+          "open_foundry.dataset"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDatasetRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dataset"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/delete-dataset": {
+      "delete": {
+        "summary": "DatasetService DeleteDataset",
+        "operationId": "open_foundry.dataset.DatasetService.DeleteDataset",
+        "tags": [
+          "open_foundry.dataset"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteDatasetResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/get-dataset": {
+      "get": {
+        "summary": "DatasetService GetDataset",
+        "operationId": "open_foundry.dataset.DatasetService.GetDataset",
+        "tags": [
+          "open_foundry.dataset"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dataset"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/get-versions": {
+      "get": {
+        "summary": "DatasetService GetVersions",
+        "operationId": "open_foundry.dataset.DatasetService.GetVersions",
+        "tags": [
+          "open_foundry.dataset"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetVersionsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/list-datasets": {
+      "get": {
+        "summary": "DatasetService ListDatasets",
+        "operationId": "open_foundry.dataset.DatasetService.ListDatasets",
+        "tags": [
+          "open_foundry.dataset"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListDatasetsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/preview-data": {
+      "post": {
+        "summary": "DatasetService PreviewData",
+        "operationId": "open_foundry.dataset.DatasetService.PreviewData",
+        "tags": [
+          "open_foundry.dataset"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewDataRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewDataResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/update-dataset": {
+      "patch": {
+        "summary": "DatasetService UpdateDataset",
+        "operationId": "open_foundry.dataset.DatasetService.UpdateDataset",
+        "tags": [
+          "open_foundry.dataset"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDatasetRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dataset"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notebook/create-notebook": {
+      "post": {
+        "summary": "NotebookService CreateNotebook",
+        "operationId": "notebook.NotebookService.CreateNotebook",
+        "tags": [
+          "notebook"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateNotebookRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Notebook"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notebook/create-session": {
+      "post": {
+        "summary": "KernelService CreateSession",
+        "operationId": "notebook.KernelService.CreateSession",
+        "tags": [
+          "notebook"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notebook/delete-notebook": {
+      "delete": {
+        "summary": "NotebookService DeleteNotebook",
+        "operationId": "notebook.NotebookService.DeleteNotebook",
+        "tags": [
+          "notebook"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Notebook"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notebook/get-notebook": {
+      "get": {
+        "summary": "NotebookService GetNotebook",
+        "operationId": "notebook.NotebookService.GetNotebook",
+        "tags": [
+          "notebook"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Notebook"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notebook/list-notebooks": {
+      "get": {
+        "summary": "NotebookService ListNotebooks",
+        "operationId": "notebook.NotebookService.ListNotebooks",
+        "tags": [
+          "notebook"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListNotebooksResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notebook/list-sessions": {
+      "get": {
+        "summary": "KernelService ListSessions",
+        "operationId": "notebook.KernelService.ListSessions",
+        "tags": [
+          "notebook"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSessionsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notebook/stop-session": {
+      "post": {
+        "summary": "KernelService StopSession",
+        "operationId": "notebook.KernelService.StopSession",
+        "tags": [
+          "notebook"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StopSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notebook/update-notebook": {
+      "patch": {
+        "summary": "NotebookService UpdateNotebook",
+        "operationId": "notebook.NotebookService.UpdateNotebook",
+        "tags": [
+          "notebook"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateNotebookRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Notebook"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ontology/create-link-type": {
+      "post": {
+        "summary": "OntologyService CreateLinkType",
+        "operationId": "open_foundry.ontology.OntologyService.CreateLinkType",
+        "tags": [
+          "open_foundry.ontology"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateLinkTypeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkType"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ontology/create-object-type": {
+      "post": {
+        "summary": "OntologyService CreateObjectType",
+        "operationId": "open_foundry.ontology.OntologyService.CreateObjectType",
+        "tags": [
+          "open_foundry.ontology"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateObjectTypeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectType"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ontology/create-property": {
+      "post": {
+        "summary": "OntologyService CreateProperty",
+        "operationId": "open_foundry.ontology.OntologyService.CreateProperty",
+        "tags": [
+          "open_foundry.ontology"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePropertyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Property"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ontology/delete-link-type": {
+      "delete": {
+        "summary": "OntologyService DeleteLinkType",
+        "operationId": "open_foundry.ontology.OntologyService.DeleteLinkType",
+        "tags": [
+          "open_foundry.ontology"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteLinkTypeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ontology/delete-object-type": {
+      "delete": {
+        "summary": "OntologyService DeleteObjectType",
+        "operationId": "open_foundry.ontology.OntologyService.DeleteObjectType",
+        "tags": [
+          "open_foundry.ontology"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteObjectTypeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ontology/get-object-type": {
+      "get": {
+        "summary": "OntologyService GetObjectType",
+        "operationId": "open_foundry.ontology.OntologyService.GetObjectType",
+        "tags": [
+          "open_foundry.ontology"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectType"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ontology/list-link-types": {
+      "get": {
+        "summary": "OntologyService ListLinkTypes",
+        "operationId": "open_foundry.ontology.OntologyService.ListLinkTypes",
+        "tags": [
+          "open_foundry.ontology"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListLinkTypesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ontology/list-object-types": {
+      "get": {
+        "summary": "OntologyService ListObjectTypes",
+        "operationId": "open_foundry.ontology.OntologyService.ListObjectTypes",
+        "tags": [
+          "open_foundry.ontology"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListObjectTypesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ontology/list-properties": {
+      "get": {
+        "summary": "OntologyService ListProperties",
+        "operationId": "open_foundry.ontology.OntologyService.ListProperties",
+        "tags": [
+          "open_foundry.ontology"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPropertiesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ontology/update-object-type": {
+      "patch": {
+        "summary": "OntologyService UpdateObjectType",
+        "operationId": "open_foundry.ontology.OntologyService.UpdateObjectType",
+        "tags": [
+          "open_foundry.ontology"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateObjectTypeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectType"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/create-pipeline": {
+      "post": {
+        "summary": "PipelineService CreatePipeline",
+        "operationId": "open_foundry.pipeline.PipelineService.CreatePipeline",
+        "tags": [
+          "open_foundry.pipeline"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePipelineRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pipeline"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/delete-pipeline": {
+      "delete": {
+        "summary": "PipelineService DeletePipeline",
+        "operationId": "open_foundry.pipeline.PipelineService.DeletePipeline",
+        "tags": [
+          "open_foundry.pipeline"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletePipelineResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/get-dataset-lineage": {
+      "get": {
+        "summary": "LineageService GetDatasetLineage",
+        "operationId": "open_foundry.pipeline.LineageService.GetDatasetLineage",
+        "tags": [
+          "open_foundry.pipeline"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LineageGraph"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/get-full-lineage": {
+      "get": {
+        "summary": "LineageService GetFullLineage",
+        "operationId": "open_foundry.pipeline.LineageService.GetFullLineage",
+        "tags": [
+          "open_foundry.pipeline"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LineageGraph"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/get-pipeline": {
+      "get": {
+        "summary": "PipelineService GetPipeline",
+        "operationId": "open_foundry.pipeline.PipelineService.GetPipeline",
+        "tags": [
+          "open_foundry.pipeline"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pipeline"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/get-run": {
+      "get": {
+        "summary": "PipelineService GetRun",
+        "operationId": "open_foundry.pipeline.PipelineService.GetRun",
+        "tags": [
+          "open_foundry.pipeline"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineRun"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/list-pipelines": {
+      "get": {
+        "summary": "PipelineService ListPipelines",
+        "operationId": "open_foundry.pipeline.PipelineService.ListPipelines",
+        "tags": [
+          "open_foundry.pipeline"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPipelinesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/list-runs": {
+      "get": {
+        "summary": "PipelineService ListRuns",
+        "operationId": "open_foundry.pipeline.PipelineService.ListRuns",
+        "tags": [
+          "open_foundry.pipeline"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListRunsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/record-lineage": {
+      "post": {
+        "summary": "LineageService RecordLineage",
+        "operationId": "open_foundry.pipeline.LineageService.RecordLineage",
+        "tags": [
+          "open_foundry.pipeline"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordLineageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordLineageResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/trigger-run": {
+      "post": {
+        "summary": "PipelineService TriggerRun",
+        "operationId": "open_foundry.pipeline.PipelineService.TriggerRun",
+        "tags": [
+          "open_foundry.pipeline"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TriggerRunRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineRun"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/update-pipeline": {
+      "patch": {
+        "summary": "PipelineService UpdatePipeline",
+        "operationId": "open_foundry.pipeline.PipelineService.UpdatePipeline",
+        "tags": [
+          "open_foundry.pipeline"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePipelineRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pipeline"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/queries/delete-saved-query": {
+      "delete": {
+        "summary": "QueryService DeleteSavedQuery",
+        "operationId": "open_foundry.query.QueryService.DeleteSavedQuery",
+        "tags": [
+          "open_foundry.query"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteSavedQueryResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/queries/execute-query": {
+      "post": {
+        "summary": "QueryService ExecuteQuery",
+        "operationId": "open_foundry.query.QueryService.ExecuteQuery",
+        "tags": [
+          "open_foundry.query"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecuteQueryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/queries/explain-query": {
+      "post": {
+        "summary": "QueryService ExplainQuery",
+        "operationId": "open_foundry.query.QueryService.ExplainQuery",
+        "tags": [
+          "open_foundry.query"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExplainQueryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExplainQueryResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/queries/list-saved-queries": {
+      "get": {
+        "summary": "QueryService ListSavedQueries",
+        "operationId": "open_foundry.query.QueryService.ListSavedQueries",
+        "tags": [
+          "open_foundry.query"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSavedQueriesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/queries/save-query": {
+      "post": {
+        "summary": "QueryService SaveQuery",
+        "operationId": "open_foundry.query.QueryService.SaveQuery",
+        "tags": [
+          "open_foundry.query"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveQueryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedQuery"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AssignRoleRequest": {
+        "type": "object",
+        "properties": {
+          "role_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "user_id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "AssignRoleResponse": {
+        "type": "object",
+        "properties": {}
+      },
+      "Cell": {
+        "type": "object",
+        "properties": {
+          "cell_type": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "execution_count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kernel": {
+            "type": "string"
+          },
+          "last_output": {
+            "$ref": "#/components/schemas/Value"
+          },
+          "notebook_id": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "source": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CellOutput": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "$ref": "#/components/schemas/Value"
+          },
+          "execution_count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "output_type": {
+            "type": "string"
+          }
+        }
+      },
+      "Column": {
+        "type": "object",
+        "properties": {
+          "data_type": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "ColumnMeta": {
+        "type": "object",
+        "properties": {
+          "data_type": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "Connection": {
+        "type": "object",
+        "properties": {
+          "config": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "connector_type": {
+            "$ref": "#/components/schemas/ConnectorType"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "last_sync_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ConnectionStatus"
+          }
+        }
+      },
+      "CreateCellRequest": {
+        "type": "object",
+        "properties": {
+          "cell_type": {
+            "type": "string"
+          },
+          "kernel": {
+            "type": "string"
+          },
+          "notebook_id": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "source": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateConnectionRequest": {
+        "type": "object",
+        "properties": {
+          "config": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "connector_type": {
+            "$ref": "#/components/schemas/ConnectorType"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateDatasetRequest": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "format": {
+            "$ref": "#/components/schemas/DatasetFormat"
+          },
+          "name": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "CreateLinkTypeRequest": {
+        "type": "object",
+        "properties": {
+          "cardinality": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source_type_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "target_type_id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "CreateNotebookRequest": {
+        "type": "object",
+        "properties": {
+          "default_kernel": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateObjectTypeRequest": {
+        "type": "object",
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "primary_key_property": {
+            "type": "string"
+          }
+        }
+      },
+      "CreatePipelineRequest": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PipelineNode"
+            }
+          }
+        }
+      },
+      "CreatePropertyRequest": {
+        "type": "object",
+        "properties": {
+          "default_value_json": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "object_type_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "property_type": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "unique_constraint": {
+            "type": "boolean"
+          },
+          "validation_rules_json": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateSessionRequest": {
+        "type": "object",
+        "properties": {
+          "kernel": {
+            "type": "string"
+          },
+          "notebook_id": {
+            "type": "string"
+          }
+        }
+      },
+      "Dataset": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "current_version": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "description": {
+            "type": "string"
+          },
+          "format": {
+            "$ref": "#/components/schemas/DatasetFormat"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "row_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "schema": {
+            "$ref": "#/components/schemas/Schema"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "storage_path": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DatasetVersion": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "message": {
+            "type": "string"
+          },
+          "row_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "DeleteConnectionRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "DeleteConnectionResponse": {
+        "type": "object",
+        "properties": {}
+      },
+      "DeleteDatasetRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "DeleteDatasetResponse": {
+        "type": "object",
+        "properties": {}
+      },
+      "DeleteLinkTypeRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "DeleteLinkTypeResponse": {
+        "type": "object",
+        "properties": {}
+      },
+      "DeleteNotebookRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        }
+      },
+      "DeleteObjectTypeRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "DeleteObjectTypeResponse": {
+        "type": "object",
+        "properties": {}
+      },
+      "DeletePipelineRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "DeletePipelineResponse": {
+        "type": "object",
+        "properties": {}
+      },
+      "DeleteSavedQueryRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "DeleteSavedQueryResponse": {
+        "type": "object",
+        "properties": {}
+      },
+      "ErrorDetail": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ExecuteCellRequest": {
+        "type": "object",
+        "properties": {
+          "cell_id": {
+            "type": "string"
+          }
+        }
+      },
+      "ExecuteQueryRequest": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "sql": {
+            "type": "string"
+          }
+        }
+      },
+      "ExplainQueryRequest": {
+        "type": "object",
+        "properties": {
+          "sql": {
+            "type": "string"
+          }
+        }
+      },
+      "ExplainQueryResponse": {
+        "type": "object",
+        "properties": {
+          "logical_plan": {
+            "type": "string"
+          },
+          "physical_plan": {
+            "type": "string"
+          }
+        }
+      },
+      "Field": {
+        "type": "object",
+        "properties": {
+          "field_type": {
+            "$ref": "#/components/schemas/FieldType"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "nullable": {
+            "type": "boolean"
+          }
+        }
+      },
+      "GetDatasetLineageRequest": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "GetDatasetRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "GetFullLineageRequest": {
+        "type": "object",
+        "properties": {}
+      },
+      "GetMeRequest": {
+        "type": "object",
+        "properties": {}
+      },
+      "GetNotebookRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        }
+      },
+      "GetObjectTypeRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "GetPipelineRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "GetRunRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "GetVersionsRequest": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "GetVersionsResponse": {
+        "type": "object",
+        "properties": {
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatasetVersion"
+            }
+          }
+        }
+      },
+      "HealthCheckRequest": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string"
+          }
+        }
+      },
+      "HealthCheckResponse": {
+        "type": "object",
+        "properties": {}
+      },
+      "InferSchemaRequest": {
+        "type": "object",
+        "properties": {
+          "connection_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "table_name": {
+            "type": "string"
+          }
+        }
+      },
+      "InferSchemaResponse": {
+        "type": "object",
+        "properties": {
+          "columns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InferredColumn"
+            }
+          }
+        }
+      },
+      "InferredColumn": {
+        "type": "object",
+        "properties": {
+          "inferred_type": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "nullable": {
+            "type": "boolean"
+          },
+          "source_type": {
+            "type": "string"
+          }
+        }
+      },
+      "LineageEdge": {
+        "type": "object",
+        "properties": {
+          "node_id": {
+            "type": "string"
+          },
+          "pipeline_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "source_dataset_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "target_dataset_id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "LineageGraph": {
+        "type": "object",
+        "properties": {
+          "edges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LineageEdge"
+            }
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LineageNode"
+            }
+          }
+        }
+      },
+      "LineageNode": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "LinkType": {
+        "type": "object",
+        "properties": {
+          "cardinality": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "description": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "source_type_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "target_type_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ListConnectionsRequest": {
+        "type": "object",
+        "properties": {
+          "pagination": {
+            "$ref": "#/components/schemas/PageRequest"
+          }
+        }
+      },
+      "ListConnectionsResponse": {
+        "type": "object",
+        "properties": {
+          "connections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Connection"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PageResponse"
+          }
+        }
+      },
+      "ListDatasetsRequest": {
+        "type": "object",
+        "properties": {
+          "pagination": {
+            "$ref": "#/components/schemas/PageRequest"
+          },
+          "search": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ListDatasetsResponse": {
+        "type": "object",
+        "properties": {
+          "datasets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Dataset"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PageResponse"
+          }
+        }
+      },
+      "ListLinkTypesRequest": {
+        "type": "object",
+        "properties": {
+          "object_type_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PageRequest"
+          }
+        }
+      },
+      "ListLinkTypesResponse": {
+        "type": "object",
+        "properties": {
+          "link_types": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LinkType"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PageResponse"
+          }
+        }
+      },
+      "ListNotebooksRequest": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "per_page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "search": {
+            "type": "string"
+          }
+        }
+      },
+      "ListNotebooksResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Notebook"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "per_page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "ListObjectTypesRequest": {
+        "type": "object",
+        "properties": {
+          "pagination": {
+            "$ref": "#/components/schemas/PageRequest"
+          },
+          "search": {
+            "type": "string"
+          }
+        }
+      },
+      "ListObjectTypesResponse": {
+        "type": "object",
+        "properties": {
+          "object_types": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObjectType"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PageResponse"
+          }
+        }
+      },
+      "ListPipelinesRequest": {
+        "type": "object",
+        "properties": {
+          "pagination": {
+            "$ref": "#/components/schemas/PageRequest"
+          },
+          "search": {
+            "type": "string"
+          }
+        }
+      },
+      "ListPipelinesResponse": {
+        "type": "object",
+        "properties": {
+          "pagination": {
+            "$ref": "#/components/schemas/PageResponse"
+          },
+          "pipelines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Pipeline"
+            }
+          }
+        }
+      },
+      "ListPropertiesRequest": {
+        "type": "object",
+        "properties": {
+          "object_type_id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "ListPropertiesResponse": {
+        "type": "object",
+        "properties": {
+          "properties": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Property"
+            }
+          }
+        }
+      },
+      "ListRolesRequest": {
+        "type": "object",
+        "properties": {}
+      },
+      "ListRolesResponse": {
+        "type": "object",
+        "properties": {
+          "roles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Role"
+            }
+          }
+        }
+      },
+      "ListRunsRequest": {
+        "type": "object",
+        "properties": {
+          "pagination": {
+            "$ref": "#/components/schemas/PageRequest"
+          },
+          "pipeline_id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "ListRunsResponse": {
+        "type": "object",
+        "properties": {
+          "pagination": {
+            "$ref": "#/components/schemas/PageResponse"
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PipelineRun"
+            }
+          }
+        }
+      },
+      "ListSavedQueriesRequest": {
+        "type": "object",
+        "properties": {
+          "pagination": {
+            "$ref": "#/components/schemas/PageRequest"
+          },
+          "search": {
+            "type": "string"
+          }
+        }
+      },
+      "ListSavedQueriesResponse": {
+        "type": "object",
+        "properties": {
+          "pagination": {
+            "$ref": "#/components/schemas/PageResponse"
+          },
+          "queries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SavedQuery"
+            }
+          }
+        }
+      },
+      "ListSessionsRequest": {
+        "type": "object",
+        "properties": {
+          "notebook_id": {
+            "type": "string"
+          }
+        }
+      },
+      "ListSessionsResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Session"
+            }
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "Notebook": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "default_kernel": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ObjectType": {
+        "type": "object",
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "description": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "primary_key_property": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PageRequest": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "per_page": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "PageResponse": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "per_page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_pages": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "Pipeline": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PipelineNode"
+            }
+          },
+          "owner_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PipelineNode": {
+        "type": "object",
+        "properties": {
+          "config_json": {
+            "type": "string"
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "id": {
+            "type": "string"
+          },
+          "input_dataset_ids": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Uuid"
+            }
+          },
+          "label": {
+            "type": "string"
+          },
+          "output_dataset_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "transform_type": {
+            "type": "string"
+          }
+        }
+      },
+      "PipelineRun": {
+        "type": "object",
+        "properties": {
+          "error_message": {
+            "type": "string"
+          },
+          "finished_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "node_results_json": {
+            "type": "string"
+          },
+          "pipeline_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "started_by": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "PreviewDataRequest": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "PreviewDataResponse": {
+        "type": "object",
+        "properties": {
+          "columns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Column"
+            }
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Row"
+            }
+          },
+          "total_rows": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "Property": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "default_value_json": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "object_type_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "property_type": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "unique_constraint": {
+            "type": "boolean"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "validation_rules_json": {
+            "type": "string"
+          }
+        }
+      },
+      "QueryResult": {
+        "type": "object",
+        "properties": {
+          "columns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ColumnMeta"
+            }
+          },
+          "execution_time_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RowData"
+            }
+          },
+          "rows_scanned": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_rows": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "RecordLineageRequest": {
+        "type": "object",
+        "properties": {
+          "node_id": {
+            "type": "string"
+          },
+          "pipeline_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "source_dataset_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "target_dataset_id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "RecordLineageResponse": {
+        "type": "object",
+        "properties": {}
+      },
+      "RefreshRequest": {
+        "type": "object",
+        "properties": {
+          "refresh_token": {
+            "type": "string"
+          }
+        }
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "RegisterResponse": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "Role": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "Row": {
+        "type": "object",
+        "properties": {
+          "values": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "RowData": {
+        "type": "object",
+        "properties": {
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "SaveQueryRequest": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sql": {
+            "type": "string"
+          }
+        }
+      },
+      "SavedQuery": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "sql": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Schema": {
+        "type": "object",
+        "properties": {
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Field"
+            }
+          }
+        }
+      },
+      "Session": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kernel": {
+            "type": "string"
+          },
+          "last_activity": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "notebook_id": {
+            "type": "string"
+          },
+          "started_by": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "StopSessionRequest": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string"
+          }
+        }
+      },
+      "SyncConnectionRequest": {
+        "type": "object",
+        "properties": {
+          "connection_id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "table_name": {
+            "type": "string"
+          },
+          "target_dataset_id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "SyncStatus": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "rows_synced": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "TestConnectionRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "TestConnectionResponse": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Timestamps": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TokenPair": {
+        "type": "object",
+        "properties": {
+          "access_token": {
+            "type": "string"
+          },
+          "expires_in": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "refresh_token": {
+            "type": "string"
+          }
+        }
+      },
+      "TriggerRunRequest": {
+        "type": "object",
+        "properties": {
+          "pipeline_id": {
+            "$ref": "#/components/schemas/Uuid"
+          }
+        }
+      },
+      "UpdateCellRequest": {
+        "type": "object",
+        "properties": {
+          "cell_id": {
+            "type": "string"
+          },
+          "cell_type": {
+            "type": "string"
+          },
+          "kernel": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "source": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateDatasetRequest": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "UpdateNotebookRequest": {
+        "type": "object",
+        "properties": {
+          "default_kernel": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateObjectTypeRequest": {
+        "type": "object",
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "primary_key_property": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdatePipelineRequest": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PipelineNode"
+            }
+          }
+        }
+      },
+      "UserInfo": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "Uuid": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

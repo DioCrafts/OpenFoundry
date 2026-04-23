@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-primary: 99 102 241;     /* indigo-500 */
+    --color-secondary: 139 92 246;   /* violet-500 */
+    --color-accent: 14 165 233;      /* sky-500 */
+    --color-success: 34 197 94;      /* green-500 */
+    --color-warning: 234 179 8;      /* yellow-500 */
+    --color-danger: 239 68 68;       /* red-500 */
+  }
+
+  body {
+    @apply antialiased;
+  }
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 dark:bg-gray-700 rounded-full;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-400 dark:bg-gray-600;
+}

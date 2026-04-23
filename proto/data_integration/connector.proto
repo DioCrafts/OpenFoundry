@@ -1,0 +1,100 @@
+syntax = "proto3";
+package open_foundry.data_integration;
+
+import "common/types.proto";
+import "google/protobuf/timestamp.proto";
+
+service ConnectorService {
+  rpc CreateConnection(CreateConnectionRequest) returns (Connection);
+  rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
+  rpc TestConnection(TestConnectionRequest) returns (TestConnectionResponse);
+  rpc SyncConnection(SyncConnectionRequest) returns (SyncStatus);
+  rpc InferSchema(InferSchemaRequest) returns (InferSchemaResponse);
+  rpc DeleteConnection(DeleteConnectionRequest) returns (DeleteConnectionResponse);
+}
+
+message Connection {
+  open_foundry.common.Uuid id = 1;
+  string name = 2;
+  ConnectorType connector_type = 3;
+  map<string, string> config = 4;
+  ConnectionStatus status = 5;
+  google.protobuf.Timestamp last_sync_at = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+
+enum ConnectorType {
+  CONNECTOR_TYPE_UNSPECIFIED = 0;
+  CONNECTOR_TYPE_POSTGRESQL = 1;
+  CONNECTOR_TYPE_MYSQL = 2;
+  CONNECTOR_TYPE_CSV = 3;
+  CONNECTOR_TYPE_PARQUET = 4;
+  CONNECTOR_TYPE_JSON = 5;
+  CONNECTOR_TYPE_S3 = 6;
+  CONNECTOR_TYPE_REST_API = 7;
+}
+
+enum ConnectionStatus {
+  CONNECTION_STATUS_UNSPECIFIED = 0;
+  CONNECTION_STATUS_CONNECTED = 1;
+  CONNECTION_STATUS_DISCONNECTED = 2;
+  CONNECTION_STATUS_ERROR = 3;
+}
+
+message CreateConnectionRequest {
+  string name = 1;
+  ConnectorType connector_type = 2;
+  map<string, string> config = 3;
+}
+
+message ListConnectionsRequest {
+  open_foundry.common.PageRequest pagination = 1;
+}
+
+message ListConnectionsResponse {
+  repeated Connection connections = 1;
+  open_foundry.common.PageResponse pagination = 2;
+}
+
+message TestConnectionRequest {
+  open_foundry.common.Uuid id = 1;
+}
+
+message TestConnectionResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message SyncConnectionRequest {
+  open_foundry.common.Uuid connection_id = 1;
+  string table_name = 2;
+  open_foundry.common.Uuid target_dataset_id = 3;
+}
+
+message SyncStatus {
+  string status = 1;
+  int64 rows_synced = 2;
+  string error = 3;
+}
+
+message InferSchemaRequest {
+  open_foundry.common.Uuid connection_id = 1;
+  string table_name = 2;
+}
+
+message InferSchemaResponse {
+  repeated InferredColumn columns = 1;
+}
+
+message InferredColumn {
+  string name = 1;
+  string source_type = 2;
+  string inferred_type = 3;
+  bool nullable = 4;
+}
+
+message DeleteConnectionRequest {
+  open_foundry.common.Uuid id = 1;
+}
+
+message DeleteConnectionResponse {}

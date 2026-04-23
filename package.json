@@ -1,0 +1,19 @@
+{
+  "name": "open-foundry",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The Open-Source Data Operating System",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "pnpm --filter @open-foundry/web dev",
+    "build": "pnpm --filter @open-foundry/web build",
+    "lint": "pnpm --filter @open-foundry/web lint",
+    "test": "pnpm --filter @open-foundry/web test",
+    "test:e2e": "pnpm --filter @open-foundry/web test:e2e",
+    "check": "pnpm --filter @open-foundry/web check"
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  }
+}

@@ -1,0 +1,32 @@
+[package]
+name = "dataset-service"
+description = "Dataset management — versioning, schemas, profiling"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+core-models = { workspace = true }
+auth-middleware = { workspace = true }
+event-bus = { workspace = true }
+storage-abstraction = { workspace = true }
+query-engine = { workspace = true }
+axum = { workspace = true, features = ["multipart"] }
+axum-extra = { workspace = true }
+tokio = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+config = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+datafusion = { workspace = true }
+regex = { workspace = true }
+thiserror = { workspace = true }
+arrow = { version = "53" }
+csv = "1.3"

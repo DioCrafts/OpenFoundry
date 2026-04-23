@@ -1,0 +1,30 @@
+[package]
+name = "notebook-service"
+description = "Interactive computational notebooks (Python/SQL)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+core-models = { workspace = true }
+auth-middleware = { workspace = true }
+event-bus = { workspace = true }
+query-engine = { workspace = true }
+storage-abstraction = { workspace = true }
+axum = { workspace = true }
+axum-extra = { workspace = true }
+tonic = { workspace = true }
+tokio = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+config = { workspace = true }
+thiserror = { workspace = true }
+pyo3 = { workspace = true }
+reqwest = { workspace = true }
+arrow = { version = "53" }

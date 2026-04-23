@@ -1,0 +1,42 @@
+syntax = "proto3";
+package open_foundry.pipeline;
+
+import "common/types.proto";
+import "google/protobuf/timestamp.proto";
+
+service LineageService {
+  rpc GetDatasetLineage(GetDatasetLineageRequest) returns (LineageGraph);
+  rpc GetFullLineage(GetFullLineageRequest) returns (LineageGraph);
+  rpc RecordLineage(RecordLineageRequest) returns (RecordLineageResponse);
+}
+
+message LineageEdge {
+  open_foundry.common.Uuid source_dataset_id = 1;
+  open_foundry.common.Uuid target_dataset_id = 2;
+  open_foundry.common.Uuid pipeline_id = 3;
+  string node_id = 4;
+}
+
+message LineageNode {
+  open_foundry.common.Uuid dataset_id = 1;
+}
+
+message LineageGraph {
+  repeated LineageNode nodes = 1;
+  repeated LineageEdge edges = 2;
+}
+
+message GetDatasetLineageRequest {
+  open_foundry.common.Uuid dataset_id = 1;
+}
+
+message GetFullLineageRequest {}
+
+message RecordLineageRequest {
+  open_foundry.common.Uuid source_dataset_id = 1;
+  open_foundry.common.Uuid target_dataset_id = 2;
+  open_foundry.common.Uuid pipeline_id = 3;
+  string node_id = 4;
+}
+
+message RecordLineageResponse {}

@@ -1,0 +1,32 @@
+<script lang="ts">
+	import type { InstallRecord } from '$lib/api/marketplace';
+
+	export let installs: InstallRecord[] = [];
+</script>
+
+<section class="rounded-3xl border border-stone-200 bg-white p-5 shadow-sm shadow-stone-200/60">
+	<div>
+		<p class="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">Installed Packages</p>
+		<h3 class="mt-2 text-xl font-semibold text-stone-900">Workspace rollout history</h3>
+		<p class="mt-1 text-sm text-stone-500">Track completed installs and their dependency plans across workspaces.</p>
+	</div>
+
+	<div class="mt-5 grid gap-3 lg:grid-cols-2">
+		{#each installs as install}
+			<div class="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-4">
+				<div class="flex items-center justify-between gap-3">
+					<div>
+						<p class="font-semibold text-stone-900">{install.listing_name}</p>
+						<p class="text-sm text-stone-500">{install.workspace_name} • {install.version}</p>
+					</div>
+					<span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">{install.status}</span>
+				</div>
+				<div class="mt-3 flex flex-wrap gap-2">
+					{#each install.dependency_plan as dependency}
+						<span class="rounded-full bg-white px-2 py-1 text-xs text-stone-600">{dependency.package_slug} {dependency.version_req}</span>
+					{/each}
+				</div>
+			</div>
+		{/each}
+	</div>
+</section>

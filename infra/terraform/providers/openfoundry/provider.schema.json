@@ -1,0 +1,54 @@
+{
+  "provider": {
+    "name": "openfoundry",
+    "version": "0.1.0",
+    "configuration": {
+      "api_url": "Base URL for the OpenFoundry gateway.",
+      "token": "Bearer token used for authenticated API operations.",
+      "workspace": "Logical workspace or environment name."
+    }
+  },
+  "resources": [
+    {
+      "name": "openfoundry_repository_integration",
+      "description": "Manage GitHub or GitLab sync configuration for an OpenFoundry repository.",
+      "attributes": {
+        "ci_trigger_strategy": "github_actions, gitlab_ci, or webhook.",
+        "external_project": "Remote project or repository slug.",
+        "provider": "git provider: github or gitlab.",
+        "repository_id": "UUID of the repository managed by code-repo-service.",
+        "sync_mode": "push_mirror, bidirectional_mirror, or query_only."
+      }
+    },
+    {
+      "name": "openfoundry_audit_policy",
+      "description": "Manage retention and purge policies through audit-service.",
+      "attributes": {
+        "classification": "public, confidential, or pii.",
+        "name": "Human-friendly policy name.",
+        "purge_mode": "redaction or hard delete posture.",
+        "retention_days": "Retention TTL for matching audit events."
+      }
+    },
+    {
+      "name": "openfoundry_nexus_peer",
+      "description": "Register and authenticate a cross-organization peer in nexus-service.",
+      "attributes": {
+        "auth_mode": "mtls+jwt, oidc+mtls, or custom auth profile.",
+        "endpoint_url": "Partner API endpoint.",
+        "shared_scopes": "Scopes allowed for federation and sharing.",
+        "slug": "Stable peer identifier."
+      }
+    }
+  ],
+  "data_sources": [
+    {
+      "name": "openfoundry_openapi_spec",
+      "description": "Expose the proto-derived OpenAPI contract for downstream tooling.",
+      "attributes": {
+        "path_count": "Number of available API operations.",
+        "spec_json": "Serialized OpenAPI document."
+      }
+    }
+  ]
+}

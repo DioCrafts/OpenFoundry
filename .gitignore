@@ -1,0 +1,72 @@
+# Ignore only local and generated artifacts.
+# Keep source, docs, lockfiles, static assets, and versioned generated specs.
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+!.env.sample
+!.env.*.sample
+!.env.template
+!.env.*.template
+.direnv/
+
+# Rust
+target/
+**/*.rs.bk
+*.profraw
+*.profdata
+
+# Node / SvelteKit
+node_modules/
+.pnpm-store/
+.npm/
+.svelte-kit/
+.vite/
+apps/web/build/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+.eslintcache
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Terraform local state
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Benchmarks and local runtime output
+benchmarks/results/*
+!benchmarks/results/.gitkeep
+tmp/
+temp/
+.cache/
+*.log
+*.pid
+*.seed
+*.tmp
+*.temp
+
+# Intentionally kept in Git:
+# - apps/web/static/generated/openapi/openfoundry.json
+# - apps/web/static/generated/terraform/openfoundry-provider.json
+# - infra/terraform/providers/openfoundry/provider.schema.json

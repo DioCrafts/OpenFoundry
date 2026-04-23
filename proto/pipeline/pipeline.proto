@@ -1,0 +1,99 @@
+syntax = "proto3";
+package open_foundry.pipeline;
+
+import "common/types.proto";
+import "google/protobuf/timestamp.proto";
+
+service PipelineService {
+  rpc CreatePipeline(CreatePipelineRequest) returns (Pipeline);
+  rpc GetPipeline(GetPipelineRequest) returns (Pipeline);
+  rpc ListPipelines(ListPipelinesRequest) returns (ListPipelinesResponse);
+  rpc UpdatePipeline(UpdatePipelineRequest) returns (Pipeline);
+  rpc DeletePipeline(DeletePipelineRequest) returns (DeletePipelineResponse);
+  rpc TriggerRun(TriggerRunRequest) returns (PipelineRun);
+  rpc GetRun(GetRunRequest) returns (PipelineRun);
+  rpc ListRuns(ListRunsRequest) returns (ListRunsResponse);
+}
+
+message Pipeline {
+  open_foundry.common.Uuid id = 1;
+  string name = 2;
+  string description = 3;
+  open_foundry.common.Uuid owner_id = 4;
+  repeated PipelineNode nodes = 5;
+  string status = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+message PipelineNode {
+  string id = 1;
+  string label = 2;
+  string transform_type = 3;
+  string config_json = 4;
+  repeated string depends_on = 5;
+  repeated open_foundry.common.Uuid input_dataset_ids = 6;
+  open_foundry.common.Uuid output_dataset_id = 7;
+}
+
+message PipelineRun {
+  open_foundry.common.Uuid id = 1;
+  open_foundry.common.Uuid pipeline_id = 2;
+  string status = 3;
+  open_foundry.common.Uuid started_by = 4;
+  string node_results_json = 5;
+  string error_message = 6;
+  google.protobuf.Timestamp started_at = 7;
+  google.protobuf.Timestamp finished_at = 8;
+}
+
+message CreatePipelineRequest {
+  string name = 1;
+  string description = 2;
+  repeated PipelineNode nodes = 3;
+}
+
+message GetPipelineRequest {
+  open_foundry.common.Uuid id = 1;
+}
+
+message ListPipelinesRequest {
+  open_foundry.common.PageRequest pagination = 1;
+  string search = 2;
+}
+
+message ListPipelinesResponse {
+  repeated Pipeline pipelines = 1;
+  open_foundry.common.PageResponse pagination = 2;
+}
+
+message UpdatePipelineRequest {
+  open_foundry.common.Uuid id = 1;
+  string name = 2;
+  string description = 3;
+  repeated PipelineNode nodes = 4;
+}
+
+message DeletePipelineRequest {
+  open_foundry.common.Uuid id = 1;
+}
+
+message DeletePipelineResponse {}
+
+message TriggerRunRequest {
+  open_foundry.common.Uuid pipeline_id = 1;
+}
+
+message GetRunRequest {
+  open_foundry.common.Uuid id = 1;
+}
+
+message ListRunsRequest {
+  open_foundry.common.Uuid pipeline_id = 1;
+  open_foundry.common.PageRequest pagination = 2;
+}
+
+message ListRunsResponse {
+  repeated PipelineRun runs = 1;
+  open_foundry.common.PageResponse pagination = 2;
+}

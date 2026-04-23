@@ -1,0 +1,18 @@
+[package]
+name = "storage-abstraction"
+description = "Object storage abstraction layer (S3, MinIO, local filesystem)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+object_store = { workspace = true }
+bytes = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }

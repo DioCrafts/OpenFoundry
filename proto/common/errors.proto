@@ -1,0 +1,8 @@
+syntax = "proto3";
+package open_foundry.common;
+
+message ErrorDetail {
+  string code = 1;
+  string message = 2;
+  map<string, string> metadata = 3;
+}

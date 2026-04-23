@@ -1,0 +1,28 @@
+syntax = "proto3";
+package open_foundry.auth;
+
+import "common/types.proto";
+
+service RbacService {
+  rpc ListRoles(ListRolesRequest) returns (ListRolesResponse);
+  rpc AssignRole(AssignRoleRequest) returns (AssignRoleResponse);
+}
+
+message ListRolesRequest {}
+
+message Role {
+  open_foundry.common.Uuid id = 1;
+  string name = 2;
+  string description = 3;
+}
+
+message ListRolesResponse {
+  repeated Role roles = 1;
+}
+
+message AssignRoleRequest {
+  open_foundry.common.Uuid user_id = 1;
+  open_foundry.common.Uuid role_id = 2;
+}
+
+message AssignRoleResponse {}

@@ -1,0 +1,25 @@
+syntax = "proto3";
+package open_foundry.common;
+
+import "google/protobuf/timestamp.proto";
+
+message Uuid {
+  string value = 1;
+}
+
+message PageRequest {
+  int32 page = 1;
+  int32 per_page = 2;
+}
+
+message PageResponse {
+  int32 page = 1;
+  int32 per_page = 2;
+  int64 total = 3;
+  int32 total_pages = 4;
+}
+
+message Timestamps {
+  google.protobuf.Timestamp created_at = 1;
+  google.protobuf.Timestamp updated_at = 2;
+}

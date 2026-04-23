@@ -1,0 +1,16 @@
+[package]
+name = "testing"
+description = "Shared test utilities: fixtures, testcontainers setup, and mocks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+testcontainers = { workspace = true }
+wiremock = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+rand = { workspace = true }

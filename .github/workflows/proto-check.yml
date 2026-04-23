@@ -1,0 +1,21 @@
+name: Proto — Lint & Breaking
+
+on:
+  push:
+    branches: [main]
+    paths: ["proto/**"]
+  pull_request:
+    branches: [main]
+    paths: ["proto/**"]
+
+jobs:
+  lint:
+    name: Buf Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bufbuild/buf-action@v1
+        with:
+          lint: true
+          breaking: true
+          input: proto

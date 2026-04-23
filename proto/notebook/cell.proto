@@ -1,0 +1,44 @@
+syntax = "proto3";
+package notebook;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+message Cell {
+  string id = 1;
+  string notebook_id = 2;
+  string cell_type = 3;
+  string kernel = 4;
+  string source = 5;
+  int32 position = 6;
+  google.protobuf.Value last_output = 7;
+  int32 execution_count = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+message CreateCellRequest {
+  string notebook_id = 1;
+  string cell_type = 2;
+  string kernel = 3;
+  string source = 4;
+  int32 position = 5;
+}
+
+message UpdateCellRequest {
+  string cell_id = 1;
+  optional string source = 2;
+  optional string cell_type = 3;
+  optional string kernel = 4;
+  optional int32 position = 5;
+}
+
+message ExecuteCellRequest {
+  string cell_id = 1;
+}
+
+message CellOutput {
+  string output_type = 1;
+  google.protobuf.Value content = 2;
+  int32 execution_count = 3;
+}

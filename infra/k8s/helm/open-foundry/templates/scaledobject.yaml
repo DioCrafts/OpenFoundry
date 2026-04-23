@@ -1,0 +1,19 @@
+{{- range $serviceName, $service := .Values.services }}
+{{- if and $service.enabled $service.autoscaling.enabled $service.autoscaling.keda.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "open-foundry.fullname" (dict "root" $ "serviceName" $serviceName) }}
+  namespace: {{ $.Values.namespace }}
+spec:
+  scaleTargetRef:
+    name: {{ include "open-foundry.fullname" (dict "root" $ "serviceName" $serviceName) }}
+  minReplicaCount: {{ $service.autoscaling.minReplicas }}
+  maxReplicaCount: {{ $service.autoscaling.maxReplicas }}
+  pollingInterval: {{ $service.autoscaling.keda.pollingInterval }}
+  cooldownPeriod: {{ $service.autoscaling.keda.cooldownPeriod }}
+  triggers:
+{{ toYaml $service.autoscaling.keda.triggers | indent 4 }}
+---
+{{- end }}
+{{- end }}

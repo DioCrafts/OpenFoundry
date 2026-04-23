@@ -1,0 +1,10 @@
+version: v2
+name: buf.build/open-foundry/api
+lint:
+  use:
+    - STANDARD
+  except:
+    - PACKAGE_VERSION_SUFFIX
+breaking:
+  use:
+    - FILE

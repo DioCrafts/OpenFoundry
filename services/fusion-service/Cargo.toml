@@ -1,0 +1,24 @@
+[package]
+name = "fusion-service"
+description = "Unified entity resolution and cross-dataset joining"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+core-models = { workspace = true }
+event-bus = { workspace = true }
+auth-middleware = { workspace = true }
+axum = { workspace = true }
+tonic = { workspace = true }
+tokio = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+config = { workspace = true }
+
