@@ -1,8 +1,7 @@
 <div align="center">
 
-<img src="images/logo.png" alt="OpenFoundry" width="110" />
+<img src="images/logo.png" alt="OpenFoundry" width="324" />
 
-# OpenFoundry
 
 ### Turn disconnected data into decisions, workflows, and real-world outcomes
 
