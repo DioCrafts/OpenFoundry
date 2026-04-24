@@ -24,10 +24,18 @@ pub struct AppConfig {
     pub local_storage_root: Option<String>,
 }
 
-fn default_host() -> String { "0.0.0.0".to_string() }
-fn default_port() -> u16 { 50053 }
-fn default_storage_backend() -> String { "s3".to_string() }
-fn default_storage_bucket() -> String { "datasets".to_string() }
+fn default_host() -> String {
+    "0.0.0.0".to_string()
+}
+fn default_port() -> u16 {
+    50053
+}
+fn default_storage_backend() -> String {
+    "s3".to_string()
+}
+fn default_storage_bucket() -> String {
+    "datasets".to_string()
+}
 
 impl AppConfig {
     pub fn from_env() -> Result<Self, config::ConfigError> {

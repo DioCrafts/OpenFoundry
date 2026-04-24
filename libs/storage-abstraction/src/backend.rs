@@ -30,7 +30,10 @@ pub trait StorageBackend: Send + Sync + 'static {
     async fn get(&self, path: &str) -> StorageResult<Bytes>;
 
     /// Download an object as a byte stream.
-    async fn get_stream(&self, path: &str) -> StorageResult<BoxStream<'static, StorageResult<Bytes>>>;
+    async fn get_stream(
+        &self,
+        path: &str,
+    ) -> StorageResult<BoxStream<'static, StorageResult<Bytes>>>;
 
     /// Delete an object.
     async fn delete(&self, path: &str) -> StorageResult<()>;
@@ -47,4 +50,3 @@ pub trait StorageBackend: Send + Sync + 'static {
     /// Get object metadata.
     async fn head(&self, path: &str) -> StorageResult<ObjectMeta>;
 }
-

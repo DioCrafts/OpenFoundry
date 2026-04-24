@@ -5,9 +5,8 @@ mod models;
 
 use auth_middleware::jwt::JwtConfig;
 use axum::{
-    middleware,
+    Router, middleware,
     routing::{get, post},
-    Router,
 };
 use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::EnvFilter;

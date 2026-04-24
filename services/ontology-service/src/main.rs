@@ -5,9 +5,8 @@ mod models;
 
 use auth_middleware::jwt::JwtConfig;
 use axum::{
-    middleware,
+    Router, middleware,
     routing::{delete, get, post, put},
-    Router,
 };
 use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::EnvFilter;
@@ -56,8 +55,7 @@ async fn main() {
         http_client,
     };
 
-    let public = Router::new()
-        .route("/health", get(|| async { "ok" }));
+    let public = Router::new().route("/health", get(|| async { "ok" }));
 
     let protected = Router::new()
         // Object types
@@ -107,4 +105,3 @@ async fn main() {
 
     axum::serve(listener, app).await.expect("server error");
 }
-

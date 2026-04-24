@@ -5,9 +5,8 @@ mod models;
 
 use auth_middleware::jwt::JwtConfig;
 use axum::{
-    middleware,
+    Router, middleware,
     routing::{get, post},
-    Router,
 };
 use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::EnvFilter;
@@ -72,8 +71,14 @@ async fn main() {
             "/api/v1/apps/from-template",
             post(handlers::apps::create_from_template),
         )
-        .route("/api/v1/apps/templates", get(handlers::apps::list_templates))
-        .route("/api/v1/widgets/catalog", get(handlers::widgets::list_widget_catalog))
+        .route(
+            "/api/v1/apps/templates",
+            get(handlers::apps::list_templates),
+        )
+        .route(
+            "/api/v1/widgets/catalog",
+            get(handlers::widgets::list_widget_catalog),
+        )
         .route(
             "/api/v1/apps/{id}",
             get(handlers::apps::get_app)
@@ -90,8 +95,7 @@ async fn main() {
         )
         .route(
             "/api/v1/apps/{app_id}/pages/{page_id}",
-            axum::routing::patch(handlers::pages::update_page)
-                .delete(handlers::pages::delete_page),
+            axum::routing::patch(handlers::pages::update_page).delete(handlers::pages::delete_page),
         )
         .route(
             "/api/v1/apps/{id}/versions",

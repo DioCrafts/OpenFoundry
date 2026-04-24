@@ -1,5 +1,10 @@
-use axum::{extract::{Path, State}, http::StatusCode, response::IntoResponse, Json};
 use auth_middleware::layer::AuthUser;
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::StatusCode,
+    response::IntoResponse,
+};
 use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
@@ -151,10 +156,11 @@ pub async fn deactivate_user(
         return response;
     }
 
-    let result = sqlx::query("UPDATE users SET is_active = false, updated_at = NOW() WHERE id = $1")
-        .bind(user_id)
-        .execute(&state.db)
-        .await;
+    let result =
+        sqlx::query("UPDATE users SET is_active = false, updated_at = NOW() WHERE id = $1")
+            .bind(user_id)
+            .execute(&state.db)
+            .await;
 
     match result {
         Ok(r) if r.rows_affected() > 0 => StatusCode::NO_CONTENT.into_response(),

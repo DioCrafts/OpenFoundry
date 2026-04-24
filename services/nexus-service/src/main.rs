@@ -4,12 +4,7 @@ mod handlers;
 mod models;
 
 use auth_middleware::jwt::JwtConfig;
-use axum::{
-    extract::FromRef,
-    middleware,
-    routing::get,
-    Router,
-};
+use axum::{Router, extract::FromRef, middleware, routing::get};
 use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::EnvFilter;
 
@@ -103,7 +98,10 @@ async fn main() {
             auth_middleware::auth_layer,
         ));
 
-    let app = Router::new().merge(public).merge(protected).with_state(state);
+    let app = Router::new()
+        .merge(public)
+        .merge(protected)
+        .with_state(state);
 
     let addr = format!("{}:{}", cfg.host, cfg.port);
     tracing::info!("starting nexus-service on {addr}");

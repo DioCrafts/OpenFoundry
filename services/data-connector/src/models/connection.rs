@@ -31,5 +31,12 @@ pub struct ListConnectionsQuery {
 
 /// Supported connector types for validation.
 pub const VALID_TYPES: &[&str] = &[
-    "postgresql", "mysql", "csv", "parquet", "json", "s3", "rest_api",
+    "postgresql",
+    "mysql",
+    "csv",
+    "parquet",
+    "json",
+    "s3",
+    "rest_api",
+    "salesforce",
 ];

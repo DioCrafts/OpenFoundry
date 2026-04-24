@@ -76,7 +76,7 @@
 				type="text"
 				value={draftSearch}
 				oninput={(event) => draftSearch = (event.currentTarget as HTMLInputElement).value}
-				placeholder="Use {{search}} in widget SQL or rely on table filtering"
+				placeholder={'Use {{search}} in widget SQL or rely on table filtering'}
 				class="mt-2 w-full bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400 dark:text-slate-100"
 			/>
 		</label>

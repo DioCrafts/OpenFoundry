@@ -8,7 +8,8 @@
     "dev": "pnpm --filter @open-foundry/web dev",
     "build": "pnpm --filter @open-foundry/web build",
     "lint": "pnpm --filter @open-foundry/web lint",
-    "test": "pnpm --filter @open-foundry/web test",
+    "test": "pnpm --filter @open-foundry/web test:unit",
+    "test:unit": "pnpm --filter @open-foundry/web test:unit",
     "test:e2e": "pnpm --filter @open-foundry/web test:e2e",
     "check": "pnpm --filter @open-foundry/web check"
   },

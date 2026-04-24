@@ -1,9 +1,4 @@
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    Json,
-};
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde::Deserialize;
 
 use crate::AppState;
@@ -23,11 +18,14 @@ pub async fn explain_query(
         Ok((logical, physical)) => Json(serde_json::json!({
             "logical_plan": logical,
             "physical_plan": physical,
-        })).into_response(),
-        Err(e) => {
-            (StatusCode::BAD_REQUEST, Json(serde_json::json!({
+        }))
+        .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
                 "error": e,
-            }))).into_response()
-        }
+            })),
+        )
+            .into_response(),
     }
 }

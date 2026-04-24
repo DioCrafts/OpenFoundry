@@ -1,5 +1,5 @@
-use datafusion::prelude::*;
 use datafusion::error::DataFusionError;
+use datafusion::prelude::*;
 use std::sync::Arc;
 
 /// OpenFoundry query context wrapping DataFusion's SessionContext.
@@ -32,11 +32,7 @@ impl QueryContext {
     }
 
     /// Register a CSV file as a table.
-    pub async fn register_csv(
-        &self,
-        table_name: &str,
-        path: &str,
-    ) -> Result<(), DataFusionError> {
+    pub async fn register_csv(&self, table_name: &str, path: &str) -> Result<(), DataFusionError> {
         self.ctx
             .register_csv(table_name, path, CsvReadOptions::default())
             .await
@@ -57,10 +53,7 @@ impl QueryContext {
     }
 
     /// Get the logical plan for a SQL query (for EXPLAIN).
-    pub async fn explain_sql(
-        &self,
-        query: &str,
-    ) -> Result<(String, String), DataFusionError> {
+    pub async fn explain_sql(&self, query: &str) -> Result<(String, String), DataFusionError> {
         let df = self.ctx.sql(query).await?;
         let logical_plan = format!("{:?}", df.logical_plan());
         let physical_plan = format!("{:?}", df.create_physical_plan().await?);
@@ -75,8 +68,7 @@ impl QueryContext {
     ) -> Result<(), DataFusionError> {
         let schema = batch.schema();
         let provider = datafusion::datasource::MemTable::try_new(schema, vec![vec![batch]])?;
-        self.ctx
-            .register_table(table_name, Arc::new(provider))?;
+        self.ctx.register_table(table_name, Arc::new(provider))?;
         Ok(())
     }
 }
@@ -86,4 +78,3 @@ impl Default for QueryContext {
         Self::new()
     }
 }
-

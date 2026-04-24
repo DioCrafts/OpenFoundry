@@ -1,18 +1,20 @@
 use axum::{
-    extract::{Path, State},
     Json,
+    extract::{Path, State},
 };
 use chrono::Utc;
 use sqlx::{query_as, query_scalar, types::Json as SqlJson};
 use uuid::Uuid;
 
 use crate::{
+    AppState,
     domain::{
         deduplication,
         engine::{blocking, graph_resolution, ml_matcher, rule_matcher},
         merge,
     },
     models::{
+        FusionOverview, ListResponse,
         golden_record::GoldenRecord,
         job::{
             CreateFusionJobRequest, FusionJob, FusionJobMetrics, FusionJobRow,
@@ -20,14 +22,15 @@ use crate::{
         },
         match_rule::MatchRuleRow,
         merge_strategy::MergeStrategyRow,
-        FusionOverview, ListResponse,
     },
-    AppState,
 };
 
-use super::{bad_request, db_error, not_found, ServiceResult};
+use super::{ServiceResult, bad_request, db_error, not_found};
 
-async fn load_job_row(db: &sqlx::PgPool, job_id: Uuid) -> Result<Option<FusionJobRow>, sqlx::Error> {
+async fn load_job_row(
+    db: &sqlx::PgPool,
+    job_id: Uuid,
+) -> Result<Option<FusionJobRow>, sqlx::Error> {
     query_as::<_, FusionJobRow>(
         r#"
         SELECT
@@ -126,12 +129,11 @@ pub async fn get_overview(State(state): State<AppState>) -> ServiceResult<Fusion
         .fetch_one(&state.db)
         .await
         .map_err(|cause| db_error(&cause))?;
-    let pending_review_count = query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM fusion_review_queue WHERE status = 'pending'",
-    )
-    .fetch_one(&state.db)
-    .await
-    .map_err(|cause| db_error(&cause))?;
+    let pending_review_count =
+        query_scalar::<_, i64>("SELECT COUNT(*) FROM fusion_review_queue WHERE status = 'pending'")
+            .fetch_one(&state.db)
+            .await
+            .map_err(|cause| db_error(&cause))?;
     let golden_record_count = query_scalar::<_, i64>("SELECT COUNT(*) FROM fusion_golden_records")
         .fetch_one(&state.db)
         .await
@@ -201,7 +203,9 @@ pub async fn create_job(
         .map_err(|cause| db_error(&cause))?
         .is_some();
     if !rule_exists || !strategy_exists {
-        return Err(bad_request("job requires an existing match rule and merge strategy"));
+        return Err(bad_request(
+            "job requires an existing match rule and merge strategy",
+        ));
     }
 
     let row = query_as::<_, FusionJobRow>(
@@ -449,7 +453,10 @@ pub async fn run_job(
             .iter()
             .filter(|evidence| evidence.final_score >= rule.auto_merge_threshold)
             .count() as i32,
-        review_pairs: evidences.iter().filter(|evidence| evidence.requires_review).count() as i32,
+        review_pairs: evidences
+            .iter()
+            .filter(|evidence| evidence.requires_review)
+            .count() as i32,
         cluster_count: clusters.len() as i32,
         golden_record_count: golden_records.len() as i32,
         precision_estimate: average_score.clamp(0.0, 1.0),
@@ -487,7 +494,11 @@ pub async fn run_job(
         "#,
     )
     .bind(job.id)
-    .bind(if review_items.is_empty() { "completed" } else { "awaiting_review" })
+    .bind(if review_items.is_empty() {
+        "completed"
+    } else {
+        "awaiting_review"
+    })
     .bind(SqlJson(metrics))
     .bind(format!(
         "Generated {} clusters, {} golden records, {} review items.",

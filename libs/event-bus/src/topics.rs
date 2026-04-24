@@ -15,4 +15,3 @@ pub mod streams {
     pub const AUDIT: &str = "OF_AUDIT";
     pub const NOTIFICATIONS: &str = "OF_NOTIFICATIONS";
 }
-

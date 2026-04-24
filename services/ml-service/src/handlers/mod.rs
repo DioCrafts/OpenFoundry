@@ -6,9 +6,9 @@ pub mod overview;
 pub mod predictions;
 pub mod training;
 
-use axum::{http::StatusCode, Json};
-use serde::{de::DeserializeOwned, Serialize};
-use serde_json::{json, Value};
+use axum::{Json, http::StatusCode};
+use serde::{Serialize, de::DeserializeOwned};
+use serde_json::{Value, json};
 
 #[derive(Debug, Serialize)]
 pub struct ErrorResponse {

@@ -1,14 +1,14 @@
 use axum::{
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use uuid::Uuid;
 
-use crate::models::notebook::*;
-use crate::models::cell::{Cell, CreateCellRequest, UpdateCellRequest};
 use crate::AppState;
+use crate::models::cell::{Cell, CreateCellRequest, UpdateCellRequest};
+use crate::models::notebook::*;
 use auth_middleware::layer::AuthUser;
 
 // ── Notebook CRUD ──
@@ -72,7 +72,9 @@ pub async fn list_notebooks(
     .await
     .unwrap_or_default();
 
-    Json(serde_json::json!({ "data": notebooks, "total": total, "page": page, "per_page": per_page }))
+    Json(
+        serde_json::json!({ "data": notebooks, "total": total, "page": page, "per_page": per_page }),
+    )
 }
 
 pub async fn get_notebook(
@@ -158,13 +160,12 @@ pub async fn add_cell(
     let source = body.source.unwrap_or_default();
 
     // Get next position
-    let max_pos: Option<i32> = sqlx::query_scalar(
-        "SELECT MAX(position) FROM cells WHERE notebook_id = $1",
-    )
-    .bind(notebook_id)
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(None);
+    let max_pos: Option<i32> =
+        sqlx::query_scalar("SELECT MAX(position) FROM cells WHERE notebook_id = $1")
+            .bind(notebook_id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or(None);
 
     let position = body.position.unwrap_or_else(|| max_pos.unwrap_or(0) + 1);
 

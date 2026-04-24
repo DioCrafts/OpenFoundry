@@ -1,5 +1,10 @@
-use axum::{Json, extract::{Path, State}, http::StatusCode, response::IntoResponse};
 use auth_middleware::layer::AuthUser;
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::StatusCode,
+    response::IntoResponse,
+};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use uuid::Uuid;
@@ -45,9 +50,15 @@ pub async fn create_api_key(
     }
 
     if !claims.has_permission("api_keys", "write")
-        && body.scopes.iter().any(|scope| !claims.has_permission_key(scope))
+        && body
+            .scopes
+            .iter()
+            .any(|scope| !claims.has_permission_key(scope))
     {
-        return json_error(StatusCode::FORBIDDEN, "requested scopes exceed caller permissions");
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "requested scopes exceed caller permissions",
+        );
     }
 
     let user = match sqlx::query_as::<_, User>(
@@ -64,9 +75,20 @@ pub async fn create_api_key(
         }
     };
 
-    match api_keys::create_api_key(&state.db, &state.jwt_config, &user, &body.name, body.scopes, body.expires_at).await {
+    match api_keys::create_api_key(
+        &state.db,
+        &state.jwt_config,
+        &user,
+        &body.name,
+        body.scopes,
+        body.expires_at,
+    )
+    .await
+    {
         Ok(api_key) => (StatusCode::CREATED, Json(api_key)).into_response(),
-        Err(ApiKeyError::InvalidExpiration) => json_error(StatusCode::BAD_REQUEST, "expires_at must be in the future"),
+        Err(ApiKeyError::InvalidExpiration) => {
+            json_error(StatusCode::BAD_REQUEST, "expires_at must be in the future")
+        }
         Err(ApiKeyError::Database(error)) => {
             tracing::error!("failed to persist API key: {error}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()

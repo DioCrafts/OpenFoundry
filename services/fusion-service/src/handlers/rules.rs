@@ -1,25 +1,22 @@
 use axum::{
-    extract::{Path, State},
     Json,
+    extract::{Path, State},
 };
 use sqlx::{query_as, types::Json as SqlJson};
 use uuid::Uuid;
 
 use crate::{
-    models::{
-        match_rule::{
-            CreateMatchRuleRequest, MatchRule, MatchRuleRow, UpdateMatchRuleRequest,
-        },
-        merge_strategy::{
-            CreateMergeStrategyRequest, MergeStrategy, MergeStrategyRow,
-            UpdateMergeStrategyRequest,
-        },
-        ListResponse,
-    },
     AppState,
+    models::{
+        ListResponse,
+        match_rule::{CreateMatchRuleRequest, MatchRule, MatchRuleRow, UpdateMatchRuleRequest},
+        merge_strategy::{
+            CreateMergeStrategyRequest, MergeStrategy, MergeStrategyRow, UpdateMergeStrategyRequest,
+        },
+    },
 };
 
-use super::{bad_request, db_error, not_found, ServiceResult};
+use super::{ServiceResult, bad_request, db_error, not_found};
 
 async fn load_rule_row(
     db: &sqlx::PgPool,
@@ -106,7 +103,9 @@ pub async fn create_rule(
     Json(body): Json<CreateMatchRuleRequest>,
 ) -> ServiceResult<MatchRule> {
     if body.name.trim().is_empty() || body.conditions.is_empty() {
-        return Err(bad_request("rule name and at least one condition are required"));
+        return Err(bad_request(
+            "rule name and at least one condition are required",
+        ));
     }
 
     let row = query_as::<_, MatchRuleRow>(
@@ -198,10 +197,15 @@ pub async fn update_rule(
     .bind(body.description.unwrap_or(rule.description))
     .bind(body.status.unwrap_or(rule.status))
     .bind(body.entity_type.unwrap_or(rule.entity_type))
-    .bind(SqlJson(body.blocking_strategy.unwrap_or(rule.blocking_strategy)))
+    .bind(SqlJson(
+        body.blocking_strategy.unwrap_or(rule.blocking_strategy),
+    ))
     .bind(SqlJson(body.conditions.unwrap_or(rule.conditions)))
     .bind(body.review_threshold.unwrap_or(rule.review_threshold))
-    .bind(body.auto_merge_threshold.unwrap_or(rule.auto_merge_threshold))
+    .bind(
+        body.auto_merge_threshold
+            .unwrap_or(rule.auto_merge_threshold),
+    )
     .fetch_one(&state.db)
     .await
     .map_err(|cause| db_error(&cause))?;
@@ -274,7 +278,10 @@ pub async fn create_merge_strategy(
     .bind(body.description.unwrap_or_default())
     .bind(body.status.unwrap_or_else(|| "active".to_string()))
     .bind(body.entity_type.unwrap_or_else(|| "person".to_string()))
-    .bind(body.default_strategy.unwrap_or_else(|| "longest_non_empty".to_string()))
+    .bind(
+        body.default_strategy
+            .unwrap_or_else(|| "longest_non_empty".to_string()),
+    )
     .bind(SqlJson(body.rules))
     .fetch_one(&state.db)
     .await

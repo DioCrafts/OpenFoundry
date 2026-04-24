@@ -1,20 +1,23 @@
-use std::{collections::HashSet, str::FromStr};
+use std::{
+    collections::{HashMap, HashSet},
+    str::FromStr,
+};
 
 use chrono::{DateTime, Utc};
 use cron::Schedule;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
+    AppState,
     domain::{
-        engine::{self, ExecutionRequest, NodeResult},
+        engine::{self, ExecutionEnvironment, ExecutionRequest, NodeResult},
         lineage,
     },
     models::{
         pipeline::{Pipeline, PipelineNode, PipelineRetryPolicy, PipelineScheduleConfig},
         run::PipelineRun,
     },
-    AppState,
 };
 
 pub async fn start_pipeline_run(
@@ -34,6 +37,9 @@ pub async fn start_pipeline_run(
     }
 
     let retry_policy = effective_retry_policy(&pipeline.parsed_retry_policy());
+    let actor_id = started_by.unwrap_or(pipeline.owner_id);
+    let prior_node_results = latest_successful_node_results(&state.db, pipeline.id).await?;
+    let execution_context = enrich_execution_context(&context, &prior_node_results);
 
     let run = sqlx::query_as::<_, PipelineRun>(
         r#"INSERT INTO pipeline_runs (
@@ -49,34 +55,61 @@ pub async fn start_pipeline_run(
     .bind(attempt_number)
     .bind(&from_node_id)
     .bind(retry_of_run_id)
-    .bind(&context)
+    .bind(&execution_context)
     .fetch_one(&state.db)
     .await
     .map_err(|error| error.to_string())?;
 
-    let results = engine::execute_pipeline(
-        &state.query_ctx,
+    let execution_result = engine::execute_pipeline(
+        &ExecutionEnvironment {
+            state: state.clone(),
+            actor_id,
+        },
         &nodes,
         &ExecutionRequest {
             start_from_node: from_node_id.clone(),
             max_attempts: retry_policy.max_attempts.max(1),
             distributed_worker_count: distributed_worker_count.max(1),
+            skip_unchanged: true,
+            prior_node_results,
         },
     )
-    .await?;
+    .await;
 
-    let error_message = results
-        .iter()
-        .find(|result| result.status == "failed")
-        .and_then(|result| result.error.clone());
-    let status = if error_message.is_some() { "failed" } else { "completed" };
-    let node_results = serde_json::to_value(&results).unwrap_or_else(|_| json!([]));
+    let (status, error_message, results, node_results, finished_context) = match execution_result {
+        Ok(results) => {
+            let error_message = results
+                .iter()
+                .find(|result| result.status == "failed")
+                .and_then(|result| result.error.clone());
+            let status = if error_message.is_some() {
+                "failed"
+            } else {
+                "completed"
+            };
+            (
+                status,
+                error_message,
+                Some(results.clone()),
+                serde_json::to_value(&results).unwrap_or_else(|_| json!([])),
+                finalize_execution_context(&execution_context, &results),
+            )
+        }
+        Err(error) => (
+            "failed",
+            Some(error),
+            None,
+            json!([]),
+            execution_context.clone(),
+        ),
+    };
 
     sqlx::query(
         r#"UPDATE pipeline_runs
            SET status = $2,
                error_message = $3,
                node_results = $4,
+               execution_context = $5,
                finished_at = NOW()
            WHERE id = $1"#,
     )
@@ -84,12 +117,15 @@ pub async fn start_pipeline_run(
     .bind(status)
     .bind(&error_message)
     .bind(&node_results)
+    .bind(&finished_context)
     .execute(&state.db)
     .await
     .map_err(|error| error.to_string())?;
 
-    if let Err(error) = record_pipeline_lineage(&state.db, pipeline.id, &nodes, &results).await {
-        tracing::warn!(pipeline_id = %pipeline.id, "pipeline lineage recording failed: {error}");
+    if let Some(results) = results.as_ref() {
+        if let Err(error) = record_pipeline_lineage(&state.db, pipeline.id, &nodes, results).await {
+            tracing::warn!(pipeline_id = %pipeline.id, "pipeline lineage recording failed: {error}");
+        }
     }
 
     if trigger_type == "scheduled" {
@@ -180,9 +216,12 @@ pub async fn run_due_scheduled_pipelines(state: &AppState) -> Result<usize, Stri
             state.distributed_pipeline_workers.max(1),
             context,
         )
-        .await {
+        .await
+        {
             Ok(_) => triggered += 1,
-            Err(error) => tracing::warn!(pipeline_id = %pipeline.id, "scheduled pipeline run failed: {error}"),
+            Err(error) => {
+                tracing::warn!(pipeline_id = %pipeline.id, "scheduled pipeline run failed: {error}")
+            }
         }
     }
 
@@ -231,6 +270,83 @@ fn first_failed_node(run: &PipelineRun) -> Option<String> {
         .map(|result| result.node_id)
 }
 
+async fn latest_successful_node_results(
+    db: &sqlx::PgPool,
+    pipeline_id: Uuid,
+) -> Result<HashMap<String, NodeResult>, String> {
+    let latest_run = sqlx::query_as::<_, PipelineRun>(
+        r#"SELECT * FROM pipeline_runs
+           WHERE pipeline_id = $1
+             AND status = 'completed'
+             AND node_results IS NOT NULL
+           ORDER BY finished_at DESC NULLS LAST, started_at DESC
+           LIMIT 1"#,
+    )
+    .bind(pipeline_id)
+    .fetch_optional(db)
+    .await
+    .map_err(|error| error.to_string())?;
+
+    let Some(run) = latest_run else {
+        return Ok(HashMap::new());
+    };
+
+    let parsed = run
+        .node_results
+        .and_then(|value| serde_json::from_value::<Vec<NodeResult>>(value).ok())
+        .unwrap_or_default();
+
+    Ok(parsed
+        .into_iter()
+        .map(|result| (result.node_id.clone(), result))
+        .collect())
+}
+
+fn enrich_execution_context(
+    context: &Value,
+    prior_node_results: &HashMap<String, NodeResult>,
+) -> Value {
+    let mut context = context.clone();
+    if let Value::Object(map) = &mut context {
+        map.insert(
+            "build".to_string(),
+            json!({
+                "started_at": Utc::now(),
+                "prior_completed_node_count": prior_node_results.len(),
+            }),
+        );
+    }
+    context
+}
+
+fn finalize_execution_context(context: &Value, results: &[NodeResult]) -> Value {
+    let skipped_nodes = results.iter().filter(|result| result.status == "skipped").count();
+    let completed_nodes = results
+        .iter()
+        .filter(|result| result.status == "completed")
+        .count();
+    let failed_nodes = results.iter().filter(|result| result.status == "failed").count();
+    let mut context = context.clone();
+    if let Value::Object(map) = &mut context {
+        map.insert(
+            "build".to_string(),
+            json!({
+                "started_at": map
+                    .get("build")
+                    .and_then(|build| build.get("started_at"))
+                    .cloned()
+                    .unwrap_or_else(|| json!(Utc::now())),
+                "finished_at": Utc::now(),
+                "completed_nodes": completed_nodes,
+                "skipped_nodes": skipped_nodes,
+                "failed_nodes": failed_nodes,
+                "incremental": skipped_nodes > 0,
+            }),
+        );
+    }
+    context
+}
+
 async fn record_pipeline_lineage(
     db: &sqlx::PgPool,
     pipeline_id: Uuid,
@@ -253,7 +369,14 @@ async fn record_pipeline_lineage(
         };
 
         for source_dataset_id in &node.input_dataset_ids {
-            lineage::record_lineage(db, *source_dataset_id, target_dataset_id, Some(pipeline_id), Some(&node.id)).await?;
+            lineage::record_lineage(
+                db,
+                *source_dataset_id,
+                target_dataset_id,
+                Some(pipeline_id),
+                Some(&node.id),
+            )
+            .await?;
         }
 
         for mapping in node.column_mappings() {

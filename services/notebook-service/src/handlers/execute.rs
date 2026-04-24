@@ -1,24 +1,22 @@
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use uuid::Uuid;
 
+use crate::AppState;
 use crate::models::cell::{Cell, CellOutput, ExecuteCellRequest};
 use crate::models::session::Session;
-use crate::AppState;
 use auth_middleware::layer::AuthUser;
 
 async fn update_session_status(db: &sqlx::PgPool, session_id: Uuid, status: &str) {
-    let _ = sqlx::query(
-        "UPDATE sessions SET status = $2, last_activity = NOW() WHERE id = $1",
-    )
-    .bind(session_id)
-    .bind(status)
-    .execute(db)
-    .await;
+    let _ = sqlx::query("UPDATE sessions SET status = $2, last_activity = NOW() WHERE id = $1")
+        .bind(session_id)
+        .bind(status)
+        .execute(db)
+        .await;
 }
 
 async fn load_session(db: &sqlx::PgPool, session_id: Uuid) -> Result<Option<Session>, sqlx::Error> {
@@ -60,16 +58,25 @@ pub async fn execute_cell(
                     return (StatusCode::CONFLICT, "session is stopped").into_response();
                 }
                 if session.kernel != cell.kernel {
-                    return (StatusCode::BAD_REQUEST, "session kernel does not match cell kernel")
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        "session kernel does not match cell kernel",
+                    )
                         .into_response();
                 }
-                if let Err(error) = state.kernel_manager.ensure_session(session.id, &session.kernel).await {
+                if let Err(error) = state
+                    .kernel_manager
+                    .ensure_session(session.id, &session.kernel)
+                    .await
+                {
                     return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response();
                 }
                 Some(session)
             }
             Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-            Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+            Err(error) => {
+                return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
+            }
         },
         None => None,
     };

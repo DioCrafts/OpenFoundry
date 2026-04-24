@@ -22,3 +22,4 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 config = { workspace = true }
 async-nats = { workspace = true }
+reqwest = { workspace = true, features = ["multipart"] }

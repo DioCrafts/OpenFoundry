@@ -1,14 +1,14 @@
+use axum::extract::ws::{Message, WebSocket};
 use axum::{
     extract::{Query, State, WebSocketUpgrade},
     http::StatusCode,
     response::IntoResponse,
 };
-use axum::extract::ws::{Message, WebSocket};
 
 use crate::{
+    AppState,
     handlers::send::{latest_notifications, unread_count},
     models::notification::{NotificationEvent, WebSocketQuery},
-    AppState,
 };
 
 pub async fn notifications_ws(
@@ -24,12 +24,10 @@ pub async fn notifications_ws(
     ws.on_upgrade(move |socket| websocket_loop(socket, state, claims.sub))
 }
 
-async fn websocket_loop(
-    mut socket: WebSocket,
-    state: AppState,
-    user_id: uuid::Uuid,
-) {
-    let notifications = latest_notifications(&state, user_id, 20).await.unwrap_or_default();
+async fn websocket_loop(mut socket: WebSocket, state: AppState, user_id: uuid::Uuid) {
+    let notifications = latest_notifications(&state, user_id, 20)
+        .await
+        .unwrap_or_default();
     let unread = unread_count(&state, Some(user_id)).await.unwrap_or(0);
     let snapshot = serde_json::json!({
         "kind": "snapshot",
@@ -63,5 +61,8 @@ async fn websocket_loop(
 }
 
 fn targets_user(event: &NotificationEvent, user_id: uuid::Uuid) -> bool {
-    event.user_id.map(|target| target == user_id).unwrap_or(true)
+    event
+        .user_id
+        .map(|target| target == user_id)
+        .unwrap_or(true)
 }

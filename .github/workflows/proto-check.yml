@@ -1,12 +1,12 @@
-name: Proto — Lint & Breaking
+name: Proto — Lint, Breaking & OpenAPI
 
 on:
   push:
     branches: [main]
-    paths: ["proto/**"]
+    paths: ["proto/**", "tools/of-cli/**", "apps/web/static/generated/openapi/**", "Cargo.*", ".github/workflows/proto-check.yml", "justfile"]
   pull_request:
     branches: [main]
-    paths: ["proto/**"]
+    paths: ["proto/**", "tools/of-cli/**", "apps/web/static/generated/openapi/**", "Cargo.*", ".github/workflows/proto-check.yml", "justfile"]
 
 jobs:
   lint:
@@ -19,3 +19,13 @@ jobs:
           lint: true
           breaking: true
           input: proto
+
+  openapi:
+    name: OpenAPI Drift Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Validate generated OpenAPI
+        run: cargo run -p of-cli -- docs validate-openapi --input apps/web/static/generated/openapi/openfoundry.json

@@ -8,7 +8,7 @@ pub struct Session {
     pub id: Uuid,
     pub notebook_id: Uuid,
     pub kernel: String,
-    pub status: String,  // "idle", "busy", "dead"
+    pub status: String, // "idle", "busy", "dead"
     pub started_by: Uuid,
     pub created_at: DateTime<Utc>,
     pub last_activity: DateTime<Utc>,

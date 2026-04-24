@@ -1,15 +1,15 @@
 use axum::{
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use serde_json::json;
 use uuid::Uuid;
 
+use crate::AppState;
 use crate::domain::executor;
 use crate::models::pipeline::*;
-use crate::AppState;
 use auth_middleware::layer::AuthUser;
 
 pub async fn create_pipeline(
@@ -89,7 +89,12 @@ pub async fn list_pipelines(
     .await
     .unwrap_or_default();
 
-    Json(ListPipelinesResponse { data: pipelines, total, page, per_page })
+    Json(ListPipelinesResponse {
+        data: pipelines,
+        total,
+        page,
+        per_page,
+    })
 }
 
 pub async fn get_pipeline(
@@ -121,7 +126,9 @@ pub async fn update_pipeline(
     {
         Ok(Some(pipeline)) => pipeline,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-        Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+        Err(error) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
+        }
     };
 
     let existing_name = existing.name.clone();
@@ -139,9 +146,7 @@ pub async fn update_pipeline(
         .map(|nodes| serde_json::to_value(nodes).unwrap_or_default())
         .unwrap_or(existing_dag);
     let schedule_config = body.schedule_config.unwrap_or(existing_schedule);
-    let retry_policy = body
-        .retry_policy
-        .unwrap_or(existing_retry_policy);
+    let retry_policy = body.retry_policy.unwrap_or(existing_retry_policy);
     let next_run_at = executor::compute_next_run_at_from_parts(&status, &schedule_config);
 
     let result = sqlx::query_as::<_, Pipeline>(

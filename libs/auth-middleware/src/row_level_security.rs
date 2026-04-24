@@ -34,7 +34,11 @@ impl RlsContext {
 
     /// Returns true if a permission key is present.
     pub fn has_permission(&self, permission: &str) -> bool {
-        self.is_admin() || self.permissions.iter().any(|candidate| candidate == permission)
+        self.is_admin()
+            || self
+                .permissions
+                .iter()
+                .any(|candidate| candidate == permission)
     }
 
     /// SQL fragment for filtering by org_id. Returns "TRUE" for admins.
@@ -53,7 +57,10 @@ impl RlsContext {
         if self.is_admin() || self.has_permission("rows:all") {
             "TRUE".to_string()
         } else if let Some(org) = self.org_id {
-            format!("({owner_column} = '{}' OR {org_column} = '{org}')", self.user_id)
+            format!(
+                "({owner_column} = '{}' OR {org_column} = '{org}')",
+                self.user_id
+            )
         } else {
             format!("{owner_column} = '{}'", self.user_id)
         }

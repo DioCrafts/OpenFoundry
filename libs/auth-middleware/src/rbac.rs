@@ -20,8 +20,8 @@ pub mod roles {
 pub fn require_roles(
     required: &'static [&'static str],
 ) -> impl Fn(Request, Next) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>>
-       + Clone
-       + Send {
++ Clone
++ Send {
     move |req: Request, next: Next| {
         let required = required;
         Box::pin(async move {
@@ -40,10 +40,10 @@ pub fn require_roles(
 }
 
 /// Axum middleware that requires the `admin` role.
-pub fn require_admin(
-) -> impl Fn(Request, Next) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>>
-       + Clone
-       + Send {
+pub fn require_admin()
+-> impl Fn(Request, Next) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>>
++ Clone
++ Send {
     require_roles(&[roles::ADMIN])
 }
 
@@ -51,14 +51,18 @@ pub fn require_admin(
 pub fn require_permissions(
     required: &'static [&'static str],
 ) -> impl Fn(Request, Next) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>>
-       + Clone
-       + Send {
++ Clone
++ Send {
     move |req: Request, next: Next| {
         let required = required;
         Box::pin(async move {
             let claims = req.extensions().get::<Claims>();
             match claims {
-                Some(c) if required.iter().any(|permission| c.has_permission_key(permission)) => {
+                Some(c)
+                    if required
+                        .iter()
+                        .any(|permission| c.has_permission_key(permission)) =>
+                {
                     next.run(req).await
                 }
                 Some(_) => (

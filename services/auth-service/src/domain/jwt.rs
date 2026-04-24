@@ -33,7 +33,14 @@ pub async fn issue_tokens(
     let access_token = jwt::encode_token(config, &access_claims)?;
     let refresh_token = jwt::encode_token(config, &refresh_claims)?;
 
-    let _ = store_refresh_token(pool, user.id, refresh_claims.jti, &refresh_token, refresh_claims.exp).await;
+    let _ = store_refresh_token(
+        pool,
+        user.id,
+        refresh_claims.jti,
+        &refresh_token,
+        refresh_claims.exp,
+    )
+    .await;
 
     Ok((access_token, refresh_token))
 }
@@ -88,5 +95,7 @@ pub async fn get_refresh_token(
 }
 
 pub fn refresh_token_matches(token: &RefreshToken, raw_token: &str) -> bool {
-    !token.revoked && token.token_hash == security::hash_token(raw_token) && token.expires_at > chrono::Utc::now()
+    !token.revoked
+        && token.token_hash == security::hash_token(raw_token)
+        && token.expires_at > chrono::Utc::now()
 }

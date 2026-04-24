@@ -1,8 +1,10 @@
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde::Deserialize;
 
 use crate::AppState;
-use crate::domain::jwt::{get_refresh_token, issue_tokens, refresh_token_matches, revoke_refresh_token};
+use crate::domain::jwt::{
+    get_refresh_token, issue_tokens, refresh_token_matches, revoke_refresh_token,
+};
 use crate::handlers::login::TokenResponse;
 use crate::models::user::User;
 
@@ -19,12 +21,18 @@ pub async fn refresh(
     let claims = match auth_middleware::jwt::decode_token(&state.jwt_config, &body.refresh_token) {
         Ok(c) if c.token_use.as_deref() == Some("refresh") => c,
         Err(_) => {
-            return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": "invalid refresh token" })))
-                .into_response()
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({ "error": "invalid refresh token" })),
+            )
+                .into_response();
         }
         _ => {
-            return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": "invalid refresh token" })))
-                .into_response()
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({ "error": "invalid refresh token" })),
+            )
+                .into_response();
         }
     };
 
@@ -32,16 +40,25 @@ pub async fn refresh(
         Ok(record) => record,
         Err(e) => {
             tracing::error!("failed to load refresh token: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "token refresh failed" })))
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "token refresh failed" })),
+            )
                 .into_response();
         }
     }) else {
-        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": "refresh token revoked" })))
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "refresh token revoked" })),
+        )
             .into_response();
     };
 
     if !refresh_token_matches(&stored_token, &body.refresh_token) {
-        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": "refresh token revoked" })))
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "refresh token revoked" })),
+        )
             .into_response();
     }
 
@@ -56,18 +73,31 @@ pub async fn refresh(
     let user = match user {
         Ok(Some(u)) => u,
         _ => {
-            return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": "user not found or disabled" })))
-                .into_response()
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({ "error": "user not found or disabled" })),
+            )
+                .into_response();
         }
     };
 
     if let Err(e) = revoke_refresh_token(&state.db, claims.jti).await {
         tracing::error!("failed to revoke refresh token: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "token refresh failed" })))
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "token refresh failed" })),
+        )
             .into_response();
     }
 
-    match issue_tokens(&state.db, &state.jwt_config, &user, vec!["refresh".to_string()]).await {
+    match issue_tokens(
+        &state.db,
+        &state.jwt_config,
+        &user,
+        vec!["refresh".to_string()],
+    )
+    .await
+    {
         Ok((access_token, refresh_token)) => Json(TokenResponse {
             access_token,
             refresh_token,
@@ -77,7 +107,10 @@ pub async fn refresh(
         .into_response(),
         Err(e) => {
             tracing::error!("token refresh failed: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "token refresh failed" })))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "token refresh failed" })),
+            )
                 .into_response()
         }
     }

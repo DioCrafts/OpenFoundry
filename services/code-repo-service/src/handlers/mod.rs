@@ -6,54 +6,63 @@ pub mod integrations;
 pub mod merge_requests;
 pub mod repos;
 
-use axum::{http::StatusCode, Json};
+use axum::{Json, http::StatusCode};
 use serde::Serialize;
 
 use crate::models::{
-	branch::BranchRow,
-	comment::CommentRow,
-	commit::{CiRunRow, CommitRow},
-	file::FileRow,
-	merge_request::MergeRequestRow,
-	integration::{IntegrationRow, SyncRunRow},
-	repository::RepositoryRow,
+    branch::BranchRow,
+    comment::CommentRow,
+    commit::{CiRunRow, CommitRow},
+    file::FileRow,
+    integration::{IntegrationRow, SyncRunRow},
+    merge_request::MergeRequestRow,
+    repository::RepositoryRow,
 };
 
 #[derive(Debug, Serialize)]
 pub struct ErrorResponse {
-	pub error: String,
+    pub error: String,
 }
 
 pub type ServiceResult<T> = Result<Json<T>, (StatusCode, Json<ErrorResponse>)>;
 
 pub fn bad_request(message: impl Into<String>) -> (StatusCode, Json<ErrorResponse>) {
-	(
-		StatusCode::BAD_REQUEST,
-		Json(ErrorResponse { error: message.into() }),
-	)
+    (
+        StatusCode::BAD_REQUEST,
+        Json(ErrorResponse {
+            error: message.into(),
+        }),
+    )
 }
 
 pub fn not_found(message: impl Into<String>) -> (StatusCode, Json<ErrorResponse>) {
-	(
-		StatusCode::NOT_FOUND,
-		Json(ErrorResponse { error: message.into() }),
-	)
+    (
+        StatusCode::NOT_FOUND,
+        Json(ErrorResponse {
+            error: message.into(),
+        }),
+    )
 }
 
 pub fn internal_error(message: impl Into<String>) -> (StatusCode, Json<ErrorResponse>) {
-	(
-		StatusCode::INTERNAL_SERVER_ERROR,
-		Json(ErrorResponse { error: message.into() }),
-	)
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ErrorResponse {
+            error: message.into(),
+        }),
+    )
 }
 
 pub fn db_error(cause: &sqlx::Error) -> (StatusCode, Json<ErrorResponse>) {
-	tracing::error!("code-repo-service database error: {cause}");
-	internal_error("database operation failed")
+    tracing::error!("code-repo-service database error: {cause}");
+    internal_error("database operation failed")
 }
 
-pub async fn load_repository_row(db: &sqlx::PgPool, id: uuid::Uuid) -> Result<Option<RepositoryRow>, sqlx::Error> {
-	sqlx::query_as::<_, RepositoryRow>(
+pub async fn load_repository_row(
+    db: &sqlx::PgPool,
+    id: uuid::Uuid,
+) -> Result<Option<RepositoryRow>, sqlx::Error> {
+    sqlx::query_as::<_, RepositoryRow>(
 		"SELECT id, name, slug, description, owner, default_branch, visibility, object_store_backend, package_kind, tags, settings, created_at, updated_at
 		 FROM code_repositories
 		 WHERE id = $1",
@@ -63,8 +72,10 @@ pub async fn load_repository_row(db: &sqlx::PgPool, id: uuid::Uuid) -> Result<Op
 	.await
 }
 
-pub async fn load_all_repositories(db: &sqlx::PgPool) -> Result<Vec<crate::models::repository::RepositoryDefinition>, sqlx::Error> {
-	let rows = sqlx::query_as::<_, RepositoryRow>(
+pub async fn load_all_repositories(
+    db: &sqlx::PgPool,
+) -> Result<Vec<crate::models::repository::RepositoryDefinition>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, RepositoryRow>(
 		"SELECT id, name, slug, description, owner, default_branch, visibility, object_store_backend, package_kind, tags, settings, created_at, updated_at
 		 FROM code_repositories
 		 ORDER BY updated_at DESC",
@@ -72,14 +83,22 @@ pub async fn load_all_repositories(db: &sqlx::PgPool) -> Result<Vec<crate::model
 	.fetch_all(db)
 	.await?;
 
-	rows.into_iter()
-		.map(crate::models::repository::RepositoryDefinition::try_from)
-		.collect::<Result<Vec<_>, _>>()
-		.map_err(|cause| sqlx::Error::Decode(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, cause))))
+    rows.into_iter()
+        .map(crate::models::repository::RepositoryDefinition::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|cause| {
+            sqlx::Error::Decode(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                cause,
+            )))
+        })
 }
 
-pub async fn load_branches(db: &sqlx::PgPool, repository_id: uuid::Uuid) -> Result<Vec<crate::models::branch::BranchDefinition>, sqlx::Error> {
-	let rows = sqlx::query_as::<_, BranchRow>(
+pub async fn load_branches(
+    db: &sqlx::PgPool,
+    repository_id: uuid::Uuid,
+) -> Result<Vec<crate::models::branch::BranchDefinition>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, BranchRow>(
 		"SELECT id, repository_id, name, head_sha, base_branch, is_default, protected, ahead_by, pending_reviews, updated_at
 		 FROM code_repository_branches
 		 WHERE repository_id = $1
@@ -89,14 +108,22 @@ pub async fn load_branches(db: &sqlx::PgPool, repository_id: uuid::Uuid) -> Resu
 	.fetch_all(db)
 	.await?;
 
-	rows.into_iter()
-		.map(crate::models::branch::BranchDefinition::try_from)
-		.collect::<Result<Vec<_>, _>>()
-		.map_err(|cause| sqlx::Error::Decode(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, cause))))
+    rows.into_iter()
+        .map(crate::models::branch::BranchDefinition::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|cause| {
+            sqlx::Error::Decode(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                cause,
+            )))
+        })
 }
 
-pub async fn load_commits(db: &sqlx::PgPool, repository_id: uuid::Uuid) -> Result<Vec<crate::models::commit::CommitDefinition>, sqlx::Error> {
-	let rows = sqlx::query_as::<_, CommitRow>(
+pub async fn load_commits(
+    db: &sqlx::PgPool,
+    repository_id: uuid::Uuid,
+) -> Result<Vec<crate::models::commit::CommitDefinition>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, CommitRow>(
 		"SELECT id, repository_id, branch_name, sha, parent_sha, title, description, author_name, author_email, files_changed, additions, deletions, created_at
 		 FROM code_repository_commits
 		 WHERE repository_id = $1
@@ -106,14 +133,22 @@ pub async fn load_commits(db: &sqlx::PgPool, repository_id: uuid::Uuid) -> Resul
 	.fetch_all(db)
 	.await?;
 
-	rows.into_iter()
-		.map(crate::models::commit::CommitDefinition::try_from)
-		.collect::<Result<Vec<_>, _>>()
-		.map_err(|cause| sqlx::Error::Decode(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, cause))))
+    rows.into_iter()
+        .map(crate::models::commit::CommitDefinition::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|cause| {
+            sqlx::Error::Decode(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                cause,
+            )))
+        })
 }
 
-pub async fn load_files(db: &sqlx::PgPool, repository_id: uuid::Uuid) -> Result<Vec<crate::models::file::RepositoryFile>, sqlx::Error> {
-	let rows = sqlx::query_as::<_, FileRow>(
+pub async fn load_files(
+    db: &sqlx::PgPool,
+    repository_id: uuid::Uuid,
+) -> Result<Vec<crate::models::file::RepositoryFile>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, FileRow>(
 		"SELECT id, repository_id, path, branch_name, language, size_bytes, content, last_commit_sha
 		 FROM code_repository_files
 		 WHERE repository_id = $1
@@ -123,14 +158,22 @@ pub async fn load_files(db: &sqlx::PgPool, repository_id: uuid::Uuid) -> Result<
 	.fetch_all(db)
 	.await?;
 
-	rows.into_iter()
-		.map(crate::models::file::RepositoryFile::try_from)
-		.collect::<Result<Vec<_>, _>>()
-		.map_err(|cause| sqlx::Error::Decode(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, cause))))
+    rows.into_iter()
+        .map(crate::models::file::RepositoryFile::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|cause| {
+            sqlx::Error::Decode(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                cause,
+            )))
+        })
 }
 
-pub async fn load_merge_request_row(db: &sqlx::PgPool, id: uuid::Uuid) -> Result<Option<MergeRequestRow>, sqlx::Error> {
-	sqlx::query_as::<_, MergeRequestRow>(
+pub async fn load_merge_request_row(
+    db: &sqlx::PgPool,
+    id: uuid::Uuid,
+) -> Result<Option<MergeRequestRow>, sqlx::Error> {
+    sqlx::query_as::<_, MergeRequestRow>(
 		"SELECT id, repository_id, title, description, source_branch, target_branch, status, author, labels, reviewers, approvals_required, changed_files, created_at, updated_at, merged_at
 		 FROM code_merge_requests
 		 WHERE id = $1",
@@ -140,9 +183,12 @@ pub async fn load_merge_request_row(db: &sqlx::PgPool, id: uuid::Uuid) -> Result
 	.await
 }
 
-pub async fn load_merge_requests(db: &sqlx::PgPool, repository_id: Option<uuid::Uuid>) -> Result<Vec<crate::models::merge_request::MergeRequestDefinition>, sqlx::Error> {
-	let rows = if let Some(repository_id) = repository_id {
-		sqlx::query_as::<_, MergeRequestRow>(
+pub async fn load_merge_requests(
+    db: &sqlx::PgPool,
+    repository_id: Option<uuid::Uuid>,
+) -> Result<Vec<crate::models::merge_request::MergeRequestDefinition>, sqlx::Error> {
+    let rows = if let Some(repository_id) = repository_id {
+        sqlx::query_as::<_, MergeRequestRow>(
 			"SELECT id, repository_id, title, description, source_branch, target_branch, status, author, labels, reviewers, approvals_required, changed_files, created_at, updated_at, merged_at
 			 FROM code_merge_requests
 			 WHERE repository_id = $1
@@ -151,41 +197,57 @@ pub async fn load_merge_requests(db: &sqlx::PgPool, repository_id: Option<uuid::
 		.bind(repository_id)
 		.fetch_all(db)
 		.await?
-	} else {
-		sqlx::query_as::<_, MergeRequestRow>(
+    } else {
+        sqlx::query_as::<_, MergeRequestRow>(
 			"SELECT id, repository_id, title, description, source_branch, target_branch, status, author, labels, reviewers, approvals_required, changed_files, created_at, updated_at, merged_at
 			 FROM code_merge_requests
 			 ORDER BY updated_at DESC",
 		)
 		.fetch_all(db)
 		.await?
-	};
+    };
 
-	rows.into_iter()
-		.map(crate::models::merge_request::MergeRequestDefinition::try_from)
-		.collect::<Result<Vec<_>, _>>()
-		.map_err(|cause| sqlx::Error::Decode(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, cause))))
+    rows.into_iter()
+        .map(crate::models::merge_request::MergeRequestDefinition::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|cause| {
+            sqlx::Error::Decode(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                cause,
+            )))
+        })
 }
 
-pub async fn load_comments(db: &sqlx::PgPool, merge_request_id: uuid::Uuid) -> Result<Vec<crate::models::comment::ReviewComment>, sqlx::Error> {
-	let rows = sqlx::query_as::<_, CommentRow>(
-		"SELECT id, merge_request_id, author, body, file_path, line_number, resolved, created_at
+pub async fn load_comments(
+    db: &sqlx::PgPool,
+    merge_request_id: uuid::Uuid,
+) -> Result<Vec<crate::models::comment::ReviewComment>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, CommentRow>(
+        "SELECT id, merge_request_id, author, body, file_path, line_number, resolved, created_at
 		 FROM code_review_comments
 		 WHERE merge_request_id = $1
 		 ORDER BY created_at ASC",
-	)
-	.bind(merge_request_id)
-	.fetch_all(db)
-	.await?;
+    )
+    .bind(merge_request_id)
+    .fetch_all(db)
+    .await?;
 
-	rows.into_iter()
-		.map(crate::models::comment::ReviewComment::try_from)
-		.collect::<Result<Vec<_>, _>>()
-		.map_err(|cause| sqlx::Error::Decode(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, cause))))
+    rows.into_iter()
+        .map(crate::models::comment::ReviewComment::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|cause| {
+            sqlx::Error::Decode(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                cause,
+            )))
+        })
 }
 
-pub async fn load_ci_runs(db: &sqlx::PgPool, repository_id: uuid::Uuid) -> Result<Vec<crate::models::commit::CiRun>, sqlx::Error> {
-	let rows = sqlx::query_as::<_, CiRunRow>(
+pub async fn load_ci_runs(
+    db: &sqlx::PgPool,
+    repository_id: uuid::Uuid,
+) -> Result<Vec<crate::models::commit::CiRun>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, CiRunRow>(
 		"SELECT id, repository_id, branch_name, commit_sha, pipeline_name, status, trigger, started_at, completed_at, checks
 		 FROM code_ci_runs
 		 WHERE repository_id = $1
@@ -195,18 +257,23 @@ pub async fn load_ci_runs(db: &sqlx::PgPool, repository_id: uuid::Uuid) -> Resul
 	.fetch_all(db)
 	.await?;
 
-	rows.into_iter()
-		.map(crate::models::commit::CiRun::try_from)
-		.collect::<Result<Vec<_>, _>>()
-		.map_err(|cause| sqlx::Error::Decode(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, cause))))
+    rows.into_iter()
+        .map(crate::models::commit::CiRun::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|cause| {
+            sqlx::Error::Decode(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                cause,
+            )))
+        })
 }
 
 pub async fn load_integrations(
-	db: &sqlx::PgPool,
-	repository_id: Option<uuid::Uuid>,
+    db: &sqlx::PgPool,
+    repository_id: Option<uuid::Uuid>,
 ) -> Result<Vec<crate::models::integration::RepositoryIntegration>, sqlx::Error> {
-	let rows = if let Some(repository_id) = repository_id {
-		sqlx::query_as::<_, IntegrationRow>(
+    let rows = if let Some(repository_id) = repository_id {
+        sqlx::query_as::<_, IntegrationRow>(
 			"SELECT id, repository_id, provider, external_namespace, external_project, external_url, sync_mode, ci_trigger_strategy, status, default_branch, branch_mapping, webhook_url, last_synced_at, created_at, updated_at
 			 FROM code_repository_integrations
 			 WHERE repository_id = $1
@@ -215,24 +282,32 @@ pub async fn load_integrations(
 		.bind(repository_id)
 		.fetch_all(db)
 		.await?
-	} else {
-		sqlx::query_as::<_, IntegrationRow>(
+    } else {
+        sqlx::query_as::<_, IntegrationRow>(
 			"SELECT id, repository_id, provider, external_namespace, external_project, external_url, sync_mode, ci_trigger_strategy, status, default_branch, branch_mapping, webhook_url, last_synced_at, created_at, updated_at
 			 FROM code_repository_integrations
 			 ORDER BY updated_at DESC",
 		)
 		.fetch_all(db)
 		.await?
-	};
+    };
 
-	rows.into_iter()
-		.map(crate::models::integration::RepositoryIntegration::try_from)
-		.collect::<Result<Vec<_>, _>>()
-		.map_err(|cause| sqlx::Error::Decode(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, cause))))
+    rows.into_iter()
+        .map(crate::models::integration::RepositoryIntegration::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|cause| {
+            sqlx::Error::Decode(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                cause,
+            )))
+        })
 }
 
-pub async fn load_integration_row(db: &sqlx::PgPool, id: uuid::Uuid) -> Result<Option<IntegrationRow>, sqlx::Error> {
-	sqlx::query_as::<_, IntegrationRow>(
+pub async fn load_integration_row(
+    db: &sqlx::PgPool,
+    id: uuid::Uuid,
+) -> Result<Option<IntegrationRow>, sqlx::Error> {
+    sqlx::query_as::<_, IntegrationRow>(
 		"SELECT id, repository_id, provider, external_namespace, external_project, external_url, sync_mode, ci_trigger_strategy, status, default_branch, branch_mapping, webhook_url, last_synced_at, created_at, updated_at
 		 FROM code_repository_integrations
 		 WHERE id = $1",
@@ -242,8 +317,11 @@ pub async fn load_integration_row(db: &sqlx::PgPool, id: uuid::Uuid) -> Result<O
 	.await
 }
 
-pub async fn load_sync_runs(db: &sqlx::PgPool, integration_id: uuid::Uuid) -> Result<Vec<crate::models::integration::ExternalSyncRun>, sqlx::Error> {
-	let rows = sqlx::query_as::<_, SyncRunRow>(
+pub async fn load_sync_runs(
+    db: &sqlx::PgPool,
+    integration_id: uuid::Uuid,
+) -> Result<Vec<crate::models::integration::ExternalSyncRun>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, SyncRunRow>(
 		"SELECT id, integration_id, repository_id, trigger, status, commit_sha, branch_name, summary, checks, started_at, completed_at
 		 FROM code_repository_sync_runs
 		 WHERE integration_id = $1
@@ -253,8 +331,13 @@ pub async fn load_sync_runs(db: &sqlx::PgPool, integration_id: uuid::Uuid) -> Re
 	.fetch_all(db)
 	.await?;
 
-	rows.into_iter()
-		.map(crate::models::integration::ExternalSyncRun::try_from)
-		.collect::<Result<Vec<_>, _>>()
-		.map_err(|cause| sqlx::Error::Decode(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, cause))))
+    rows.into_iter()
+        .map(crate::models::integration::ExternalSyncRun::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|cause| {
+            sqlx::Error::Decode(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                cause,
+            )))
+        })
 }

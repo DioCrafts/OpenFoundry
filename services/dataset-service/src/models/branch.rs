@@ -9,6 +9,7 @@ pub struct DatasetBranch {
     pub dataset_id: Uuid,
     pub name: String,
     pub version: i32,
+    pub base_version: i32,
     pub description: String,
     pub is_default: bool,
     pub created_at: DateTime<Utc>,
@@ -20,4 +21,9 @@ pub struct CreateDatasetBranchRequest {
     pub name: String,
     pub source_version: Option<i32>,
     pub description: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MergeDatasetBranchRequest {
+    pub target_branch: Option<String>,
 }

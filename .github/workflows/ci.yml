@@ -3,10 +3,10 @@ name: CI — Rust
 on:
   push:
     branches: [main]
-    paths: ["libs/**", "services/**", "Cargo.*", "proto/**"]
+    paths: ["libs/**", "services/**", "tools/**", "smoke/**", "Cargo.*", "proto/**", ".github/workflows/ci.yml", "justfile"]
   pull_request:
     branches: [main]
-    paths: ["libs/**", "services/**", "Cargo.*", "proto/**"]
+    paths: ["libs/**", "services/**", "tools/**", "smoke/**", "Cargo.*", "proto/**", ".github/workflows/ci.yml", "justfile"]
 
 env:
   CARGO_TERM_COLOR: always
@@ -68,6 +68,105 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
         run: cargo test --workspace
+
+  smoke:
+    name: Smoke
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://test:test@localhost:5432/test
+      JWT_SECRET: test-secret-for-ci-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build smoke stack
+        run: cargo build -p of-cli -p gateway -p data-connector -p dataset-service -p pipeline-service -p query-service -p audit-service
+      - name: Prepare service databases
+        env:
+          PGPASSWORD: test
+        run: |
+          psql -h localhost -U test -d postgres \
+            -c "DROP DATABASE IF EXISTS of_connectors;" \
+            -c "DROP DATABASE IF EXISTS of_datasets;" \
+            -c "DROP DATABASE IF EXISTS of_pipelines;" \
+            -c "DROP DATABASE IF EXISTS of_queries;" \
+            -c "DROP DATABASE IF EXISTS of_audit;" \
+            -c "CREATE DATABASE of_connectors;" \
+            -c "CREATE DATABASE of_datasets;" \
+            -c "CREATE DATABASE of_pipelines;" \
+            -c "CREATE DATABASE of_queries;" \
+            -c "CREATE DATABASE of_audit;"
+      - name: Run critical-path smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/of-datasets /tmp/of-smoke-logs
+
+          print_logs() {
+            for file in /tmp/of-smoke-logs/*.log; do
+              if [[ -f "$file" ]]; then
+                echo "::group::$(basename "$file")"
+                cat "$file"
+                echo "::endgroup::"
+              fi
+            done
+          }
+
+          cleanup() {
+            jobs -p | xargs -r kill || true
+          }
+
+          trap 'status=$?; if [[ $status -ne 0 ]]; then print_logs; fi; cleanup' EXIT
+
+          DATABASE_URL=postgres://test:test@localhost:5432/of_connectors JWT_SECRET="$JWT_SECRET" target/debug/data-connector > /tmp/of-smoke-logs/data-connector.log 2>&1 &
+          DATABASE_URL=postgres://test:test@localhost:5432/of_datasets JWT_SECRET="$JWT_SECRET" STORAGE_BACKEND=local LOCAL_STORAGE_ROOT=/tmp/of-datasets target/debug/dataset-service > /tmp/of-smoke-logs/dataset-service.log 2>&1 &
+          DATABASE_URL=postgres://test:test@localhost:5432/of_pipelines JWT_SECRET="$JWT_SECRET" target/debug/pipeline-service > /tmp/of-smoke-logs/pipeline-service.log 2>&1 &
+          DATABASE_URL=postgres://test:test@localhost:5432/of_queries JWT_SECRET="$JWT_SECRET" target/debug/query-service > /tmp/of-smoke-logs/query-service.log 2>&1 &
+          DATABASE_URL=postgres://test:test@localhost:5432/of_audit JWT_SECRET="$JWT_SECRET" target/debug/audit-service > /tmp/of-smoke-logs/audit-service.log 2>&1 &
+          JWT_SECRET="$JWT_SECRET" \
+            DATA_CONNECTOR_SERVICE_URL=http://127.0.0.1:50052 \
+            DATASET_SERVICE_URL=http://127.0.0.1:50053 \
+            QUERY_SERVICE_URL=http://127.0.0.1:50055 \
+            PIPELINE_SERVICE_URL=http://127.0.0.1:50056 \
+            AUDIT_SERVICE_URL=http://127.0.0.1:50070 \
+            target/debug/gateway > /tmp/of-smoke-logs/gateway.log 2>&1 &
+
+          for url in \
+            http://127.0.0.1:50052/health \
+            http://127.0.0.1:50053/health \
+            http://127.0.0.1:50055/health \
+            http://127.0.0.1:50056/health \
+            http://127.0.0.1:50070/health \
+            http://127.0.0.1:8080/health
+          do
+            for attempt in $(seq 1 30); do
+              if curl -sf "$url" >/dev/null; then
+                break
+              fi
+              if [[ "$attempt" -eq 30 ]]; then
+                echo "Service not ready: $url"
+                exit 1
+              fi
+              sleep 2
+            done
+          done
+
+          JWT_SECRET="$JWT_SECRET" target/debug/of smoke run \
+            --scenario smoke/scenarios/p0-critical-path.json \
+            --output smoke/results/p0-critical-path.json
 
   deny:
     name: Cargo Deny

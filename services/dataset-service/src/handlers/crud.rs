@@ -1,13 +1,15 @@
 use axum::{
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use uuid::Uuid;
 
 use crate::AppState;
-use crate::models::dataset::{CreateDatasetRequest, Dataset, ListDatasetsQuery, UpdateDatasetRequest};
+use crate::models::dataset::{
+    CreateDatasetRequest, Dataset, ListDatasetsQuery, UpdateDatasetRequest,
+};
 
 /// POST /api/v1/datasets
 pub async fn create_dataset(
@@ -39,9 +41,9 @@ pub async fn create_dataset(
         Ok(ds) => {
             let _ = sqlx::query(
                 r#"INSERT INTO dataset_branches (
-                       id, dataset_id, name, version, description, is_default
+                       id, dataset_id, name, version, base_version, description, is_default
                    )
-                   VALUES ($1, $2, 'main', $3, 'Default branch', TRUE)
+                   VALUES ($1, $2, 'main', $3, $3, 'Default branch', TRUE)
                    ON CONFLICT (dataset_id, name) DO NOTHING"#,
             )
             .bind(Uuid::now_v7())
@@ -54,7 +56,11 @@ pub async fn create_dataset(
         }
         Err(e) => {
             tracing::error!("create dataset failed: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "create failed" }))).into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "create failed" })),
+            )
+                .into_response()
         }
     }
 }
@@ -80,7 +86,7 @@ pub async fn list_datasets(
     )
     .bind(&search_pattern)
     .bind(&params.tag)
-        .bind(params.owner_id)
+    .bind(params.owner_id)
     .bind(per_page)
     .bind(offset)
     .fetch_all(&state.db)
@@ -94,7 +100,7 @@ pub async fn list_datasets(
     )
     .bind(&search_pattern)
     .bind(&params.tag)
-        .bind(params.owner_id)
+    .bind(params.owner_id)
     .fetch_one(&state.db)
     .await
     .unwrap_or(0);
@@ -106,7 +112,8 @@ pub async fn list_datasets(
             "per_page": per_page,
             "total": total,
             "total_pages": (total as f64 / per_page as f64).ceil() as i64,
-        })).into_response(),
+        }))
+        .into_response(),
         Err(e) => {
             tracing::error!("list datasets failed: {e}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()

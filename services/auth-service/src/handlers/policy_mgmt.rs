@@ -1,5 +1,10 @@
-use axum::{Json, extract::{Path, State}, http::StatusCode, response::IntoResponse};
 use auth_middleware::layer::AuthUser;
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::StatusCode,
+    response::IntoResponse,
+};
 use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
@@ -160,7 +165,15 @@ pub async fn evaluate_policy(
         return response;
     }
 
-    match abac::evaluate(&state.db, &claims, &body.resource, &body.action, &body.resource_attributes).await {
+    match abac::evaluate(
+        &state.db,
+        &claims,
+        &body.resource,
+        &body.action,
+        &body.resource_attributes,
+    )
+    .await
+    {
         Ok(result) => Json(result).into_response(),
         Err(e) => {
             tracing::error!("failed to evaluate ABAC policies: {e}");

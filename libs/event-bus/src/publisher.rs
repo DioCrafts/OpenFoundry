@@ -36,11 +36,8 @@ impl Publisher {
     ) -> Result<(), PublishError> {
         let event = Event::new(event_type, &self.source, payload);
         let bytes = serde_json::to_vec(&event)?;
-        self.js
-            .publish(subject.to_string(), bytes.into())
-            .await?;
+        self.js.publish(subject.to_string(), bytes.into()).await?;
         tracing::debug!(subject, event_type, "event published");
         Ok(())
     }
 }
-

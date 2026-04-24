@@ -10,7 +10,7 @@
 	export let onSearchQueryChange: (query: string) => void;
 	export let onRunSearch: () => void;
 
-		let selectedFile: RepositoryFile | null = null;
+		let selectedFile: RepositoryFile | null;
 
 		$: selectedFile = files.find((file) => file.path === selectedFilePath) ?? files[0] ?? null;
 

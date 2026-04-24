@@ -2,7 +2,7 @@ pub mod clusters;
 pub mod jobs;
 pub mod rules;
 
-use axum::{http::StatusCode, Json};
+use axum::{Json, http::StatusCode};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]

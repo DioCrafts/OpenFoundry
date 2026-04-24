@@ -28,4 +28,3 @@ impl<T: Serialize> Event<T> {
         }
     }
 }
-

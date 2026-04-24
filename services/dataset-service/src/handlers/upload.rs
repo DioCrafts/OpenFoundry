@@ -1,8 +1,8 @@
 use axum::{
+    Json,
     extract::{Multipart, Path, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use bytes::BytesMut;
 use uuid::Uuid;
@@ -39,14 +39,22 @@ pub async fn upload_data(
                 Ok(data) => file_data.extend_from_slice(&data),
                 Err(e) => {
                     tracing::error!("failed to read upload: {e}");
-                    return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "failed to read file" }))).into_response();
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({ "error": "failed to read file" })),
+                    )
+                        .into_response();
                 }
             }
         }
     }
 
     if file_data.is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "no file provided" }))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "no file provided" })),
+        )
+            .into_response();
     }
 
     let data = file_data.freeze();
@@ -65,7 +73,11 @@ pub async fn upload_data(
     // Upload to storage
     if let Err(e) = state.storage.put(&version_path, data.clone()).await {
         tracing::error!("storage upload failed: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "storage upload failed" }))).into_response();
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "storage upload failed" })),
+        )
+            .into_response();
     }
 
     // Create version record
@@ -112,15 +124,21 @@ pub async fn upload_data(
         .flatten();
 
     if let Some(dataset) = refreshed_dataset {
-        if let Err(error) = profiler::refresh_dataset_quality(&state, &dataset, Some(data.clone())).await {
+        if let Err(error) =
+            profiler::refresh_dataset_quality(&state, &dataset, Some(data.clone())).await
+        {
             tracing::warn!(dataset_id = %dataset_id, "quality refresh failed after upload: {error}");
         }
     }
 
     tracing::info!(dataset_id = %dataset_id, version = new_version, "data uploaded");
-    (StatusCode::OK, Json(serde_json::json!({
-        "dataset_id": dataset_id,
-        "version": new_version,
-        "size_bytes": size,
-    }))).into_response()
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "dataset_id": dataset_id,
+            "version": new_version,
+            "size_bytes": size,
+        })),
+    )
+        .into_response()
 }

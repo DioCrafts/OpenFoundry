@@ -5,9 +5,8 @@ mod models;
 
 use auth_middleware::jwt::JwtConfig;
 use axum::{
-    middleware,
+    Router, middleware,
     routing::{delete, get, patch, post, put},
-    Router,
 };
 use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::EnvFilter;
@@ -56,7 +55,10 @@ async fn main() {
         .route("/api/v1/auth/register", post(handlers::register::register))
         .route("/api/v1/auth/login", post(handlers::login::login))
         .route("/api/v1/auth/refresh", post(handlers::token::refresh))
-        .route("/api/v1/auth/mfa/complete", post(handlers::mfa::complete_login))
+        .route(
+            "/api/v1/auth/mfa/complete",
+            post(handlers::mfa::complete_login),
+        )
         .route(
             "/api/v1/auth/sso/providers/public",
             get(handlers::sso::list_public_providers),
@@ -65,19 +67,18 @@ async fn main() {
             "/api/v1/auth/sso/providers/{slug}/start",
             get(handlers::sso::start_login),
         )
-        .route("/api/v1/auth/sso/callback", post(handlers::sso::complete_login));
+        .route(
+            "/api/v1/auth/sso/callback",
+            post(handlers::sso::complete_login),
+        );
 
     // Protected routes (auth required)
     let protected = Router::new()
         .route("/api/v1/users/me", get(handlers::user_mgmt::me))
-        .route(
-            "/api/v1/users",
-            get(handlers::user_mgmt::list_users),
-        )
+        .route("/api/v1/users", get(handlers::user_mgmt::list_users))
         .route(
             "/api/v1/users/{id}",
-            patch(handlers::user_mgmt::update_user)
-                .delete(handlers::user_mgmt::deactivate_user),
+            patch(handlers::user_mgmt::update_user).delete(handlers::user_mgmt::deactivate_user),
         )
         .route(
             "/api/v1/users/{id}/roles",
@@ -99,10 +100,7 @@ async fn main() {
             "/api/v1/roles",
             get(handlers::role_mgmt::list_roles).post(handlers::role_mgmt::create_role),
         )
-        .route(
-            "/api/v1/roles/{id}",
-            put(handlers::role_mgmt::update_role),
-        )
+        .route("/api/v1/roles/{id}", put(handlers::role_mgmt::update_role))
         .route(
             "/api/v1/permissions",
             get(handlers::permission_mgmt::list_permissions)
@@ -118,8 +116,7 @@ async fn main() {
         )
         .route(
             "/api/v1/policies",
-            get(handlers::policy_mgmt::list_policies)
-                .post(handlers::policy_mgmt::create_policy),
+            get(handlers::policy_mgmt::list_policies).post(handlers::policy_mgmt::create_policy),
         )
         .route(
             "/api/v1/policies/evaluate",
@@ -127,13 +124,11 @@ async fn main() {
         )
         .route(
             "/api/v1/policies/{id}",
-            put(handlers::policy_mgmt::update_policy)
-                .delete(handlers::policy_mgmt::delete_policy),
+            put(handlers::policy_mgmt::update_policy).delete(handlers::policy_mgmt::delete_policy),
         )
         .route(
             "/api/v1/api-keys",
-            get(handlers::api_key_mgmt::list_api_keys)
-                .post(handlers::api_key_mgmt::create_api_key),
+            get(handlers::api_key_mgmt::list_api_keys).post(handlers::api_key_mgmt::create_api_key),
         )
         .route(
             "/api/v1/api-keys/{id}",
@@ -151,8 +146,7 @@ async fn main() {
         )
         .route(
             "/api/v1/auth/sso/providers/{id}",
-            put(handlers::sso::update_provider)
-                .delete(handlers::sso::delete_provider),
+            put(handlers::sso::update_provider).delete(handlers::sso::delete_provider),
         )
         .layer(middleware::from_fn_with_state(
             jwt_config,

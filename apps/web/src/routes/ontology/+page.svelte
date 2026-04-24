@@ -1,6 +1,5 @@
 <script lang="ts">
   import { listObjectTypes, deleteObjectType, type ObjectType } from '$lib/api/ontology';
-  import { goto } from '$app/navigation';
 
   let types = $state<ObjectType[]>([]);
   let total = $state(0);

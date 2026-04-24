@@ -5,13 +5,12 @@ mod models;
 
 use auth_middleware::jwt::JwtConfig;
 use axum::{
-    middleware,
+    Router, middleware,
     routing::{delete, get, patch, post},
-    Router,
 };
+use core_models::{health::HealthStatus, observability};
 use sqlx::postgres::PgPoolOptions;
 use storage_abstraction::StorageBackend;
-use tracing_subscriber::EnvFilter;
 
 /// Shared application state passed to all handlers.
 #[derive(Clone)]
@@ -29,9 +28,7 @@ impl axum::extract::FromRef<AppState> for JwtConfig {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    observability::init_tracing("dataset-service");
 
     let cfg = config::AppConfig::from_env().expect("failed to load config");
 
@@ -50,24 +47,25 @@ async fn main() {
 
     let storage: std::sync::Arc<dyn StorageBackend> = match cfg.storage_backend.as_str() {
         "local" => {
-            let root = cfg.local_storage_root.as_deref().unwrap_or("/tmp/of-datasets");
+            let root = cfg
+                .local_storage_root
+                .as_deref()
+                .unwrap_or("/tmp/of-datasets");
             std::sync::Arc::new(
                 storage_abstraction::local::LocalStorage::new(root)
                     .expect("failed to init local storage"),
             )
         }
-        _ => {
-            std::sync::Arc::new(
-                storage_abstraction::s3::S3Storage::new(
-                    &cfg.storage_bucket,
-                    cfg.s3_region.as_deref().unwrap_or("us-east-1"),
-                    cfg.s3_endpoint.as_deref(),
-                    cfg.s3_access_key.as_deref().unwrap_or("minioadmin"),
-                    cfg.s3_secret_key.as_deref().unwrap_or("minioadmin"),
-                )
-                .expect("failed to init S3 storage"),
+        _ => std::sync::Arc::new(
+            storage_abstraction::s3::S3Storage::new(
+                &cfg.storage_bucket,
+                cfg.s3_region.as_deref().unwrap_or("us-east-1"),
+                cfg.s3_endpoint.as_deref(),
+                cfg.s3_access_key.as_deref().unwrap_or("minioadmin"),
+                cfg.s3_secret_key.as_deref().unwrap_or("minioadmin"),
             )
-        }
+            .expect("failed to init S3 storage"),
+        ),
     };
 
     let state = AppState {
@@ -76,31 +74,87 @@ async fn main() {
         storage,
     };
 
-    let public = Router::new()
-        .route("/health", get(|| async { "ok" }));
+    let public = Router::new().route(
+        "/health",
+        get(|| async { axum::Json(HealthStatus::ok("dataset-service")) }),
+    );
 
     let protected = Router::new()
         .route("/api/v1/datasets", post(handlers::crud::create_dataset))
         .route("/api/v1/datasets", get(handlers::crud::list_datasets))
-        .route("/api/v1/datasets/catalog/facets", get(handlers::catalog::get_catalog_facets))
+        .route(
+            "/api/v1/datasets/catalog/facets",
+            get(handlers::catalog::get_catalog_facets),
+        )
         .route("/api/v1/datasets/{id}", get(handlers::crud::get_dataset))
-        .route("/api/v1/datasets/{id}", patch(handlers::crud::update_dataset))
-        .route("/api/v1/datasets/{id}", delete(handlers::crud::delete_dataset))
-        .route("/api/v1/datasets/{id}/upload", post(handlers::upload::upload_data))
-        .route("/api/v1/datasets/{id}/preview", get(handlers::preview::preview_data))
-        .route("/api/v1/datasets/{id}/schema", get(handlers::preview::get_schema))
-        .route("/api/v1/datasets/{id}/versions", get(handlers::versions::list_versions))
-        .route("/api/v1/datasets/{id}/branches", get(handlers::branches::list_branches))
-        .route("/api/v1/datasets/{id}/branches", post(handlers::branches::create_branch))
+        .route(
+            "/api/v1/datasets/{id}",
+            patch(handlers::crud::update_dataset),
+        )
+        .route(
+            "/api/v1/datasets/{id}",
+            delete(handlers::crud::delete_dataset),
+        )
+        .route(
+            "/api/v1/datasets/{id}/upload",
+            post(handlers::upload::upload_data),
+        )
+        .route(
+            "/api/v1/datasets/{id}/preview",
+            get(handlers::preview::preview_data),
+        )
+        .route(
+            "/api/v1/datasets/{id}/schema",
+            get(handlers::preview::get_schema),
+        )
+        .route(
+            "/api/v1/datasets/{id}/versions",
+            get(handlers::versions::list_versions),
+        )
+        .route(
+            "/api/v1/datasets/{id}/files",
+            get(handlers::export::list_files),
+        )
+        .route(
+            "/api/v1/datasets/{id}/branches",
+            get(handlers::branches::list_branches),
+        )
+        .route(
+            "/api/v1/datasets/{id}/branches",
+            post(handlers::branches::create_branch),
+        )
         .route(
             "/api/v1/datasets/{id}/branches/{branch_name}/checkout",
             post(handlers::branches::checkout_branch),
         )
-        .route("/api/v1/datasets/{id}/quality", get(handlers::quality::get_dataset_quality))
-        .route("/api/v1/datasets/{id}/quality/profile", post(handlers::quality::refresh_dataset_quality))
-        .route("/api/v1/datasets/{id}/quality/rules", post(handlers::quality::create_quality_rule))
-        .route("/api/v1/datasets/{id}/quality/rules/{rule_id}", patch(handlers::quality::update_quality_rule))
-        .route("/api/v1/datasets/{id}/quality/rules/{rule_id}", delete(handlers::quality::delete_quality_rule))
+        .route(
+            "/api/v1/datasets/{id}/branches/{branch_name}/merge",
+            post(handlers::branches::merge_branch),
+        )
+        .route(
+            "/api/v1/datasets/{id}/branches/{branch_name}/promote",
+            post(handlers::branches::promote_branch),
+        )
+        .route(
+            "/api/v1/datasets/{id}/quality",
+            get(handlers::quality::get_dataset_quality),
+        )
+        .route(
+            "/api/v1/datasets/{id}/quality/profile",
+            post(handlers::quality::refresh_dataset_quality),
+        )
+        .route(
+            "/api/v1/datasets/{id}/quality/rules",
+            post(handlers::quality::create_quality_rule),
+        )
+        .route(
+            "/api/v1/datasets/{id}/quality/rules/{rule_id}",
+            patch(handlers::quality::update_quality_rule),
+        )
+        .route(
+            "/api/v1/datasets/{id}/quality/rules/{rule_id}",
+            delete(handlers::quality::delete_quality_rule),
+        )
         .layer(middleware::from_fn_with_state(
             jwt_config,
             auth_middleware::auth_layer,

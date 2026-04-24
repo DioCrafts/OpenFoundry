@@ -1,16 +1,16 @@
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use serde_json::json;
 use uuid::Uuid;
 
+use crate::AppState;
 use crate::domain::executor;
 use crate::models::pipeline::Pipeline;
 use crate::models::run::{PipelineRun, RetryPipelineRunRequest, TriggerPipelineRequest};
-use crate::AppState;
 use auth_middleware::{layer::AuthUser, tenant::TenantContext};
 
 pub async fn trigger_run(
@@ -23,7 +23,9 @@ pub async fn trigger_run(
     let pipeline = match load_pipeline(&state, pipeline_id).await {
         Ok(Some(pipeline)) => pipeline,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-        Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+        Err(error) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
+        }
     };
 
     let mut context = body.context.unwrap_or_else(|| {
@@ -64,7 +66,9 @@ pub async fn retry_run(
     let pipeline = match load_pipeline(&state, pipeline_id).await {
         Ok(Some(pipeline)) => pipeline,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-        Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+        Err(error) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
+        }
     };
 
     let previous_run = match sqlx::query_as::<_, PipelineRun>(
@@ -77,7 +81,9 @@ pub async fn retry_run(
     {
         Ok(Some(run)) => run,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-        Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+        Err(error) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
+        }
     };
 
     match executor::retry_pipeline_run(
@@ -87,7 +93,8 @@ pub async fn retry_run(
         body.from_node_id,
         tenant.clamp_pipeline_workers(state.distributed_pipeline_workers),
     )
-    .await {
+    .await
+    {
         Ok(run) => (StatusCode::CREATED, Json(serde_json::json!(run))).into_response(),
         Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
     }

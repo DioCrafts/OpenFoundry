@@ -1,4 +1,4 @@
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
@@ -51,17 +51,26 @@ pub async fn login(
     let user = match user {
         Ok(Some(u)) if u.is_active => u,
         Ok(Some(_)) => {
-            return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": "account disabled" })))
-                .into_response()
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({ "error": "account disabled" })),
+            )
+                .into_response();
         }
         _ => {
-            return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": "invalid credentials" })))
-                .into_response()
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({ "error": "invalid credentials" })),
+            )
+                .into_response();
         }
     };
 
     if !verify_password(&body.password, &user.password_hash) {
-        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": "invalid credentials" })))
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "invalid credentials" })),
+        )
             .into_response();
     }
 
@@ -76,7 +85,10 @@ pub async fn login(
         Ok(config) => config,
         Err(e) => {
             tracing::error!("failed to load MFA configuration: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "login failed" })))
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "login failed" })),
+            )
                 .into_response();
         }
     };
@@ -92,7 +104,10 @@ pub async fn login(
                 .into_response(),
                 Err(e) => {
                     tracing::error!("failed to issue MFA challenge: {e}");
-                    (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "login failed" })))
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({ "error": "login failed" })),
+                    )
                         .into_response()
                 }
             };
@@ -105,7 +120,14 @@ pub async fn login(
             .into_response();
     }
 
-    match issue_tokens(&state.db, &state.jwt_config, &user, vec!["password".to_string()]).await {
+    match issue_tokens(
+        &state.db,
+        &state.jwt_config,
+        &user,
+        vec!["password".to_string()],
+    )
+    .await
+    {
         Ok((access_token, refresh_token)) => {
             tracing::info!(user_id = %user.id, "user logged in");
             Json(LoginResponse::Authenticated {
@@ -118,15 +140,18 @@ pub async fn login(
         }
         Err(e) => {
             tracing::error!("token generation failed: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "token generation failed" })))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "token generation failed" })),
+            )
                 .into_response()
         }
     }
 }
 
 fn verify_password(password: &str, hash: &str) -> bool {
-    use argon2::{Argon2, PasswordVerifier};
     use argon2::PasswordHash;
+    use argon2::{Argon2, PasswordVerifier};
 
     let parsed = match PasswordHash::new(hash) {
         Ok(h) => h,

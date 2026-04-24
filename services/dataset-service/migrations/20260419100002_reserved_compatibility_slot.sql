@@ -1,0 +1,6 @@
+-- Reserved compatibility migration.
+--
+-- A previous local/dev iteration used this version number and some persisted
+-- databases still have it recorded in `_sqlx_migrations`. Keep this no-op file
+-- so existing environments can continue applying newer migrations without
+-- tripping `VersionMissing(...)` during startup.

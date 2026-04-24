@@ -1,5 +1,5 @@
-use axum::{Json, extract::State, response::IntoResponse};
 use auth_middleware::layer::AuthUser;
+use axum::{Json, extract::State, response::IntoResponse};
 use serde::Deserialize;
 
 use crate::AppState;
@@ -60,7 +60,10 @@ pub async fn create_permission(
         Ok(permission) => (axum::http::StatusCode::CREATED, Json(permission)).into_response(),
         Err(e) => {
             tracing::error!("failed to create permission: {e}");
-            json_error(axum::http::StatusCode::INTERNAL_SERVER_ERROR, "failed to create permission")
+            json_error(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to create permission",
+            )
         }
     }
 }

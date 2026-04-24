@@ -1,8 +1,8 @@
 use bytes::Bytes;
-use futures::stream::BoxStream;
 use futures::TryStreamExt;
-use object_store::local::LocalFileSystem;
+use futures::stream::BoxStream;
 use object_store::ObjectStore;
+use object_store::local::LocalFileSystem;
 use object_store::path::Path;
 use std::sync::Arc;
 
@@ -16,9 +16,11 @@ pub struct LocalStorage {
 
 impl LocalStorage {
     pub fn new(root: &str) -> StorageResult<Self> {
-        let store = LocalFileSystem::new_with_prefix(root)
-            .map_err(StorageError::Io)?;
-        Ok(Self { store: Arc::new(store), root: root.to_string() })
+        let store = LocalFileSystem::new_with_prefix(root).map_err(StorageError::Io)?;
+        Ok(Self {
+            store: Arc::new(store),
+            root: root.to_string(),
+        })
     }
 
     pub fn root(&self) -> &str {
@@ -43,7 +45,10 @@ fn convert_meta(m: &object_store::ObjectMeta) -> ObjectMeta {
 impl StorageBackend for LocalStorage {
     async fn put(&self, path: &str, data: Bytes) -> StorageResult<()> {
         let p = to_path(path)?;
-        self.store.put(&p, data.into()).await.map_err(StorageError::Io)?;
+        self.store
+            .put(&p, data.into())
+            .await
+            .map_err(StorageError::Io)?;
         Ok(())
     }
 
@@ -53,7 +58,10 @@ impl StorageBackend for LocalStorage {
         result.bytes().await.map_err(StorageError::Io)
     }
 
-    async fn get_stream(&self, path: &str) -> StorageResult<BoxStream<'static, StorageResult<Bytes>>> {
+    async fn get_stream(
+        &self,
+        path: &str,
+    ) -> StorageResult<BoxStream<'static, StorageResult<Bytes>>> {
         let p = to_path(path)?;
         let result = self.store.get(&p).await.map_err(StorageError::Io)?;
         let stream = result.into_stream().map_err(StorageError::Io);
@@ -98,4 +106,3 @@ impl StorageBackend for LocalStorage {
         Ok(convert_meta(&meta))
     }
 }
-

@@ -1,5 +1,10 @@
-use axum::{Json, extract::{Path, State}, http::StatusCode, response::IntoResponse};
 use auth_middleware::layer::AuthUser;
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::StatusCode,
+    response::IntoResponse,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -87,9 +92,14 @@ pub async fn start_login(
         return json_error(StatusCode::BAD_REQUEST, "saml login flow is not wired yet");
     }
 
-    let redirect_uri = format!("{}/auth/callback", state.public_web_origin.trim_end_matches('/'));
+    let redirect_uri = format!(
+        "{}/auth/callback",
+        state.public_web_origin.trim_end_matches('/')
+    );
     match oauth::build_authorization_url(&state.jwt_config, &provider, &redirect_uri, Some("/")) {
-        Ok(authorization_url) => Json(json!({ "authorization_url": authorization_url })).into_response(),
+        Ok(authorization_url) => {
+            Json(json!({ "authorization_url": authorization_url })).into_response()
+        }
         Err(error) => json_error(StatusCode::BAD_REQUEST, error),
     }
 }
@@ -112,7 +122,10 @@ pub async fn complete_login(
         }
     };
 
-    let redirect_uri = format!("{}/auth/callback", state.public_web_origin.trim_end_matches('/'));
+    let redirect_uri = format!(
+        "{}/auth/callback",
+        state.public_web_origin.trim_end_matches('/')
+    );
     let token_payload = match oauth::exchange_code(&provider, &body.code, &redirect_uri).await {
         Ok(payload) => payload,
         Err(error) => return json_error(StatusCode::BAD_GATEWAY, error),
@@ -124,7 +137,10 @@ pub async fn complete_login(
         .filter(|value| !value.is_empty())
         .map(ToString::to_string);
     let Some(access_token) = access_token else {
-        return json_error(StatusCode::BAD_GATEWAY, "provider token response is missing access_token");
+        return json_error(
+            StatusCode::BAD_GATEWAY,
+            "provider token response is missing access_token",
+        );
     };
 
     let userinfo = match oauth::fetch_userinfo(&provider, &access_token).await {
@@ -137,13 +153,16 @@ pub async fn complete_login(
         Err(error) => return json_error(StatusCode::BAD_GATEWAY, error),
     };
 
-    let user = match find_or_create_sso_user(&state.db, &provider, &subject, &email, &name, &userinfo).await {
-        Ok(user) => user,
-        Err(e) => {
-            tracing::error!("failed to materialize SSO user: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
+    let user =
+        match find_or_create_sso_user(&state.db, &provider, &subject, &email, &name, &userinfo)
+            .await
+        {
+            Ok(user) => user,
+            Err(e) => {
+                tracing::error!("failed to materialize SSO user: {e}");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        };
 
     let mfa_configuration = match load_mfa_configuration(&state.db, user.id).await {
         Ok(configuration) => configuration,
@@ -352,7 +371,10 @@ async fn list_enabled_oidc_providers(pool: &sqlx::PgPool) -> Result<Vec<SsoProvi
     .await
 }
 
-async fn load_provider_by_slug(pool: &sqlx::PgPool, slug: &str) -> Result<Option<SsoProvider>, sqlx::Error> {
+async fn load_provider_by_slug(
+    pool: &sqlx::PgPool,
+    slug: &str,
+) -> Result<Option<SsoProvider>, sqlx::Error> {
     sqlx::query_as::<_, SsoProvider>(
         "SELECT id, slug, name, provider_type, enabled, client_id, client_secret, issuer_url, authorization_url, token_url, userinfo_url, scopes, saml_metadata_url, saml_entity_id, saml_sso_url, saml_certificate, attribute_mapping, created_at, updated_at FROM sso_providers WHERE slug = $1 AND enabled = true",
     )
@@ -361,7 +383,10 @@ async fn load_provider_by_slug(pool: &sqlx::PgPool, slug: &str) -> Result<Option
     .await
 }
 
-async fn load_provider_by_id(pool: &sqlx::PgPool, provider_id: Uuid) -> Result<Option<SsoProvider>, sqlx::Error> {
+async fn load_provider_by_id(
+    pool: &sqlx::PgPool,
+    provider_id: Uuid,
+) -> Result<Option<SsoProvider>, sqlx::Error> {
     sqlx::query_as::<_, SsoProvider>(
         "SELECT id, slug, name, provider_type, enabled, client_id, client_secret, issuer_url, authorization_url, token_url, userinfo_url, scopes, saml_metadata_url, saml_entity_id, saml_sso_url, saml_certificate, attribute_mapping, created_at, updated_at FROM sso_providers WHERE id = $1",
     )
@@ -370,7 +395,10 @@ async fn load_provider_by_id(pool: &sqlx::PgPool, provider_id: Uuid) -> Result<O
     .await
 }
 
-async fn load_mfa_configuration(pool: &sqlx::PgPool, user_id: Uuid) -> Result<Option<TotpConfiguration>, sqlx::Error> {
+async fn load_mfa_configuration(
+    pool: &sqlx::PgPool,
+    user_id: Uuid,
+) -> Result<Option<TotpConfiguration>, sqlx::Error> {
     sqlx::query_as::<_, TotpConfiguration>(
         "SELECT user_id, secret, recovery_code_hashes, enabled, verified_at, created_at, updated_at FROM user_mfa_totp WHERE user_id = $1",
     )

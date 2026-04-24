@@ -12,10 +12,12 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+auth-middleware = { workspace = true }
 plugin-sdk = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
 tokio = { workspace = true }
+uuid = { workspace = true }
 clap = { version = "4.5", features = ["derive"] }

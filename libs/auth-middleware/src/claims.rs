@@ -67,7 +67,9 @@ impl Claims {
             || self.permissions.iter().any(|candidate| {
                 candidate == permission
                     || candidate == "*:*"
-                    || resource_wildcard.as_ref().is_some_and(|wildcard| candidate == wildcard)
+                    || resource_wildcard
+                        .as_ref()
+                        .is_some_and(|wildcard| candidate == wildcard)
             })
     }
 

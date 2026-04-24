@@ -3,15 +3,13 @@ mod middleware;
 mod proxy;
 mod routes;
 
-use axum::{middleware as axum_mw, routing::get, Router};
+use axum::{Router, middleware as axum_mw, routing::get};
+use core_models::{health::HealthStatus, observability};
 use tower_http::trace::TraceLayer;
-use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    observability::init_tracing("gateway");
 
     let cfg = config::GatewayConfig::from_env().expect("failed to load config");
 
@@ -19,12 +17,17 @@ async fn main() {
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .expect("failed to build HTTP client");
+    let rate_limit_state =
+        middleware::rate_limit::RateLimitState::new(&cfg.jwt_secret, cfg.rate_limit.clone());
 
     // Health check (unauthenticated)
-    let health = Router::new().route("/health", get(|| async { "ok" }));
+    let health = Router::new().route(
+        "/health",
+        get(|| async { axum::Json(HealthStatus::ok("gateway")) }),
+    );
 
     // API proxy routes
-    let api = routes::v1::router(cfg.clone(), client);
+    let api = routes::v1::router(cfg.clone(), client, rate_limit_state);
 
     let app = Router::new()
         .merge(health)

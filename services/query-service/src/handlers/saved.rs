@@ -1,8 +1,8 @@
 use axum::{
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use uuid::Uuid;
 
@@ -33,7 +33,11 @@ pub async fn create_saved_query(
         Ok(q) => (StatusCode::CREATED, Json(q)).into_response(),
         Err(e) => {
             tracing::error!("create saved query failed: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "create failed" }))).into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "create failed" })),
+            )
+                .into_response()
         }
     }
 }
@@ -65,7 +69,8 @@ pub async fn list_saved_queries(
             "data": qs,
             "page": page,
             "per_page": per_page,
-        })).into_response(),
+        }))
+        .into_response(),
         Err(e) => {
             tracing::error!("list saved queries failed: {e}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()

@@ -5,19 +5,20 @@ mod models;
 
 use auth_middleware::jwt::JwtConfig;
 use axum::{
-    middleware,
+    Router, middleware,
     routing::{delete, get, post, put},
-    Router,
 };
-use query_engine::context::QueryContext;
+use core_models::{health::HealthStatus, observability};
 use sqlx::postgres::PgPoolOptions;
-use tracing_subscriber::EnvFilter;
+use storage_abstraction::StorageBackend;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: sqlx::PgPool,
     pub jwt_config: JwtConfig,
-    pub query_ctx: std::sync::Arc<QueryContext>,
+    pub http_client: reqwest::Client,
+    pub dataset_service_url: String,
+    pub storage: std::sync::Arc<dyn StorageBackend>,
     pub distributed_pipeline_workers: usize,
 }
 
@@ -29,11 +30,10 @@ impl axum::extract::FromRef<AppState> for JwtConfig {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    observability::init_tracing("pipeline-service");
 
     let cfg = config::AppConfig::from_env().expect("failed to load config");
+    tracing::info!(data_dir = %cfg.data_dir, "pipeline-service data directory configured");
 
     let pool = PgPoolOptions::new()
         .max_connections(20)
@@ -47,12 +47,39 @@ async fn main() {
         .expect("failed to run migrations");
 
     let jwt_config = JwtConfig::new(&cfg.jwt_secret);
-    let query_ctx = std::sync::Arc::new(QueryContext::new());
+    let http_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .expect("failed to build HTTP client");
+    let storage: std::sync::Arc<dyn StorageBackend> = match cfg.storage_backend.as_str() {
+        "local" => {
+            let root = cfg
+                .local_storage_root
+                .as_deref()
+                .unwrap_or("/tmp/of-datasets");
+            std::sync::Arc::new(
+                storage_abstraction::local::LocalStorage::new(root)
+                    .expect("failed to init local storage"),
+            )
+        }
+        _ => std::sync::Arc::new(
+            storage_abstraction::s3::S3Storage::new(
+                &cfg.storage_bucket,
+                cfg.s3_region.as_deref().unwrap_or("us-east-1"),
+                cfg.s3_endpoint.as_deref(),
+                cfg.s3_access_key.as_deref().unwrap_or("minioadmin"),
+                cfg.s3_secret_key.as_deref().unwrap_or("minioadmin"),
+            )
+            .expect("failed to init S3 storage"),
+        ),
+    };
 
     let state = AppState {
         db: pool,
         jwt_config: jwt_config.clone(),
-        query_ctx,
+        http_client,
+        dataset_service_url: cfg.dataset_service_url.clone(),
+        storage,
         distributed_pipeline_workers: cfg.distributed_pipeline_workers.max(1),
     };
 
@@ -61,14 +88,18 @@ async fn main() {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
         loop {
             interval.tick().await;
-            if let Err(error) = domain::executor::run_due_scheduled_pipelines(&scheduler_state).await {
+            if let Err(error) =
+                domain::executor::run_due_scheduled_pipelines(&scheduler_state).await
+            {
                 tracing::warn!("pipeline scheduling evaluation failed: {error}");
             }
         }
     });
 
-    let public = Router::new()
-        .route("/health", get(|| async { "ok" }));
+    let public = Router::new().route(
+        "/health",
+        get(|| async { axum::Json(HealthStatus::ok("pipeline-service")) }),
+    );
 
     let protected = Router::new()
         // Pipeline CRUD
@@ -116,4 +147,3 @@ async fn main() {
 
     axum::serve(listener, app).await.expect("server error");
 }
-

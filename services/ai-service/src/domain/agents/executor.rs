@@ -1,18 +1,18 @@
 use serde_json::json;
 
 use crate::models::{
-	agent::{AgentExecutionTrace, AgentPlanStep},
-	knowledge_base::KnowledgeSearchResult,
-	tool::ToolDefinition,
+    agent::{AgentExecutionTrace, AgentPlanStep},
+    knowledge_base::KnowledgeSearchResult,
+    tool::ToolDefinition,
 };
 
 pub fn execute_plan(
-	plan: &[AgentPlanStep],
-	tools: &[ToolDefinition],
-	user_message: &str,
-	knowledge_hits: &[KnowledgeSearchResult],
+    plan: &[AgentPlanStep],
+    tools: &[ToolDefinition],
+    user_message: &str,
+    knowledge_hits: &[KnowledgeSearchResult],
 ) -> Vec<AgentExecutionTrace> {
-	plan
+    plan
 		.iter()
 		.map(|step| {
 			let output = if let Some(tool_name) = &step.tool_name {

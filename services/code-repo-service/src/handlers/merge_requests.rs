@@ -1,41 +1,63 @@
-use axum::{extract::{Path, Query, State}, Json};
+use axum::{
+    Json,
+    extract::{Path, Query, State},
+};
 use chrono::Utc;
 use serde::Deserialize;
 
 use crate::{
-	domain::review,
-	handlers::{bad_request, db_error, internal_error, load_comments, load_merge_request_row, load_merge_requests, load_repository_row, not_found, ServiceResult},
-		models::{comment::{CreateCommentRequest, ReviewComment}, merge_request::{CreateMergeRequestRequest, MergeRequestDefinition, MergeRequestDetail, MergeRequestStatus, UpdateMergeRequestRequest}, ListResponse},
-	AppState,
+    AppState,
+    domain::review,
+    handlers::{
+        ServiceResult, bad_request, db_error, internal_error, load_comments,
+        load_merge_request_row, load_merge_requests, load_repository_row, not_found,
+    },
+    models::{
+        ListResponse,
+        comment::{CreateCommentRequest, ReviewComment},
+        merge_request::{
+            CreateMergeRequestRequest, MergeRequestDefinition, MergeRequestDetail,
+            MergeRequestStatus, UpdateMergeRequestRequest,
+        },
+    },
 };
 
 #[derive(Debug, Deserialize)]
 pub struct MergeRequestQuery {
-	pub repository_id: Option<uuid::Uuid>,
+    pub repository_id: Option<uuid::Uuid>,
 }
 
 pub async fn list_merge_requests(
-	Query(query): Query<MergeRequestQuery>,
-	State(state): State<AppState>,
+    Query(query): Query<MergeRequestQuery>,
+    State(state): State<AppState>,
 ) -> ServiceResult<ListResponse<MergeRequestDefinition>> {
-	let merge_requests = load_merge_requests(&state.db, query.repository_id).await.map_err(|cause| db_error(&cause))?;
-	Ok(Json(ListResponse { items: merge_requests }))
+    let merge_requests = load_merge_requests(&state.db, query.repository_id)
+        .await
+        .map_err(|cause| db_error(&cause))?;
+    Ok(Json(ListResponse {
+        items: merge_requests,
+    }))
 }
 
 pub async fn create_merge_request(
-	State(state): State<AppState>,
-	Json(request): Json<CreateMergeRequestRequest>,
+    State(state): State<AppState>,
+    Json(request): Json<CreateMergeRequestRequest>,
 ) -> ServiceResult<MergeRequestDefinition> {
-	if request.title.trim().is_empty() {
-		return Err(bad_request("merge request title is required"));
-	}
-	load_repository_row(&state.db, request.repository_id).await.map_err(|cause| db_error(&cause))?.ok_or_else(|| not_found("repository not found"))?;
-	let id = uuid::Uuid::now_v7();
-	let now = Utc::now();
-	let labels = serde_json::to_value(&request.labels).map_err(|cause| internal_error(cause.to_string()))?;
-	let reviewers = serde_json::to_value(&request.reviewers).map_err(|cause| internal_error(cause.to_string()))?;
+    if request.title.trim().is_empty() {
+        return Err(bad_request("merge request title is required"));
+    }
+    load_repository_row(&state.db, request.repository_id)
+        .await
+        .map_err(|cause| db_error(&cause))?
+        .ok_or_else(|| not_found("repository not found"))?;
+    let id = uuid::Uuid::now_v7();
+    let now = Utc::now();
+    let labels =
+        serde_json::to_value(&request.labels).map_err(|cause| internal_error(cause.to_string()))?;
+    let reviewers = serde_json::to_value(&request.reviewers)
+        .map_err(|cause| internal_error(cause.to_string()))?;
 
-	sqlx::query(
+    sqlx::query(
 		"INSERT INTO code_merge_requests (id, repository_id, title, description, source_branch, target_branch, status, author, labels, reviewers, approvals_required, changed_files, created_at, updated_at, merged_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, 'open', $7, $8::jsonb, $9::jsonb, $10, $11, $12, $13, NULL)",
 	)
@@ -56,58 +78,83 @@ pub async fn create_merge_request(
 	.await
 	.map_err(|cause| db_error(&cause))?;
 
-	let row = load_merge_request_row(&state.db, id)
-		.await
-		.map_err(|cause| db_error(&cause))?
-		.ok_or_else(|| internal_error("created merge request could not be reloaded"))?;
-	let merge_request = MergeRequestDefinition::try_from(row).map_err(|cause| internal_error(cause.to_string()))?;
-	Ok(Json(merge_request))
+    let row = load_merge_request_row(&state.db, id)
+        .await
+        .map_err(|cause| db_error(&cause))?
+        .ok_or_else(|| internal_error("created merge request could not be reloaded"))?;
+    let merge_request =
+        MergeRequestDefinition::try_from(row).map_err(|cause| internal_error(cause.to_string()))?;
+    Ok(Json(merge_request))
 }
 
 pub async fn get_merge_request(
-	Path(id): Path<uuid::Uuid>,
-	State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+    State(state): State<AppState>,
 ) -> ServiceResult<MergeRequestDetail> {
-	let row = load_merge_request_row(&state.db, id)
-		.await
-		.map_err(|cause| db_error(&cause))?
-		.ok_or_else(|| not_found("merge request not found"))?;
-	let merge_request = MergeRequestDefinition::try_from(row).map_err(|cause| internal_error(cause.to_string()))?;
-	let comments = load_comments(&state.db, id).await.map_err(|cause| db_error(&cause))?;
-	let (approvals, threads) = review::approval_summary(&merge_request, &comments);
-	Ok(Json(MergeRequestDetail {
-		merge_request,
-		comments,
-		approval_count: approvals,
-		thread_count: threads,
-	}))
+    let row = load_merge_request_row(&state.db, id)
+        .await
+        .map_err(|cause| db_error(&cause))?
+        .ok_or_else(|| not_found("merge request not found"))?;
+    let merge_request =
+        MergeRequestDefinition::try_from(row).map_err(|cause| internal_error(cause.to_string()))?;
+    let comments = load_comments(&state.db, id)
+        .await
+        .map_err(|cause| db_error(&cause))?;
+    let (approvals, threads) = review::approval_summary(&merge_request, &comments);
+    Ok(Json(MergeRequestDetail {
+        merge_request,
+        comments,
+        approval_count: approvals,
+        thread_count: threads,
+    }))
 }
 
 pub async fn update_merge_request(
-	Path(id): Path<uuid::Uuid>,
-	State(state): State<AppState>,
-	Json(request): Json<UpdateMergeRequestRequest>,
+    Path(id): Path<uuid::Uuid>,
+    State(state): State<AppState>,
+    Json(request): Json<UpdateMergeRequestRequest>,
 ) -> ServiceResult<MergeRequestDefinition> {
-	let row = load_merge_request_row(&state.db, id)
-		.await
-		.map_err(|cause| db_error(&cause))?
-		.ok_or_else(|| not_found("merge request not found"))?;
-	let mut merge_request = MergeRequestDefinition::try_from(row).map_err(|cause| internal_error(cause.to_string()))?;
+    let row = load_merge_request_row(&state.db, id)
+        .await
+        .map_err(|cause| db_error(&cause))?
+        .ok_or_else(|| not_found("merge request not found"))?;
+    let mut merge_request =
+        MergeRequestDefinition::try_from(row).map_err(|cause| internal_error(cause.to_string()))?;
 
-	if let Some(title) = request.title { merge_request.title = title; }
-	if let Some(description) = request.description { merge_request.description = description; }
-	if let Some(status) = request.status { merge_request.status = status; }
-	if let Some(labels) = request.labels { merge_request.labels = labels; }
-	if let Some(reviewers) = request.reviewers { merge_request.reviewers = reviewers; }
-	if let Some(approvals_required) = request.approvals_required { merge_request.approvals_required = approvals_required; }
-	if let Some(changed_files) = request.changed_files { merge_request.changed_files = changed_files; }
+    if let Some(title) = request.title {
+        merge_request.title = title;
+    }
+    if let Some(description) = request.description {
+        merge_request.description = description;
+    }
+    if let Some(status) = request.status {
+        merge_request.status = status;
+    }
+    if let Some(labels) = request.labels {
+        merge_request.labels = labels;
+    }
+    if let Some(reviewers) = request.reviewers {
+        merge_request.reviewers = reviewers;
+    }
+    if let Some(approvals_required) = request.approvals_required {
+        merge_request.approvals_required = approvals_required;
+    }
+    if let Some(changed_files) = request.changed_files {
+        merge_request.changed_files = changed_files;
+    }
 
-	let now = Utc::now();
-	let labels = serde_json::to_value(&merge_request.labels).map_err(|cause| internal_error(cause.to_string()))?;
-	let reviewers = serde_json::to_value(&merge_request.reviewers).map_err(|cause| internal_error(cause.to_string()))?;
-	let merged_at = if merge_request.status == MergeRequestStatus::Merged { Some(now) } else { merge_request.merged_at };
+    let now = Utc::now();
+    let labels = serde_json::to_value(&merge_request.labels)
+        .map_err(|cause| internal_error(cause.to_string()))?;
+    let reviewers = serde_json::to_value(&merge_request.reviewers)
+        .map_err(|cause| internal_error(cause.to_string()))?;
+    let merged_at = if merge_request.status == MergeRequestStatus::Merged {
+        Some(now)
+    } else {
+        merge_request.merged_at
+    };
 
-	sqlx::query(
+    sqlx::query(
 		"UPDATE code_merge_requests
 		 SET title = $2, description = $3, status = $4, labels = $5::jsonb, reviewers = $6::jsonb, approvals_required = $7, changed_files = $8, updated_at = $9, merged_at = $10
 		 WHERE id = $1",
@@ -126,36 +173,45 @@ pub async fn update_merge_request(
 	.await
 	.map_err(|cause| db_error(&cause))?;
 
-	let row = load_merge_request_row(&state.db, id)
-		.await
-		.map_err(|cause| db_error(&cause))?
-		.ok_or_else(|| internal_error("updated merge request could not be reloaded"))?;
-	let merge_request = MergeRequestDefinition::try_from(row).map_err(|cause| internal_error(cause.to_string()))?;
-	Ok(Json(merge_request))
+    let row = load_merge_request_row(&state.db, id)
+        .await
+        .map_err(|cause| db_error(&cause))?
+        .ok_or_else(|| internal_error("updated merge request could not be reloaded"))?;
+    let merge_request =
+        MergeRequestDefinition::try_from(row).map_err(|cause| internal_error(cause.to_string()))?;
+    Ok(Json(merge_request))
 }
 
 pub async fn list_comments(
-	Path(id): Path<uuid::Uuid>,
-	State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+    State(state): State<AppState>,
 ) -> ServiceResult<ListResponse<ReviewComment>> {
-	load_merge_request_row(&state.db, id).await.map_err(|cause| db_error(&cause))?.ok_or_else(|| not_found("merge request not found"))?;
-	let comments = load_comments(&state.db, id).await.map_err(|cause| db_error(&cause))?;
-	Ok(Json(ListResponse { items: comments }))
+    load_merge_request_row(&state.db, id)
+        .await
+        .map_err(|cause| db_error(&cause))?
+        .ok_or_else(|| not_found("merge request not found"))?;
+    let comments = load_comments(&state.db, id)
+        .await
+        .map_err(|cause| db_error(&cause))?;
+    Ok(Json(ListResponse { items: comments }))
 }
 
 pub async fn create_comment(
-	Path(id): Path<uuid::Uuid>,
-	State(state): State<AppState>,
-	Json(request): Json<CreateCommentRequest>,
+    Path(id): Path<uuid::Uuid>,
+    State(state): State<AppState>,
+    Json(request): Json<CreateCommentRequest>,
 ) -> ServiceResult<ReviewComment> {
-	if request.body.trim().is_empty() {
-		return Err(bad_request("comment body is required"));
-	}
-	load_merge_request_row(&state.db, id).await.map_err(|cause| db_error(&cause))?.ok_or_else(|| not_found("merge request not found"))?;
-	let comment_id = uuid::Uuid::now_v7();
-	let now = Utc::now();
+    if request.body.trim().is_empty() {
+        return Err(bad_request("comment body is required"));
+    }
+    load_merge_request_row(&state.db, id)
+        .await
+        .map_err(|cause| db_error(&cause))?
+        .ok_or_else(|| not_found("merge request not found"))?;
+    let comment_id = uuid::Uuid::now_v7();
+    let now = Utc::now();
 
-	sqlx::query(
+    sqlx::query(
 		"INSERT INTO code_review_comments (id, merge_request_id, author, body, file_path, line_number, resolved, created_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
 	)
@@ -171,7 +227,12 @@ pub async fn create_comment(
 	.await
 	.map_err(|cause| db_error(&cause))?;
 
-	let comments = load_comments(&state.db, id).await.map_err(|cause| db_error(&cause))?;
-	let comment = comments.into_iter().find(|entry| entry.id == comment_id).ok_or_else(|| internal_error("created comment could not be reloaded"))?;
-	Ok(Json(comment))
+    let comments = load_comments(&state.db, id)
+        .await
+        .map_err(|cause| db_error(&cause))?;
+    let comment = comments
+        .into_iter()
+        .find(|entry| entry.id == comment_id)
+        .ok_or_else(|| internal_error("created comment could not be reloaded"))?;
+    Ok(Json(comment))
 }

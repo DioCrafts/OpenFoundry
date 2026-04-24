@@ -1,13 +1,13 @@
 use axum::{
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use uuid::Uuid;
 
-use crate::models::object_type::*;
 use crate::AppState;
+use crate::models::object_type::*;
 use auth_middleware::layer::AuthUser;
 
 pub async fn create_object_type(
@@ -76,7 +76,12 @@ pub async fn list_object_types(
     .await
     .unwrap_or_default();
 
-    Json(ListObjectTypesResponse { data: types, total, page, per_page })
+    Json(ListObjectTypesResponse {
+        data: types,
+        total,
+        page,
+        per_page,
+    })
 }
 
 pub async fn get_object_type(

@@ -1,13 +1,13 @@
 use axum::{
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use uuid::Uuid;
 
-use crate::models::run::*;
 use crate::AppState;
+use crate::models::run::*;
 use auth_middleware::layer::AuthUser;
 
 pub async fn list_runs(

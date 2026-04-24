@@ -4,11 +4,13 @@ mod models;
 
 use auth_middleware::jwt::JwtConfig;
 use axum::{
-    middleware,
+    Router, middleware,
     routing::{get, patch, post},
-    Router,
 };
-use lettre::{message::Mailbox, transport::smtp::authentication::Credentials, AsyncSmtpTransport, Tokio1Executor};
+use lettre::{
+    AsyncSmtpTransport, Tokio1Executor, message::Mailbox,
+    transport::smtp::authentication::Credentials,
+};
 use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::EnvFilter;
 
@@ -52,14 +54,16 @@ async fn main() {
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .expect("failed to build notification HTTP client");
-    let email_sender = cfg.smtp_host.as_deref().map(build_smtp_transport).transpose().expect("failed to build SMTP transport");
-    let email_from = cfg
-        .smtp_from_address
+    let email_sender = cfg
+        .smtp_host
         .as_deref()
-        .map(|address| {
-            let parsed = address.parse().expect("invalid smtp from address");
-            Mailbox::new(cfg.smtp_from_name.clone(), parsed)
-        });
+        .map(build_smtp_transport)
+        .transpose()
+        .expect("failed to build SMTP transport");
+    let email_from = cfg.smtp_from_address.as_deref().map(|address| {
+        let parsed = address.parse().expect("invalid smtp from address");
+        Mailbox::new(cfg.smtp_from_name.clone(), parsed)
+    });
     let (notification_bus, _) = tokio::sync::broadcast::channel(256);
 
     let state = AppState {
@@ -124,7 +128,9 @@ async fn main() {
     axum::serve(listener, app).await.expect("server error");
 }
 
-fn build_smtp_transport(host: &str) -> Result<AsyncSmtpTransport<Tokio1Executor>, lettre::transport::smtp::Error> {
+fn build_smtp_transport(
+    host: &str,
+) -> Result<AsyncSmtpTransport<Tokio1Executor>, lettre::transport::smtp::Error> {
     let cfg = config::AppConfig::from_env().expect("failed to reload config for SMTP");
     let mut builder = AsyncSmtpTransport::<Tokio1Executor>::relay(host)?;
 

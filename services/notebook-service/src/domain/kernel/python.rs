@@ -36,7 +36,10 @@ pub async fn execute(
     run_python(source, locals)
 }
 
-fn run_python(source: &str, locals: Option<Arc<Py<PyDict>>>) -> Result<KernelExecutionResult, String> {
+fn run_python(
+    source: &str,
+    locals: Option<Arc<Py<PyDict>>>,
+) -> Result<KernelExecutionResult, String> {
     Python::with_gil(|py| {
         let locals = locals.unwrap_or_else(|| Arc::new(PyDict::new_bound(py).unbind()));
         let locals = locals.as_ref().bind(py);

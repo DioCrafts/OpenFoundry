@@ -1,5 +1,5 @@
-use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use auth_middleware::layer::AuthUser;
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -48,7 +48,10 @@ pub async fn status(
         Ok(Some(configuration)) => Json(MfaStatusResponse {
             configured: true,
             enabled: configuration.enabled,
-            recovery_codes_remaining: configuration.recovery_code_hashes.as_array().map_or(0, Vec::len),
+            recovery_codes_remaining: configuration
+                .recovery_code_hashes
+                .as_array()
+                .map_or(0, Vec::len),
         })
         .into_response(),
         Ok(None) => Json(MfaStatusResponse {
@@ -224,7 +227,9 @@ pub async fn complete_login(
     let mut next_recovery_hashes = None;
     let valid_code = if mfa::verify_totp(&configuration.secret, &body.code) {
         true
-    } else if let Some(updated_hashes) = mfa::consume_recovery_code(&configuration.recovery_code_hashes, &body.code) {
+    } else if let Some(updated_hashes) =
+        mfa::consume_recovery_code(&configuration.recovery_code_hashes, &body.code)
+    {
         next_recovery_hashes = Some(updated_hashes);
         true
     } else {
@@ -252,7 +257,14 @@ pub async fn complete_login(
     let mut auth_methods = challenge.auth_methods;
     auth_methods.push("mfa".to_string());
 
-    match jwt::issue_tokens(&state.db, &state.jwt_config, &user, mfa::normalize_scopes(&auth_methods)).await {
+    match jwt::issue_tokens(
+        &state.db,
+        &state.jwt_config,
+        &user,
+        mfa::normalize_scopes(&auth_methods),
+    )
+    .await
+    {
         Ok((access_token, refresh_token)) => Json(TokenResponse {
             access_token,
             refresh_token,

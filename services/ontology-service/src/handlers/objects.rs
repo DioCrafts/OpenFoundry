@@ -1,8 +1,8 @@
 use axum::{
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -69,13 +69,12 @@ pub async fn list_objects(
     let per_page = params.per_page.unwrap_or(20).clamp(1, 100);
     let offset = (page - 1) * per_page;
 
-    let total: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM object_instances WHERE object_type_id = $1",
-    )
-    .bind(type_id)
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(0);
+    let total: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM object_instances WHERE object_type_id = $1")
+            .bind(type_id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or(0);
 
     let objects = sqlx::query_as::<_, ObjectInstance>(
         r#"SELECT * FROM object_instances
@@ -97,12 +96,10 @@ pub async fn get_object(
     State(state): State<AppState>,
     Path((_type_id, obj_id)): Path<(Uuid, Uuid)>,
 ) -> impl IntoResponse {
-    match sqlx::query_as::<_, ObjectInstance>(
-        "SELECT * FROM object_instances WHERE id = $1",
-    )
-    .bind(obj_id)
-    .fetch_optional(&state.db)
-    .await
+    match sqlx::query_as::<_, ObjectInstance>("SELECT * FROM object_instances WHERE id = $1")
+        .bind(obj_id)
+        .fetch_optional(&state.db)
+        .await
     {
         Ok(Some(obj)) => Json(serde_json::json!(obj)).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),

@@ -5,10 +5,10 @@ mod models;
 
 use auth_middleware::jwt::JwtConfig;
 use axum::{
+    Router,
     extract::FromRef,
     middleware,
     routing::{get, post},
-    Router,
 };
 use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::EnvFilter;
@@ -85,8 +85,7 @@ async fn main() {
         )
         .route(
             "/api/v1/ai/knowledge-bases/{id}/documents",
-            get(handlers::knowledge::list_documents)
-                .post(handlers::knowledge::create_document),
+            get(handlers::knowledge::list_documents).post(handlers::knowledge::create_document),
         )
         .route(
             "/api/v1/ai/knowledge-bases/{id}/search",
@@ -134,7 +133,10 @@ async fn main() {
             auth_middleware::auth_layer,
         ));
 
-    let app = Router::new().merge(public).merge(protected).with_state(state);
+    let app = Router::new()
+        .merge(public)
+        .merge(protected)
+        .with_state(state);
 
     let addr = format!("{}:{}", cfg.host, cfg.port);
     tracing::info!("starting ai-service on {addr}");

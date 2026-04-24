@@ -1,5 +1,10 @@
-use axum::{Json, extract::{Path, State}, http::StatusCode, response::IntoResponse};
 use auth_middleware::layer::AuthUser;
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::StatusCode,
+    response::IntoResponse,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -85,14 +90,12 @@ pub async fn create_group(
     }
 
     let group_id = Uuid::now_v7();
-    match sqlx::query(
-        "INSERT INTO groups (id, name, description) VALUES ($1, $2, $3)",
-    )
-    .bind(group_id)
-    .bind(&body.name)
-    .bind(&body.description)
-    .execute(&state.db)
-    .await
+    match sqlx::query("INSERT INTO groups (id, name, description) VALUES ($1, $2, $3)")
+        .bind(group_id)
+        .bind(&body.name)
+        .bind(&body.description)
+        .execute(&state.db)
+        .await
     {
         Ok(_) => {
             if let Err(e) = replace_group_roles(&state.db, group_id, &body.role_ids).await {
@@ -226,7 +229,10 @@ pub async fn remove_user_from_group(
     }
 }
 
-async fn build_group_response(pool: &sqlx::PgPool, group: Group) -> Result<GroupResponse, sqlx::Error> {
+async fn build_group_response(
+    pool: &sqlx::PgPool,
+    group: Group,
+) -> Result<GroupResponse, sqlx::Error> {
     let roles = sqlx::query_as::<_, Role>(
         r#"SELECT r.id, r.name, r.description, r.created_at
            FROM roles r

@@ -4,12 +4,7 @@ mod handlers;
 mod models;
 
 use auth_middleware::jwt::JwtConfig;
-use axum::{
-    extract::FromRef,
-    middleware,
-    routing::get,
-    Router,
-};
+use axum::{Router, extract::FromRef, middleware, routing::get};
 use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::EnvFilter;
 
@@ -53,8 +48,14 @@ async fn main() {
     let public = Router::new().route("/health", get(|| async { "ok" }));
 
     let protected = Router::new()
-        .route("/api/v1/marketplace/overview", get(handlers::browse::get_overview))
-        .route("/api/v1/marketplace/categories", get(handlers::browse::list_categories))
+        .route(
+            "/api/v1/marketplace/overview",
+            get(handlers::browse::get_overview),
+        )
+        .route(
+            "/api/v1/marketplace/categories",
+            get(handlers::browse::list_categories),
+        )
         .route(
             "/api/v1/marketplace/listings",
             get(handlers::browse::list_listings).post(handlers::publish::publish_listing),
@@ -84,7 +85,10 @@ async fn main() {
             auth_middleware::auth_layer,
         ));
 
-    let app = Router::new().merge(public).merge(protected).with_state(state);
+    let app = Router::new()
+        .merge(public)
+        .merge(protected)
+        .with_state(state);
 
     let addr = format!("{}:{}", cfg.host, cfg.port);
     tracing::info!("starting marketplace-service on {addr}");

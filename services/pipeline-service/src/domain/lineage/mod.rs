@@ -143,7 +143,13 @@ fn build_graph(edges: &[LineageEdge]) -> LineageGraph {
         });
     }
 
-    let nodes = node_ids.into_iter().map(|id| LineageNode { dataset_id: id }).collect();
+    let nodes = node_ids
+        .into_iter()
+        .map(|id| LineageNode { dataset_id: id })
+        .collect();
 
-    LineageGraph { nodes, edges: graph_edges }
+    LineageGraph {
+        nodes,
+        edges: graph_edges,
+    }
 }

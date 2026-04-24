@@ -1,9 +1,9 @@
 use axum::extract::State;
 use sqlx::query_scalar;
 
-use crate::{models::MlStudioOverview, AppState};
+use crate::{AppState, models::MlStudioOverview};
 
-use super::{db_error, ServiceResult};
+use super::{ServiceResult, db_error};
 
 pub async fn get_overview(State(state): State<AppState>) -> ServiceResult<MlStudioOverview> {
     let experiment_count = query_scalar::<_, i64>("SELECT COUNT(*) FROM ml_experiments")
@@ -23,24 +23,22 @@ pub async fn get_overview(State(state): State<AppState>) -> ServiceResult<MlStud
         .await
         .map_err(|cause| db_error(&cause))?;
 
-    let production_model_count = query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM ml_model_versions WHERE stage = 'production'",
-    )
-    .fetch_one(&state.db)
-    .await
-    .map_err(|cause| db_error(&cause))?;
+    let production_model_count =
+        query_scalar::<_, i64>("SELECT COUNT(*) FROM ml_model_versions WHERE stage = 'production'")
+            .fetch_one(&state.db)
+            .await
+            .map_err(|cause| db_error(&cause))?;
 
     let feature_count = query_scalar::<_, i64>("SELECT COUNT(*) FROM ml_features")
         .fetch_one(&state.db)
         .await
         .map_err(|cause| db_error(&cause))?;
 
-    let online_feature_count = query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM ml_features WHERE online_enabled = TRUE",
-    )
-    .fetch_one(&state.db)
-    .await
-    .map_err(|cause| db_error(&cause))?;
+    let online_feature_count =
+        query_scalar::<_, i64>("SELECT COUNT(*) FROM ml_features WHERE online_enabled = TRUE")
+            .fetch_one(&state.db)
+            .await
+            .map_err(|cause| db_error(&cause))?;
 
     let deployment_count = query_scalar::<_, i64>("SELECT COUNT(*) FROM ml_deployments")
         .fetch_one(&state.db)

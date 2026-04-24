@@ -5,13 +5,12 @@ mod models;
 
 use auth_middleware::jwt::JwtConfig;
 use axum::{
-    middleware,
+    Router, middleware,
     routing::{delete, get, post},
-    Router,
 };
+use core_models::{health::HealthStatus, observability};
 use query_engine::context::QueryContext;
 use sqlx::postgres::PgPoolOptions;
-use tracing_subscriber::EnvFilter;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -29,11 +28,12 @@ impl axum::extract::FromRef<AppState> for JwtConfig {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    observability::init_tracing("query-service");
 
     let cfg = config::AppConfig::from_env().expect("failed to load config");
+    if let Some(data_dir) = cfg.data_dir.as_deref() {
+        tracing::info!(data_dir, "query-service local data directory configured");
+    }
 
     let pool = PgPoolOptions::new()
         .max_connections(20)
@@ -57,15 +57,32 @@ async fn main() {
         distributed_query_workers: cfg.distributed_query_workers.max(1),
     };
 
-    let public = Router::new()
-        .route("/health", get(|| async { "ok" }));
+    let public = Router::new().route(
+        "/health",
+        get(|| async { axum::Json(HealthStatus::ok("query-service")) }),
+    );
 
     let protected = Router::new()
-        .route("/api/v1/queries/execute", post(handlers::execute::execute_query))
-        .route("/api/v1/queries/explain", post(handlers::explain::explain_query))
-        .route("/api/v1/queries/saved", post(handlers::saved::create_saved_query))
-        .route("/api/v1/queries/saved", get(handlers::saved::list_saved_queries))
-        .route("/api/v1/queries/saved/{id}", delete(handlers::saved::delete_saved_query))
+        .route(
+            "/api/v1/queries/execute",
+            post(handlers::execute::execute_query),
+        )
+        .route(
+            "/api/v1/queries/explain",
+            post(handlers::explain::explain_query),
+        )
+        .route(
+            "/api/v1/queries/saved",
+            post(handlers::saved::create_saved_query),
+        )
+        .route(
+            "/api/v1/queries/saved",
+            get(handlers::saved::list_saved_queries),
+        )
+        .route(
+            "/api/v1/queries/saved/{id}",
+            delete(handlers::saved::delete_saved_query),
+        )
         .layer(middleware::from_fn_with_state(
             jwt_config,
             auth_middleware::auth_layer,

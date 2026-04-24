@@ -10,8 +10,12 @@ pub struct AppConfig {
     pub jwt_secret: String,
 }
 
-fn default_host() -> String { "0.0.0.0".to_string() }
-fn default_port() -> u16 { 50057 }
+fn default_host() -> String {
+    "0.0.0.0".to_string()
+}
+fn default_port() -> u16 {
+    50057
+}
 
 impl AppConfig {
     pub fn from_env() -> Result<Self, config::ConfigError> {

@@ -5,10 +5,10 @@ mod models;
 
 use auth_middleware::jwt::JwtConfig;
 use axum::{
+    Router,
     extract::FromRef,
     middleware,
     routing::{get, post},
-    Router,
 };
 use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::EnvFilter;
@@ -53,7 +53,10 @@ async fn main() {
     let public = Router::new().route("/health", get(|| async { "ok" }));
 
     let protected = Router::new()
-        .route("/api/v1/reports/overview", get(handlers::crud::get_overview))
+        .route(
+            "/api/v1/reports/overview",
+            get(handlers::crud::get_overview),
+        )
         .route(
             "/api/v1/reports/catalog",
             get(handlers::generate::get_catalog),
@@ -91,7 +94,10 @@ async fn main() {
             auth_middleware::auth_layer,
         ));
 
-    let app = Router::new().merge(public).merge(protected).with_state(state);
+    let app = Router::new()
+        .merge(public)
+        .merge(protected)
+        .with_state(state);
 
     let addr = format!("{}:{}", cfg.host, cfg.port);
     tracing::info!("starting report-service on {addr}");

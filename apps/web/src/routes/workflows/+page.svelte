@@ -15,7 +15,6 @@
     triggerWorkflowEvent,
     updateWorkflow,
     type WorkflowApproval,
-    type WorkflowBranch,
     type WorkflowDefinition,
     type WorkflowRun,
     type WorkflowStep,
@@ -86,10 +85,6 @@
     stepConfigText = Object.fromEntries(
       draft.steps.map((step) => [step.id, JSON.stringify(step.config ?? {}, null, 2)]),
     );
-  }
-
-  function selectedWorkflow(): WorkflowDefinition | undefined {
-    return workflows.find((workflow) => workflow.id === selectedWorkflowId);
   }
 
   async function loadWorkflows() {

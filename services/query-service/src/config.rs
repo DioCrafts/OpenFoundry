@@ -14,9 +14,15 @@ pub struct AppConfig {
     pub distributed_query_workers: usize,
 }
 
-fn default_host() -> String { "0.0.0.0".to_string() }
-fn default_port() -> u16 { 50055 }
-fn default_distributed_query_workers() -> usize { 1 }
+fn default_host() -> String {
+    "0.0.0.0".to_string()
+}
+fn default_port() -> u16 {
+    50055
+}
+fn default_distributed_query_workers() -> usize {
+    1
+}
 
 impl AppConfig {
     pub fn from_env() -> Result<Self, config::ConfigError> {

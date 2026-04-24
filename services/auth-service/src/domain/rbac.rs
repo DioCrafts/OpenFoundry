@@ -11,13 +11,11 @@ pub struct AccessBundle {
 }
 
 pub async fn assign_role(pool: &PgPool, user_id: Uuid, role_id: Uuid) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-    )
-    .bind(user_id)
-    .bind(role_id)
-    .execute(pool)
-    .await?;
+    sqlx::query("INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+        .bind(user_id)
+        .bind(role_id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -37,7 +35,10 @@ pub async fn get_role_by_name(pool: &PgPool, name: &str) -> Result<Option<Role>,
         .await
 }
 
-pub async fn get_user_access_bundle(pool: &PgPool, user_id: Uuid) -> Result<AccessBundle, sqlx::Error> {
+pub async fn get_user_access_bundle(
+    pool: &PgPool,
+    user_id: Uuid,
+) -> Result<AccessBundle, sqlx::Error> {
     let roles = sqlx::query_scalar::<_, String>(
         r#"SELECT DISTINCT name FROM (
                SELECT r.name AS name

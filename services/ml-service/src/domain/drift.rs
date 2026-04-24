@@ -25,7 +25,8 @@ pub fn generate_report(request: &GenerateDriftReportRequest, variant_count: usiz
     let volume_shift = ((observed - baseline).abs() / baseline).min(1.5);
 
     let dataset_score = round_score((0.12 + volume_shift + variant_count as f64 * 0.04).min(1.5));
-    let concept_score = round_score((0.09 + volume_shift * 0.7 + variant_count as f64 * 0.03).min(1.5));
+    let concept_score =
+        round_score((0.09 + volume_shift * 0.7 + variant_count as f64 * 0.03).min(1.5));
     let recommend_retraining = dataset_score >= 0.25 || concept_score >= 0.18;
 
     DriftReport {
@@ -45,7 +46,8 @@ pub fn generate_report(request: &GenerateDriftReportRequest, variant_count: usiz
         recommend_retraining,
         auto_retraining_job_id: None,
         notes: if recommend_retraining {
-            "Observed drift exceeded the configured threshold; retraining is recommended.".to_string()
+            "Observed drift exceeded the configured threshold; retraining is recommended."
+                .to_string()
         } else {
             "Observed drift remains within the configured guardrails.".to_string()
         },

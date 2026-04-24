@@ -5,10 +5,10 @@ mod models;
 
 use auth_middleware::jwt::JwtConfig;
 use axum::{
+    Router,
     extract::FromRef,
     middleware,
     routing::{get, post},
-    Router,
 };
 use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::EnvFilter;
@@ -104,7 +104,10 @@ async fn main() {
             auth_middleware::auth_layer,
         ));
 
-    let app = Router::new().merge(public).merge(protected).with_state(state);
+    let app = Router::new()
+        .merge(public)
+        .merge(protected)
+        .with_state(state);
 
     let addr = format!("{}:{}", cfg.host, cfg.port);
     tracing::info!("starting fusion-service on {addr}");

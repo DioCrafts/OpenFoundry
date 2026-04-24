@@ -159,7 +159,7 @@
     try {
       return source.trim() ? JSON.parse(source) : fallback;
     } catch (cause) {
-      throw new Error(`${label} must be valid JSON`);
+      throw new Error(`${label} must be valid JSON`, { cause });
     }
   }
 

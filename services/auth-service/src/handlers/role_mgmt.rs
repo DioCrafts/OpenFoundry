@@ -1,5 +1,10 @@
-use axum::{extract::{Path, State}, http::StatusCode, response::IntoResponse, Json};
 use auth_middleware::layer::AuthUser;
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::StatusCode,
+    response::IntoResponse,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -50,9 +55,11 @@ pub async fn list_roles(
         return response;
     }
 
-    let roles = sqlx::query_as::<_, Role>("SELECT id, name, description, created_at FROM roles ORDER BY name")
-        .fetch_all(&state.db)
-        .await;
+    let roles = sqlx::query_as::<_, Role>(
+        "SELECT id, name, description, created_at FROM roles ORDER BY name",
+    )
+    .fetch_all(&state.db)
+    .await;
 
     match roles {
         Ok(roles) => {
@@ -87,18 +94,17 @@ pub async fn create_role(
     }
 
     let role_id = Uuid::now_v7();
-    let result = sqlx::query(
-        "INSERT INTO roles (id, name, description) VALUES ($1, $2, $3)",
-    )
-    .bind(role_id)
-    .bind(&body.name)
-    .bind(&body.description)
-    .execute(&state.db)
-    .await;
+    let result = sqlx::query("INSERT INTO roles (id, name, description) VALUES ($1, $2, $3)")
+        .bind(role_id)
+        .bind(&body.name)
+        .bind(&body.description)
+        .execute(&state.db)
+        .await;
 
     match result {
         Ok(_) => {
-            if let Err(e) = replace_role_permissions(&state.db, role_id, &body.permission_ids).await {
+            if let Err(e) = replace_role_permissions(&state.db, role_id, &body.permission_ids).await
+            {
                 tracing::error!("failed to assign role permissions: {e}");
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
             }
@@ -141,18 +147,17 @@ pub async fn update_role(
         return response;
     }
 
-    let result = sqlx::query(
-        "UPDATE roles SET description = $2 WHERE id = $1",
-    )
-    .bind(role_id)
-    .bind(body.description)
-    .execute(&state.db)
-    .await;
+    let result = sqlx::query("UPDATE roles SET description = $2 WHERE id = $1")
+        .bind(role_id)
+        .bind(body.description)
+        .execute(&state.db)
+        .await;
 
     match result {
         Ok(record) if record.rows_affected() == 0 => StatusCode::NOT_FOUND.into_response(),
         Ok(_) => {
-            if let Err(e) = replace_role_permissions(&state.db, role_id, &body.permission_ids).await {
+            if let Err(e) = replace_role_permissions(&state.db, role_id, &body.permission_ids).await
+            {
                 tracing::error!("failed to replace role permissions: {e}");
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
             }

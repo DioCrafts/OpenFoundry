@@ -1,19 +1,19 @@
-use axum::{extract::State, Json};
+use axum::{Json, extract::State};
 use chrono::Utc;
-use serde_json::{json, Value};
-use sqlx::{query_as, query_scalar, FromRow};
+use serde_json::{Value, json};
+use sqlx::{FromRow, query_as, query_scalar};
 use uuid::Uuid;
 
 use crate::{
+    AppState,
     domain::training,
     models::{
         model_version::ModelVersion,
         training_job::{CreateTrainingJobRequest, ListTrainingJobsResponse, TrainingJob},
     },
-    AppState,
 };
 
-use super::{bad_request, db_error, deserialize_json, to_json, ServiceResult};
+use super::{ServiceResult, bad_request, db_error, deserialize_json, to_json};
 
 #[derive(Debug, FromRow)]
 struct TrainingJobRow {
@@ -193,7 +193,9 @@ pub async fn create_training_job(
             .bind(job_id)
             .bind(best_trial.hyperparameters.clone())
             .bind(to_json(&vec![best_trial.objective_metric.clone()]))
-            .bind(Some(format!("ml://models/{model_id}/versions/{next_version_number}")))
+            .bind(Some(format!(
+                "ml://models/{model_id}/versions/{next_version_number}"
+            )))
             .bind(json!({
                 "signature": "tabular",
                 "objective_metric": objective_metric_name,

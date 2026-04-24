@@ -5,18 +5,21 @@ mod models;
 
 use auth_middleware::jwt::JwtConfig;
 use axum::{
+    Router,
     extract::FromRef,
     middleware,
     routing::{get, post},
-    Router,
 };
+use core_models::{health::HealthStatus, observability};
 use sqlx::postgres::PgPoolOptions;
-use tracing_subscriber::EnvFilter;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: sqlx::PgPool,
     pub jwt_config: JwtConfig,
+    pub http_client: reqwest::Client,
+    pub dataset_service_url: String,
+    pub archive_dir: String,
 }
 
 impl FromRef<AppState> for JwtConfig {
@@ -27,9 +30,7 @@ impl FromRef<AppState> for JwtConfig {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    observability::init_tracing("streaming-service");
 
     let cfg = config::AppConfig::from_env().expect("failed to load config");
 
@@ -45,12 +46,22 @@ async fn main() {
         .expect("failed to run migrations");
 
     let jwt_config = JwtConfig::new(&cfg.jwt_secret);
+    let http_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .expect("failed to build HTTP client");
     let state = AppState {
         db: pool,
         jwt_config: jwt_config.clone(),
+        http_client,
+        dataset_service_url: cfg.dataset_service_url.clone(),
+        archive_dir: cfg.archive_dir.clone(),
     };
 
-    let public = Router::new().route("/health", get(|| async { "ok" }));
+    let public = Router::new().route(
+        "/health",
+        get(|| async { axum::Json(HealthStatus::ok("streaming-service")) }),
+    );
 
     let protected = Router::new()
         .route(
@@ -66,6 +77,10 @@ async fn main() {
             axum::routing::patch(handlers::streams::update_stream),
         )
         .route(
+            "/api/v1/streaming/streams/{id}/events",
+            post(handlers::streams::push_events),
+        )
+        .route(
             "/api/v1/streaming/windows",
             get(handlers::streams::list_windows).post(handlers::streams::create_window),
         )
@@ -75,8 +90,7 @@ async fn main() {
         )
         .route(
             "/api/v1/streaming/topologies",
-            get(handlers::topologies::list_topologies)
-                .post(handlers::topologies::create_topology),
+            get(handlers::topologies::list_topologies).post(handlers::topologies::create_topology),
         )
         .route(
             "/api/v1/streaming/topologies/{id}",
@@ -103,7 +117,10 @@ async fn main() {
             auth_middleware::auth_layer,
         ));
 
-    let app = Router::new().merge(public).merge(protected).with_state(state);
+    let app = Router::new()
+        .merge(public)
+        .merge(protected)
+        .with_state(state);
 
     let addr = format!("{}:{}", cfg.host, cfg.port);
     tracing::info!("starting streaming-service on {addr}");

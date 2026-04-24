@@ -3,17 +3,17 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use cron::Schedule;
 use serde::Serialize;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
 use crate::{
+    AppState,
     domain::branching,
     models::{
         approval::WorkflowApproval,
         execution::WorkflowRun,
         workflow::{WorkflowDefinition, WorkflowStep},
     },
-    AppState,
 };
 
 pub async fn execute_workflow_run(
@@ -100,7 +100,9 @@ pub async fn run_due_cron_workflows(state: &AppState) -> Result<usize, String> {
 
         match execute_workflow_run(state, &workflow, "cron", None, context).await {
             Ok(_) => triggered += 1,
-            Err(error) => tracing::warn!(workflow_id = %workflow.id, "cron workflow trigger failed: {error}"),
+            Err(error) => {
+                tracing::warn!(workflow_id = %workflow.id, "cron workflow trigger failed: {error}")
+            }
         }
     }
 
@@ -160,7 +162,13 @@ async fn continue_run(
         };
 
         let Some(step) = steps.iter().find(|candidate| candidate.id == step_id) else {
-            return fail_run(state, run.id, &run.context, format!("step '{step_id}' not found")).await;
+            return fail_run(
+                state,
+                run.id,
+                &run.context,
+                format!("step '{step_id}' not found"),
+            )
+            .await;
         };
 
         match step.step_type.as_str() {
@@ -206,7 +214,8 @@ async fn continue_run(
                 .await;
 
                 if let Some(next_step_id) = branching::resolve_next_step(step, &run.context) {
-                    run = update_running_step(state, run.id, Some(next_step_id), &run.context).await?;
+                    run = update_running_step(state, run.id, Some(next_step_id), &run.context)
+                        .await?;
                 } else {
                     return complete_run(state, run.id, &run.context).await;
                 }
@@ -325,7 +334,11 @@ async fn update_running_step(
     .map_err(|error| error.to_string())
 }
 
-async fn complete_run(state: &AppState, run_id: Uuid, context: &Value) -> Result<WorkflowRun, String> {
+async fn complete_run(
+    state: &AppState,
+    run_id: Uuid,
+    context: &Value,
+) -> Result<WorkflowRun, String> {
     sqlx::query_as::<_, WorkflowRun>(
         r#"UPDATE workflow_runs
            SET status = 'completed', current_step_id = NULL, context = $2, finished_at = NOW(), error_message = NULL

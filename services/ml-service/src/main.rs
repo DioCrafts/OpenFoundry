@@ -5,10 +5,10 @@ mod models;
 
 use auth_middleware::jwt::JwtConfig;
 use axum::{
+    Router,
     extract::FromRef,
     middleware,
     routing::{get, post},
-    Router,
 };
 use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::EnvFilter;
@@ -85,8 +85,7 @@ async fn main() {
         )
         .route(
             "/api/v1/ml/models/{id}/versions",
-            get(handlers::models::list_model_versions)
-                .post(handlers::models::create_model_version),
+            get(handlers::models::list_model_versions).post(handlers::models::create_model_version),
         )
         .route(
             "/api/v1/ml/model-versions/{id}/transition",
@@ -140,7 +139,10 @@ async fn main() {
             auth_middleware::auth_layer,
         ));
 
-    let app = Router::new().merge(public).merge(protected).with_state(state);
+    let app = Router::new()
+        .merge(public)
+        .merge(protected)
+        .with_state(state);
 
     let addr = format!("{}:{}", cfg.host, cfg.port);
     tracing::info!("starting ml-service on {addr}");

@@ -1,5 +1,7 @@
 use serde::Deserialize;
 
+use crate::middleware::rate_limit::RateLimitConfig;
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct GatewayConfig {
     #[serde(default = "default_host")]
@@ -11,6 +13,8 @@ pub struct GatewayConfig {
     pub cors_origins: Vec<String>,
     #[serde(default = "default_auth_url")]
     pub auth_service_url: String,
+    #[serde(default = "default_data_connector_url")]
+    pub data_connector_service_url: String,
     #[serde(default = "default_dataset_url")]
     pub dataset_service_url: String,
     #[serde(default = "default_query_url")]
@@ -45,6 +49,8 @@ pub struct GatewayConfig {
     pub audit_service_url: String,
     #[serde(default = "default_nexus_service_url")]
     pub nexus_service_url: String,
+    #[serde(default)]
+    pub rate_limit: RateLimitConfig,
 }
 
 fn default_host() -> String {
@@ -55,6 +61,9 @@ fn default_port() -> u16 {
 }
 fn default_auth_url() -> String {
     "http://localhost:50051".to_string()
+}
+fn default_data_connector_url() -> String {
+    "http://localhost:50052".to_string()
 }
 fn default_dataset_url() -> String {
     "http://localhost:50053".to_string()
@@ -88,15 +97,15 @@ fn default_fusion_service_url() -> String {
 }
 
 fn default_streaming_service_url() -> String {
-	"http://localhost:50054".to_string()
+    "http://localhost:50054".to_string()
 }
 
 fn default_report_service_url() -> String {
-	"http://localhost:50064".to_string()
+    "http://localhost:50064".to_string()
 }
 
 fn default_geospatial_service_url() -> String {
-	"http://localhost:50068".to_string()
+    "http://localhost:50068".to_string()
 }
 
 fn default_code_repo_service_url() -> String {
@@ -112,7 +121,7 @@ fn default_audit_service_url() -> String {
 }
 
 fn default_nexus_service_url() -> String {
-	"http://localhost:50067".to_string()
+    "http://localhost:50067".to_string()
 }
 
 impl GatewayConfig {

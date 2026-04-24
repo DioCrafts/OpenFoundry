@@ -48,4 +48,3 @@ pub async fn create_consumer(
         .await
         .map_err(|e| SubscribeError::Consumer(e.to_string()))
 }
-

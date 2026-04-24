@@ -2,6 +2,7 @@
 
 use serde_json::Value;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct InferredColumn {
     pub name: String,
@@ -11,6 +12,7 @@ pub struct InferredColumn {
 }
 
 /// Infer columns from a JSON array sample.
+#[allow(dead_code)]
 pub fn infer_from_json_sample(sample: &[Value]) -> Vec<InferredColumn> {
     let Some(first) = sample.first() else {
         return vec![];
@@ -35,9 +37,9 @@ pub fn infer_from_json_sample(sample: &[Value]) -> Vec<InferredColumn> {
                 name: key.clone(),
                 source_type: "json".to_string(),
                 inferred_type: inferred_type.to_string(),
-                nullable: sample.iter().any(|row| {
-                    row.get(key).is_none_or(|v| v.is_null())
-                }),
+                nullable: sample
+                    .iter()
+                    .any(|row| row.get(key).is_none_or(|v| v.is_null())),
             }
         })
         .collect()

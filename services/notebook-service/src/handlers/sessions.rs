@@ -1,13 +1,13 @@
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use uuid::Uuid;
 
-use crate::models::session::*;
 use crate::AppState;
+use crate::models::session::*;
 use auth_middleware::layer::AuthUser;
 
 pub async fn create_session(

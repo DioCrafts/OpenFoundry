@@ -1,0 +1,350 @@
+{
+  "base_url": "http://127.0.0.1:8080",
+  "started_at_epoch_ms": 1777058179259,
+  "success": true,
+  "failure_message": null,
+  "steps": [
+    {
+      "name": "create_connection",
+      "method": "POST",
+      "path": "/api/v1/connections",
+      "url": "http://127.0.0.1:8080/api/v1/connections",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [
+        {
+          "path": "/id",
+          "status": "passed",
+          "expected": null,
+          "actual": "019dc0eb-e932-7661-9e0d-f0b062f216ef"
+        }
+      ],
+      "captured": {
+        "connection_id": "019dc0eb-e932-7661-9e0d-f0b062f216ef"
+      },
+      "response_preview": "{\"id\":\"019dc0eb-e932-7661-9e0d-f0b062f216ef\",\"name\":\"smoke-rest-019dc0eb-e8bb-70a3-8826-af71ddc1b840\",\"connector_type\":\"rest_api\",\"config\":{\"base_url\":\"http://127.0.0.1:8080\",\"health_path\":\"/health\",\"resource_path\":\"/health\"},\"status\":\"disconnected\",\"owner_id\":\"019dc0eb-e8bc-7930-b76d-3d3e368b77d2\",\"last_sync_at\":null,\"created_at\":\"2026-04-24T19:16:19.379485Z\",\"updated_at\":\"2026-04-24T19:16:19.379..."
+    },
+    {
+      "name": "test_connection",
+      "method": "POST",
+      "path": "/api/v1/connections/${connection_id}/test",
+      "url": "http://127.0.0.1:8080/api/v1/connections/019dc0eb-e932-7661-9e0d-f0b062f216ef/test",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/success",
+          "status": "passed",
+          "expected": true,
+          "actual": true
+        },
+        {
+          "path": "/latency_ms",
+          "status": "passed",
+          "expected": null,
+          "actual": 0
+        },
+        {
+          "path": "/details/path",
+          "status": "passed",
+          "expected": "/health",
+          "actual": "/health"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"details\":{\"path\":\"/health\",\"response_bytes\":95},\"latency_ms\":0,\"message\":\"GET /health returned HTTP 200\",\"success\":true}"
+    },
+    {
+      "name": "create_source_dataset",
+      "method": "POST",
+      "path": "/api/v1/datasets",
+      "url": "http://127.0.0.1:8080/api/v1/datasets",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [],
+      "captured": {
+        "source_dataset_id": "019dc0eb-e99d-71a3-b954-b4ed87c4d68c"
+      },
+      "response_preview": "{\"id\":\"019dc0eb-e99d-71a3-b954-b4ed87c4d68c\",\"name\":\"smoke-input-019dc0eb-e8bb-70a3-8826-af71ddc1b840\",\"description\":\"P1 smoke source dataset\",\"format\":\"json\",\"storage_path\":\"datasets/019dc0eb-e99d-71a3-b954-b4ed87c4d68c\",\"size_bytes\":0,\"row_count\":0,\"owner_id\":\"019dc0eb-e8bc-7930-b76d-3d3e368b77d2\",\"tags\":[\"smoke\",\"p1\"],\"current_version\":1,\"active_branch\":\"main\",\"created_at\":\"2026-04-24T19:16:19...."
+    },
+    {
+      "name": "sync_connection_to_dataset",
+      "method": "POST",
+      "path": "/api/v1/connections/${connection_id}/sync",
+      "url": "http://127.0.0.1:8080/api/v1/connections/019dc0eb-e932-7661-9e0d-f0b062f216ef/sync",
+      "expected_status": 202,
+      "actual_status": 202,
+      "assertions": [
+        {
+          "path": "/status",
+          "status": "passed",
+          "expected": "pending",
+          "actual": "pending"
+        }
+      ],
+      "captured": {
+        "sync_job_id": "019dc0eb-e9ce-7f80-82c0-5a5ea7e7f5f1"
+      },
+      "response_preview": "{\"connection_id\":\"019dc0eb-e932-7661-9e0d-f0b062f216ef\",\"job_id\":\"019dc0eb-e9ce-7f80-82c0-5a5ea7e7f5f1\",\"max_attempts\":3,\"scheduled_at\":\"2026-04-24T19:16:19.534169Z\",\"status\":\"pending\"}"
+    },
+    {
+      "name": "wait_for_sync_completion",
+      "method": "GET",
+      "path": "/api/v1/connections/${connection_id}/sync-jobs",
+      "url": "http://127.0.0.1:8080/api/v1/connections/019dc0eb-e932-7661-9e0d-f0b062f216ef/sync-jobs",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/0/id",
+          "status": "passed",
+          "expected": "019dc0eb-e9ce-7f80-82c0-5a5ea7e7f5f1",
+          "actual": "019dc0eb-e9ce-7f80-82c0-5a5ea7e7f5f1"
+        },
+        {
+          "path": "/0/status",
+          "status": "passed",
+          "expected": "completed",
+          "actual": "completed"
+        },
+        {
+          "path": "/0/result_dataset_version",
+          "status": "passed",
+          "expected": null,
+          "actual": 1
+        }
+      ],
+      "captured": {},
+      "response_preview": "[{\"id\":\"019dc0eb-e9ce-7f80-82c0-5a5ea7e7f5f1\",\"connection_id\":\"019dc0eb-e932-7661-9e0d-f0b062f216ef\",\"target_dataset_id\":\"019dc0eb-e99d-71a3-b954-b4ed87c4d68c\",\"table_name\":\"/health\",\"status\":\"completed\",\"rows_synced\":1,\"error\":null,\"attempts\":1,\"max_attempts\":3,\"scheduled_at\":\"2026-04-24T19:16:19.534169Z\",\"next_retry_at\":null,\"result_dataset_version\":1,\"sync_metadata\":{\"source\":{\"rows\":1,\"url\":\"h..."
+    },
+    {
+      "name": "preview_source_dataset",
+      "method": "GET",
+      "path": "/api/v1/datasets/${source_dataset_id}/preview",
+      "url": "http://127.0.0.1:8080/api/v1/datasets/019dc0eb-e99d-71a3-b954-b4ed87c4d68c/preview",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/total_rows",
+          "status": "passed",
+          "expected": 1,
+          "actual": 1
+        },
+        {
+          "path": "/rows/0/status",
+          "status": "passed",
+          "expected": "ok",
+          "actual": "ok"
+        },
+        {
+          "path": "/rows/0/service",
+          "status": "passed",
+          "expected": "gateway",
+          "actual": "gateway"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"branch\":null,\"columns\":[{\"field_type\":\"Utf8\",\"name\":\"service\",\"nullable\":true},{\"field_type\":\"Utf8\",\"name\":\"status\",\"nullable\":true},{\"field_type\":\"Utf8\",\"name\":\"timestamp\",\"nullable\":true},{\"field_type\":\"Utf8\",\"name\":\"version\",\"nullable\":true}],\"dataset_id\":\"019dc0eb-e99d-71a3-b954-b4ed87c4d68c\",\"errors\":[],\"format\":\"json\",\"limit\":50,\"offset\":0,\"row_count\":1,\"rows\":[{\"service\":\"gateway\",\"status..."
+    },
+    {
+      "name": "list_source_dataset_files",
+      "method": "GET",
+      "path": "/api/v1/datasets/${source_dataset_id}/files",
+      "url": "http://127.0.0.1:8080/api/v1/datasets/019dc0eb-e99d-71a3-b954-b4ed87c4d68c/files",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/items/0/path",
+          "status": "passed",
+          "expected": null,
+          "actual": "datasets/019dc0eb-e99d-71a3-b954-b4ed87c4d68c/v1"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"current_version\":1,\"dataset_id\":\"019dc0eb-e99d-71a3-b954-b4ed87c4d68c\",\"items\":[{\"content_type\":null,\"last_modified\":\"2026-04-24T19:16:19.668496177Z\",\"path\":\"datasets/019dc0eb-e99d-71a3-b954-b4ed87c4d68c/v1\",\"size\":97}],\"root\":\"datasets/019dc0eb-e99d-71a3-b954-b4ed87c4d68c\"}"
+    },
+    {
+      "name": "create_source_branch",
+      "method": "POST",
+      "path": "/api/v1/datasets/${source_dataset_id}/branches",
+      "url": "http://127.0.0.1:8080/api/v1/datasets/019dc0eb-e99d-71a3-b954-b4ed87c4d68c/branches",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [
+        {
+          "path": "/base_version",
+          "status": "passed",
+          "expected": 1,
+          "actual": 1
+        }
+      ],
+      "captured": {
+        "source_branch_name": "feature-019dc0eb-e8bb-70a3-8826-af71ddc1b840"
+      },
+      "response_preview": "{\"id\":\"019dc0eb-ec16-75c3-85a6-47e3122bb406\",\"dataset_id\":\"019dc0eb-e99d-71a3-b954-b4ed87c4d68c\",\"name\":\"feature-019dc0eb-e8bb-70a3-8826-af71ddc1b840\",\"version\":1,\"base_version\":1,\"description\":\"P1 smoke branch\",\"is_default\":false,\"created_at\":\"2026-04-24T19:16:20.118177Z\",\"updated_at\":\"2026-04-24T19:16:20.118177Z\"}"
+    },
+    {
+      "name": "list_source_branches",
+      "method": "GET",
+      "path": "/api/v1/datasets/${source_dataset_id}/branches",
+      "url": "http://127.0.0.1:8080/api/v1/datasets/019dc0eb-e99d-71a3-b954-b4ed87c4d68c/branches",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/0/name",
+          "status": "passed",
+          "expected": "main",
+          "actual": "main"
+        },
+        {
+          "path": "/1/name",
+          "status": "passed",
+          "expected": "feature-019dc0eb-e8bb-70a3-8826-af71ddc1b840",
+          "actual": "feature-019dc0eb-e8bb-70a3-8826-af71ddc1b840"
+        }
+      ],
+      "captured": {},
+      "response_preview": "[{\"id\":\"019dc0eb-e9a0-78b1-93bc-d75eff02e484\",\"dataset_id\":\"019dc0eb-e99d-71a3-b954-b4ed87c4d68c\",\"name\":\"main\",\"version\":1,\"base_version\":1,\"description\":\"Default branch\",\"is_default\":true,\"created_at\":\"2026-04-24T19:16:19.525611Z\",\"updated_at\":\"2026-04-24T19:16:19.672001Z\"},{\"id\":\"019dc0eb-ec16-75c3-85a6-47e3122bb406\",\"dataset_id\":\"019dc0eb-e99d-71a3-b954-b4ed87c4d68c\",\"name\":\"feature-019dc0eb-e..."
+    },
+    {
+      "name": "checkout_source_branch",
+      "method": "POST",
+      "path": "/api/v1/datasets/${source_dataset_id}/branches/${source_branch_name}/checkout",
+      "url": "http://127.0.0.1:8080/api/v1/datasets/019dc0eb-e99d-71a3-b954-b4ed87c4d68c/branches/feature-019dc0eb-e8bb-70a3-8826-af71ddc1b840/checkout",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/active_branch",
+          "status": "passed",
+          "expected": "feature-019dc0eb-e8bb-70a3-8826-af71ddc1b840",
+          "actual": "feature-019dc0eb-e8bb-70a3-8826-af71ddc1b840"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"id\":\"019dc0eb-e99d-71a3-b954-b4ed87c4d68c\",\"name\":\"smoke-input-019dc0eb-e8bb-70a3-8826-af71ddc1b840\",\"description\":\"P1 smoke source dataset\",\"format\":\"json\",\"storage_path\":\"datasets/019dc0eb-e99d-71a3-b954-b4ed87c4d68c\",\"size_bytes\":97,\"row_count\":1,\"owner_id\":\"019dc0eb-e8bc-7930-b76d-3d3e368b77d2\",\"tags\":[\"smoke\",\"p1\"],\"current_version\":1,\"active_branch\":\"feature-019dc0eb-e8bb-70a3-8826-af71ddc..."
+    },
+    {
+      "name": "promote_source_branch",
+      "method": "POST",
+      "path": "/api/v1/datasets/${source_dataset_id}/branches/${source_branch_name}/promote",
+      "url": "http://127.0.0.1:8080/api/v1/datasets/019dc0eb-e99d-71a3-b954-b4ed87c4d68c/branches/feature-019dc0eb-e8bb-70a3-8826-af71ddc1b840/promote",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/status",
+          "status": "passed",
+          "expected": "promoted",
+          "actual": "promoted"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"source_branch\":\"feature-019dc0eb-e8bb-70a3-8826-af71ddc1b840\",\"status\":\"promoted\",\"target_branch\":\"main\",\"target_was_active\":false,\"version\":1}"
+    },
+    {
+      "name": "create_output_dataset",
+      "method": "POST",
+      "path": "/api/v1/datasets",
+      "url": "http://127.0.0.1:8080/api/v1/datasets",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [],
+      "captured": {
+        "output_dataset_id": "019dc0eb-ec30-72a2-8a98-f1e2f727205e"
+      },
+      "response_preview": "{\"id\":\"019dc0eb-ec30-72a2-8a98-f1e2f727205e\",\"name\":\"smoke-output-019dc0eb-e8bb-70a3-8826-af71ddc1b840\",\"description\":\"P1 smoke output dataset\",\"format\":\"json\",\"storage_path\":\"datasets/019dc0eb-ec30-72a2-8a98-f1e2f727205e\",\"size_bytes\":0,\"row_count\":0,\"owner_id\":\"019dc0eb-e8bc-7930-b76d-3d3e368b77d2\",\"tags\":[\"smoke\",\"p1\"],\"current_version\":1,\"active_branch\":\"main\",\"created_at\":\"2026-04-24T19:16:20..."
+    },
+    {
+      "name": "create_pipeline",
+      "method": "POST",
+      "path": "/api/v1/pipelines",
+      "url": "http://127.0.0.1:8080/api/v1/pipelines",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [],
+      "captured": {
+        "pipeline_id": "019dc0eb-ec38-73a3-8fd7-ae9c7d088a32"
+      },
+      "response_preview": "{\"created_at\":\"2026-04-24T19:16:20.152438Z\",\"dag\":[{\"config\":null,\"depends_on\":[],\"id\":\"pass-1\",\"input_dataset_ids\":[\"019dc0eb-e99d-71a3-b954-b4ed87c4d68c\"],\"label\":\"Smoke passthrough\",\"output_dataset_id\":\"019dc0eb-ec30-72a2-8a98-f1e2f727205e\",\"transform_type\":\"passthrough\"}],\"description\":\"P0 golden path pipeline\",\"id\":\"019dc0eb-ec38-73a3-8fd7-ae9c7d088a32\",\"name\":\"smoke-pipeline-019dc0eb-e8bb-70..."
+    },
+    {
+      "name": "trigger_pipeline_run",
+      "method": "POST",
+      "path": "/api/v1/pipelines/${pipeline_id}/run",
+      "url": "http://127.0.0.1:8080/api/v1/pipelines/019dc0eb-ec38-73a3-8fd7-ae9c7d088a32/run",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [
+        {
+          "path": "/status",
+          "status": "passed",
+          "expected": "completed",
+          "actual": "completed"
+        }
+      ],
+      "captured": {
+        "pipeline_run_id": "019dc0eb-ec3d-73b2-a658-9b26617c0691"
+      },
+      "response_preview": "{\"attempt_number\":1,\"error_message\":null,\"execution_context\":{\"smoke_run_id\":\"019dc0eb-e8bb-70a3-8826-af71ddc1b840\",\"tenant\":{\"quotas\":{\"max_distributed_query_workers\":4,\"max_pipeline_workers\":4,\"max_query_limit\":5000,\"max_request_body_bytes\":20971520,\"requests_per_minute\":600},\"scope_id\":\"019dc0eb-e8bc-7930-b76d-3d3e368b77d2\",\"tenant_id\":null,\"tier\":\"team\",\"workspace\":\"smoke\"}},\"finished_at\":\"202..."
+    },
+    {
+      "name": "execute_query",
+      "method": "POST",
+      "path": "/api/v1/queries/execute",
+      "url": "http://127.0.0.1:8080/api/v1/queries/execute",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/rows/0/0",
+          "status": "passed",
+          "expected": "1",
+          "actual": "1"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"columns\":[{\"name\":\"smoke_value\",\"data_type\":\"Int64\"}],\"rows\":[[\"1\"]],\"total_rows\":1,\"execution_time_ms\":12,\"execution\":{\"mode\":\"local:team\",\"worker_count\":1,\"workers\":[{\"worker_id\":\"query-local-1\",\"offset\":0,\"row_count\":1,\"limit\":1}]}}"
+    },
+    {
+      "name": "append_audit_event",
+      "method": "POST",
+      "path": "/api/v1/audit/events",
+      "url": "http://127.0.0.1:8080/api/v1/audit/events",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [],
+      "captured": {
+        "audit_event_id": "019dc0eb-ec80-7d51-a703-04bfd5ac85e9"
+      },
+      "response_preview": "{\"id\":\"019dc0eb-ec80-7d51-a703-04bfd5ac85e9\",\"sequence\":4,\"previous_hash\":\"AUD-00000003-AUD00000-DATASETS\",\"entry_hash\":\"AUD-00000004-AUD00000-SMOKE019\",\"source_service\":\"smoke-019dc0eb-e8bb-70a3-8826-af71ddc1b840\",\"channel\":\"api\",\"actor\":\"smoke-runner\",\"action\":\"critical-path-verified\",\"resource_type\":\"pipeline\",\"resource_id\":\"019dc0eb-ec38-73a3-8fd7-ae9c7d088a32\",\"status\":\"success\",\"severity\":\"l..."
+    },
+    {
+      "name": "list_audit_events",
+      "method": "GET",
+      "path": "/api/v1/audit/events?source_service=smoke-${RUN_ID}",
+      "url": "http://127.0.0.1:8080/api/v1/audit/events?source_service=smoke-019dc0eb-e8bb-70a3-8826-af71ddc1b840",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/items/0/id",
+          "status": "passed",
+          "expected": "019dc0eb-ec80-7d51-a703-04bfd5ac85e9",
+          "actual": "019dc0eb-ec80-7d51-a703-04bfd5ac85e9"
+        },
+        {
+          "path": "/items/0/source_service",
+          "status": "passed",
+          "expected": "smoke-019dc0eb-e8bb-70a3-8826-af71ddc1b840",
+          "actual": "smoke-019dc0eb-e8bb-70a3-8826-af71ddc1b840"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"items\":[{\"id\":\"019dc0eb-ec80-7d51-a703-04bfd5ac85e9\",\"sequence\":4,\"previous_hash\":\"AUD-00000003-AUD00000-DATASETS\",\"entry_hash\":\"AUD-00000004-AUD00000-SMOKE019\",\"source_service\":\"smoke-019dc0eb-e8bb-70a3-8826-af71ddc1b840\",\"channel\":\"api\",\"actor\":\"smoke-runner\",\"action\":\"critical-path-verified\",\"resource_type\":\"pipeline\",\"resource_id\":\"019dc0eb-ec38-73a3-8fd7-ae9c7d088a32\",\"status\":\"success\",\"se..."
+    }
+  ]
+}

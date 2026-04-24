@@ -2,33 +2,33 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
-	#[serde(default = "default_host")]
-	pub host: String,
-	#[serde(default = "default_port")]
-	pub port: u16,
-	pub database_url: String,
-	pub jwt_secret: String,
-	#[serde(default = "default_public_base_url")]
-	pub public_base_url: String,
+    #[serde(default = "default_host")]
+    pub host: String,
+    #[serde(default = "default_port")]
+    pub port: u16,
+    pub database_url: String,
+    pub jwt_secret: String,
+    #[serde(default = "default_public_base_url")]
+    pub public_base_url: String,
 }
 
 fn default_host() -> String {
-	"0.0.0.0".to_string()
+    "0.0.0.0".to_string()
 }
 
 fn default_port() -> u16 {
-	50063
+    50063
 }
 
 fn default_public_base_url() -> String {
-	"http://localhost:5173/apps/runtime".to_string()
+    "http://localhost:5173/apps/runtime".to_string()
 }
 
 impl AppConfig {
-	pub fn from_env() -> Result<Self, config::ConfigError> {
-		config::Config::builder()
-			.add_source(config::Environment::default().separator("__"))
-			.build()?
-			.try_deserialize()
-	}
+    pub fn from_env() -> Result<Self, config::ConfigError> {
+        config::Config::builder()
+            .add_source(config::Environment::default().separator("__"))
+            .build()?
+            .try_deserialize()
+    }
 }

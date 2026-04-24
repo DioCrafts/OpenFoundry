@@ -1,4 +1,4 @@
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -23,10 +23,11 @@ pub async fn register(
     Json(body): Json<RegisterRequest>,
 ) -> impl IntoResponse {
     // Check if email already exists
-    let existing = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)")
-        .bind(&body.email)
-        .fetch_one(&state.db)
-        .await;
+    let existing =
+        sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)")
+            .bind(&body.email)
+            .fetch_one(&state.db)
+            .await;
 
     if matches!(existing, Ok(true)) {
         return (
@@ -43,13 +44,13 @@ pub async fn register(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({ "error": "failed to hash password" })),
             )
-                .into_response()
+                .into_response();
         }
     };
 
     let user_id = Uuid::now_v7();
     let result = sqlx::query(
-          r#"INSERT INTO users (id, email, name, password_hash, is_active, auth_source)
+        r#"INSERT INTO users (id, email, name, password_hash, is_active, auth_source)
               VALUES ($1, $2, $3, $4, true, 'local')"#,
     )
     .bind(user_id)
@@ -95,9 +96,9 @@ pub async fn register(
 }
 
 fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error> {
-    use argon2::{Argon2, PasswordHasher};
     use argon2::password_hash::SaltString;
     use argon2::password_hash::rand_core::OsRng;
+    use argon2::{Argon2, PasswordHasher};
 
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();

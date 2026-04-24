@@ -4,12 +4,7 @@ mod handlers;
 mod models;
 
 use auth_middleware::jwt::JwtConfig;
-use axum::{
-    extract::FromRef,
-    middleware,
-    routing::get,
-    Router,
-};
+use axum::{Router, extract::FromRef, middleware, routing::get};
 use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::EnvFilter;
 
@@ -53,7 +48,10 @@ async fn main() {
     let public = Router::new().route("/health", get(|| async { "ok" }));
 
     let protected = Router::new()
-        .route("/api/v1/code-repos/overview", get(handlers::repos::get_overview))
+        .route(
+            "/api/v1/code-repos/overview",
+            get(handlers::repos::get_overview),
+        )
         .route(
             "/api/v1/code-repos/repositories",
             get(handlers::repos::list_repositories).post(handlers::repos::create_repository),
@@ -88,11 +86,13 @@ async fn main() {
         )
         .route(
             "/api/v1/code-repos/integrations",
-            get(handlers::integrations::list_integrations).post(handlers::integrations::create_integration),
+            get(handlers::integrations::list_integrations)
+                .post(handlers::integrations::create_integration),
         )
         .route(
             "/api/v1/code-repos/integrations/{id}",
-            get(handlers::integrations::get_integration).patch(handlers::integrations::update_integration),
+            get(handlers::integrations::get_integration)
+                .patch(handlers::integrations::update_integration),
         )
         .route(
             "/api/v1/code-repos/integrations/{id}/sync",
@@ -100,22 +100,28 @@ async fn main() {
         )
         .route(
             "/api/v1/code-repos/merge-requests",
-            get(handlers::merge_requests::list_merge_requests).post(handlers::merge_requests::create_merge_request),
+            get(handlers::merge_requests::list_merge_requests)
+                .post(handlers::merge_requests::create_merge_request),
         )
         .route(
             "/api/v1/code-repos/merge-requests/{id}",
-            get(handlers::merge_requests::get_merge_request).patch(handlers::merge_requests::update_merge_request),
+            get(handlers::merge_requests::get_merge_request)
+                .patch(handlers::merge_requests::update_merge_request),
         )
         .route(
             "/api/v1/code-repos/merge-requests/{id}/comments",
-            get(handlers::merge_requests::list_comments).post(handlers::merge_requests::create_comment),
+            get(handlers::merge_requests::list_comments)
+                .post(handlers::merge_requests::create_comment),
         )
         .layer(middleware::from_fn_with_state(
             jwt_config,
             auth_middleware::auth_layer,
         ));
 
-    let app = Router::new().merge(public).merge(protected).with_state(state);
+    let app = Router::new()
+        .merge(public)
+        .merge(protected)
+        .with_state(state);
 
     let addr = format!("{}:{}", cfg.host, cfg.port);
     tracing::info!("starting code-repo-service on {addr}");

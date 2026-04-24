@@ -1,14 +1,14 @@
 use axum::{
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::models::link_type::*;
 use crate::AppState;
+use crate::models::link_type::*;
 use auth_middleware::layer::AuthUser;
 
 // --- Link Type CRUD ---
@@ -21,7 +21,9 @@ pub async fn create_link_type(
     let id = Uuid::now_v7();
     let display_name = body.display_name.unwrap_or_else(|| body.name.clone());
     let description = body.description.unwrap_or_default();
-    let cardinality = body.cardinality.unwrap_or_else(|| "many_to_many".to_string());
+    let cardinality = body
+        .cardinality
+        .unwrap_or_else(|| "many_to_many".to_string());
 
     let result = sqlx::query_as::<_, LinkType>(
         r#"INSERT INTO link_types (id, name, display_name, description, source_type_id, target_type_id, cardinality, owner_id)

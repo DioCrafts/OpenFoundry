@@ -10,6 +10,7 @@ license.workspace = true
 core-models = { workspace = true }
 auth-middleware = { workspace = true }
 event-bus = { workspace = true }
+storage-abstraction = { workspace = true }
 query-engine = { workspace = true }
 axum = { workspace = true }
 axum-extra = { workspace = true }
@@ -27,6 +28,8 @@ thiserror = { workspace = true }
 futures = { workspace = true }
 pyo3 = { workspace = true, features = ["abi3-py311"] }
 base64 = { workspace = true }
+bytes = { workspace = true }
+reqwest = { workspace = true, features = ["multipart"] }
+datafusion = { workspace = true }
 cron = "0.12"
 wasmtime = "24"
-

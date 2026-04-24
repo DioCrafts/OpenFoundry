@@ -7,8 +7,8 @@ use uuid::Uuid;
 pub struct Cell {
     pub id: Uuid,
     pub notebook_id: Uuid,
-    pub cell_type: String,        // "code", "markdown"
-    pub kernel: String,           // "python", "sql"
+    pub cell_type: String, // "code", "markdown"
+    pub kernel: String,    // "python", "sql"
     pub source: String,
     pub position: i32,
     pub last_output: Option<serde_json::Value>,
@@ -40,7 +40,7 @@ pub struct ExecuteCellRequest {
 
 #[derive(Debug, Serialize)]
 pub struct CellOutput {
-    pub output_type: String,  // "text", "error", "table", "image"
+    pub output_type: String, // "text", "error", "table", "image"
     pub content: serde_json::Value,
     pub execution_count: i32,
 }

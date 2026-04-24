@@ -1,14 +1,16 @@
 use axum::{
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use uuid::Uuid;
 
 use crate::AppState;
 use crate::connectors;
-use crate::models::connection::{Connection, CreateConnectionRequest, ListConnectionsQuery, VALID_TYPES};
+use crate::models::connection::{
+    Connection, CreateConnectionRequest, ListConnectionsQuery, VALID_TYPES,
+};
 
 /// POST /api/v1/connections
 pub async fn create_connection(
@@ -30,11 +32,16 @@ pub async fn create_connection(
         "csv" => connectors::csv::validate_config(&body.config),
         "json" => connectors::json::validate_config(&body.config),
         "rest_api" => connectors::rest_api::validate_config(&body.config),
+        "salesforce" => connectors::salesforce::validate_config(&body.config),
         _ => Ok(()),
     };
 
     if let Err(msg) = validation {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": msg }))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": msg })),
+        )
+            .into_response();
     }
 
     let id = Uuid::now_v7();
@@ -55,7 +62,11 @@ pub async fn create_connection(
         Ok(conn) => (StatusCode::CREATED, Json(conn)).into_response(),
         Err(e) => {
             tracing::error!("create connection failed: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "create failed" }))).into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "create failed" })),
+            )
+                .into_response()
         }
     }
 }
@@ -88,7 +99,8 @@ pub async fn list_connections(
             "page": page,
             "per_page": per_page,
             "total": total,
-        })).into_response(),
+        }))
+        .into_response(),
         Err(e) => {
             tracing::error!("list connections failed: {e}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -134,16 +146,23 @@ pub async fn test_connection(
         }
     };
 
-    // For PostgreSQL, try to actually connect
-    let (success, message) = match conn.connector_type.as_str() {
-        "postgresql" => {
-            let dsn = connectors::postgres::build_connection_string(&conn.config);
-            match sqlx::PgPool::connect(&dsn).await {
-                Ok(_pool) => (true, "connection successful".to_string()),
-                Err(e) => (false, format!("connection failed: {e}")),
-            }
-        }
-        _ => (true, "config validated".to_string()),
+    let test_result = match conn.connector_type.as_str() {
+        "postgresql" => connectors::postgres::test_connection(&conn.config).await,
+        "csv" => connectors::csv::test_connection(&conn.config).await,
+        "json" => connectors::json::test_connection(&conn.config).await,
+        "rest_api" => connectors::rest_api::test_connection(&conn.config).await,
+        "salesforce" => connectors::salesforce::test_connection(&conn.config).await,
+        other => Err(format!("unsupported connector type: {other}")),
+    };
+
+    let (success, message, latency_ms, details) = match test_result {
+        Ok(result) => (
+            result.success,
+            result.message,
+            Some(result.latency_ms),
+            result.details,
+        ),
+        Err(error) => (false, error, None, None),
     };
 
     // Update status
@@ -157,7 +176,10 @@ pub async fn test_connection(
     Json(serde_json::json!({
         "success": success,
         "message": message,
-    })).into_response()
+        "latency_ms": latency_ms,
+        "details": details,
+    }))
+    .into_response()
 }
 
 /// DELETE /api/v1/connections/:id

@@ -1,4 +1,4 @@
-use auth_middleware::{jwt::encode_token, Claims, JwtConfig};
+use auth_middleware::{Claims, JwtConfig, jwt::encode_token};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 

@@ -1,8 +1,8 @@
 use bytes::Bytes;
-use futures::stream::BoxStream;
 use futures::TryStreamExt;
-use object_store::aws::AmazonS3Builder;
+use futures::stream::BoxStream;
 use object_store::ObjectStore;
+use object_store::aws::AmazonS3Builder;
 use object_store::path::Path;
 
 use crate::backend::{ObjectMeta, StorageBackend, StorageError, StorageResult};
@@ -33,7 +33,10 @@ impl S3Storage {
         }
 
         let store = builder.build().map_err(StorageError::Io)?;
-        Ok(Self { store, bucket: bucket.to_string() })
+        Ok(Self {
+            store,
+            bucket: bucket.to_string(),
+        })
     }
 
     pub fn bucket(&self) -> &str {
@@ -58,7 +61,10 @@ fn convert_meta(m: &object_store::ObjectMeta) -> ObjectMeta {
 impl StorageBackend for S3Storage {
     async fn put(&self, path: &str, data: Bytes) -> StorageResult<()> {
         let p = to_path(path)?;
-        self.store.put(&p, data.into()).await.map_err(StorageError::Io)?;
+        self.store
+            .put(&p, data.into())
+            .await
+            .map_err(StorageError::Io)?;
         Ok(())
     }
 
@@ -68,7 +74,10 @@ impl StorageBackend for S3Storage {
         result.bytes().await.map_err(StorageError::Io)
     }
 
-    async fn get_stream(&self, path: &str) -> StorageResult<BoxStream<'static, StorageResult<Bytes>>> {
+    async fn get_stream(
+        &self,
+        path: &str,
+    ) -> StorageResult<BoxStream<'static, StorageResult<Bytes>>> {
         let p = to_path(path)?;
         let result = self.store.get(&p).await.map_err(StorageError::Io)?;
         let stream = result.into_stream().map_err(StorageError::Io);
@@ -113,4 +122,3 @@ impl StorageBackend for S3Storage {
         Ok(convert_meta(&meta))
     }
 }
-

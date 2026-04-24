@@ -95,6 +95,10 @@ proto-gen:
 openapi-gen:
     cargo run -p of-cli -- docs generate-openapi --output apps/web/static/generated/openapi/openfoundry.json
 
+# Validate checked-in OpenAPI docs against the current proto/tooling state
+openapi-check:
+    cargo run -p of-cli -- docs validate-openapi --input apps/web/static/generated/openapi/openfoundry.json
+
 # Generate Terraform provider schema for docs and portal consumption
 terraform-schema:
     cargo run -p of-cli -- terraform schema --output infra/terraform/providers/openfoundry/provider.schema.json
@@ -103,6 +107,10 @@ terraform-schema:
 # Run reproducible benchmark suite against a live stack
 bench-critical-paths:
     cargo run -p of-cli -- bench run --scenario benchmarks/scenarios/critical-paths.json --output benchmarks/results/critical-paths.json
+
+# Run the critical-path smoke suite against a live stack
+smoke-critical-paths:
+    cargo run -p of-cli -- smoke run --scenario smoke/scenarios/p0-critical-path.json --output smoke/results/p0-critical-path.json
 
 # Lint proto files
 proto-lint:
@@ -152,14 +160,30 @@ fe-build:
 fe-lint:
     cd apps/web && pnpm lint
 
+# Typecheck frontend
+fe-check:
+    cd apps/web && pnpm check
+
 # Run frontend tests
 fe-test:
     cd apps/web && pnpm test
 
+# Run frontend unit tests
+fe-test-unit:
+    cd apps/web && pnpm test:unit
+
+# Run frontend E2E tests
+fe-test-e2e:
+    cd apps/web && pnpm test:e2e
+
+# Run frontend CI checks locally
+ci-frontend: fe-lint fe-check fe-test-unit fe-build
+    @echo "✅ Frontend CI checks passed"
+
 # ── CI ───────────────────────────────────────────────────────
 
 # Run full CI checks locally
-ci: lint test proto-lint
+ci: lint test proto-lint openapi-check ci-frontend
     @echo "✅ All CI checks passed"
 
 # ── Cleanup ──────────────────────────────────────────────────

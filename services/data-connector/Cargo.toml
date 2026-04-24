@@ -21,6 +21,7 @@ tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 config = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["multipart"] }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
+csv = "1.3"

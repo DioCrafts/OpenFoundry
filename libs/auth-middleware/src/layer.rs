@@ -1,6 +1,6 @@
 use axum::{
     extract::Request,
-    http::{header::AUTHORIZATION, StatusCode},
+    http::{StatusCode, header::AUTHORIZATION},
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -36,9 +36,7 @@ pub async fn auth_layer(
             req.extensions_mut().insert(claims);
             next.run(req).await
         }
-        Err(jwt::JwtError::Expired) => {
-            (StatusCode::UNAUTHORIZED, "token expired").into_response()
-        }
+        Err(jwt::JwtError::Expired) => (StatusCode::UNAUTHORIZED, "token expired").into_response(),
         Err(e) => {
             tracing::warn!("JWT validation failed: {e}");
             (StatusCode::UNAUTHORIZED, "invalid token").into_response()

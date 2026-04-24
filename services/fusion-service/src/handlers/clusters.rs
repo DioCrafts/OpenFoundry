@@ -1,24 +1,24 @@
 use axum::{
-    extract::{Path, State},
     Json,
+    extract::{Path, State},
 };
 use sqlx::{query_as, types::Json as SqlJson};
 use uuid::Uuid;
 
 use crate::{
+    AppState,
     domain::feedback,
     models::{
+        ListResponse,
         cluster::{
             ClusterDetail, ClusterRow, ResolvedCluster, ReviewQueueItem, ReviewQueueRow,
             SubmitReviewRequest,
         },
         golden_record::{GoldenRecord, GoldenRecordRow},
-        ListResponse,
     },
-    AppState,
 };
 
-use super::{db_error, not_found, ServiceResult};
+use super::{ServiceResult, db_error, not_found};
 
 async fn load_cluster_row(
     db: &sqlx::PgPool,
@@ -237,7 +237,8 @@ pub async fn submit_review(
         .map_err(|cause| db_error(&cause))?;
     let cluster: ResolvedCluster = cluster_row.into();
     let review_item = review_row.map(Into::into);
-    let (updated_cluster, updated_review) = feedback::apply_review(&cluster, review_item.as_ref(), &body);
+    let (updated_cluster, updated_review) =
+        feedback::apply_review(&cluster, review_item.as_ref(), &body);
 
     sqlx::query(
         "UPDATE fusion_clusters SET status = $2, requires_review = $3, suggested_golden_record_id = $4, updated_at = NOW() WHERE id = $1",
@@ -264,18 +265,20 @@ pub async fn submit_review(
         .map_err(|cause| db_error(&cause))?;
     }
 
-    sqlx::query("UPDATE fusion_golden_records SET status = $2, updated_at = NOW() WHERE cluster_id = $1")
-        .bind(cluster_id)
-        .bind(if updated_cluster.status == "rejected" {
-            "rejected"
-        } else if updated_cluster.status == "split_requested" {
-            "superseded"
-        } else {
-            "active"
-        })
-        .execute(&state.db)
-        .await
-        .map_err(|cause| db_error(&cause))?;
+    sqlx::query(
+        "UPDATE fusion_golden_records SET status = $2, updated_at = NOW() WHERE cluster_id = $1",
+    )
+    .bind(cluster_id)
+    .bind(if updated_cluster.status == "rejected" {
+        "rejected"
+    } else if updated_cluster.status == "split_requested" {
+        "superseded"
+    } else {
+        "active"
+    })
+    .execute(&state.db)
+    .await
+    .map_err(|cause| db_error(&cause))?;
 
     let golden_record = load_golden_record_row(&state.db, cluster_id)
         .await

@@ -5,9 +5,8 @@ mod models;
 
 use auth_middleware::jwt::JwtConfig;
 use axum::{
-    middleware,
+    Router, middleware,
     routing::{delete, get, post, put},
-    Router,
 };
 use domain::kernel::KernelManager;
 use sqlx::postgres::PgPoolOptions;
