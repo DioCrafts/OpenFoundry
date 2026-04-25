@@ -2,7 +2,6 @@
 
 <img src="images/logo.png" alt="OpenFoundry" width="324" />
 
-
 ### Turn disconnected data into decisions, workflows, and real-world outcomes
 
 **A unified platform to connect operations, teams, systems, and AI — so your organization can act faster, with less chaos and more confidence.**
