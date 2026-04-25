@@ -65,6 +65,34 @@ pub fn build_report(
                 "GDPR/erasure workflows mask subject data while preserving traceability.",
             ),
         ],
+        ComplianceStandard::Gdpr => vec![
+            ComplianceFinding::new(
+                "Art. 5(1)(e)",
+                "Storage limitation enforced",
+                "pass",
+                "Audit policies attach explicit retention windows and erase workflows to subject-linked data.",
+            ),
+            ComplianceFinding::new(
+                "Art. 15/17",
+                "Subject rights workflow",
+                "pass",
+                "Export and erasure endpoints provide portable exports and subject masking with audit traceability.",
+            ),
+        ],
+        ComplianceStandard::Itar => vec![
+            ComplianceFinding::new(
+                "ITAR 122.5",
+                "Export access review",
+                "pass",
+                "Controlled exports can be attached to approval and lineage evidence for cross-border restrictions.",
+            ),
+            ComplianceFinding::new(
+                "ITAR 123.26",
+                "Controlled data handling",
+                "pass",
+                "Confidential/controlled classifications and governance templates preserve retention and hold requirements.",
+            ),
+        ],
     };
 
     let generated_at = Utc::now();

@@ -1,0 +1,34 @@
+[
+  {
+    "account": "atlas",
+    "region": "iberia",
+    "amount": 180,
+    "status": "healthy",
+    "lat": 40.4168,
+    "lon": -3.7038
+  },
+  {
+    "account": "lyra",
+    "region": "iberia",
+    "amount": 120,
+    "status": "watch",
+    "lat": 41.3874,
+    "lon": 2.1686
+  },
+  {
+    "account": "orion",
+    "region": "france",
+    "amount": 160,
+    "status": "healthy",
+    "lat": 48.8566,
+    "lon": 2.3522
+  },
+  {
+    "account": "nova",
+    "region": "france",
+    "amount": 90,
+    "status": "risk",
+    "lat": 45.764,
+    "lon": 4.8357
+  }
+]

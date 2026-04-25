@@ -1,7 +1,9 @@
 pub mod audit_event;
 pub mod compliance_report;
 pub mod data_classification;
+pub mod governance_template;
 pub mod policy;
+pub mod sensitive_data;
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 

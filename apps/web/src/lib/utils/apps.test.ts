@@ -7,6 +7,7 @@ import {
   createEmptyAppDraft,
   createWidgetFromCatalog,
   normalizePageLayout,
+  seedSlateWorkspace,
 } from './apps';
 
 describe('app builder utilities', () => {
@@ -27,6 +28,42 @@ describe('app builder utilities', () => {
       max_width: '1280px',
       show_branding: true,
       custom_css: null,
+      builder_experience: 'workshop',
+      consumer_mode: {
+        enabled: false,
+        allow_guest_access: false,
+        portal_title: null,
+        portal_subtitle: null,
+        primary_cta_label: null,
+        primary_cta_url: null,
+      },
+      slate: {
+        enabled: false,
+        framework: 'react',
+        package_name: '@open-foundry/slate-app',
+        entry_file: 'src/App.tsx',
+        sdk_import: '@open-foundry/sdk/react',
+        workspace: {
+          enabled: false,
+          repository_id: null,
+          layout: 'split',
+          runtime: 'typescript-react',
+          dev_command: 'pnpm dev',
+          preview_command: 'pnpm build',
+          files: [],
+        },
+        quiver_embed: {
+          enabled: false,
+          primary_type_id: null,
+          secondary_type_id: null,
+          join_field: null,
+          secondary_join_field: null,
+          date_field: null,
+          metric_field: null,
+          group_field: null,
+          selected_group: null,
+        },
+      },
     });
   });
 
@@ -108,5 +145,20 @@ describe('app builder utilities', () => {
     ]);
 
     expect(normalized[0].widgets.map((widget) => widget.position.y)).toEqual([0, 2]);
+  });
+
+  it('clones Slate workspace files for round-trip editing', () => {
+    const source = [
+      {
+        path: 'src/App.tsx',
+        language: 'typescript',
+        content: 'export default function App() { return null; }',
+      },
+    ];
+    const files = seedSlateWorkspace(source);
+
+    files[0].content = 'changed';
+
+    expect(source[0].content).toContain('return null');
   });
 });

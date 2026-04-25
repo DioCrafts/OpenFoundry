@@ -1,0 +1,663 @@
+{
+  "base_url": "http://127.0.0.1:8080",
+  "default_headers": {
+    "content-type": "application/json"
+  },
+  "auth": {
+    "type": "dev_jwt",
+    "secret_env": "JWT_SECRET",
+    "roles": ["admin"],
+    "permissions": ["*:*"],
+    "attributes": {
+      "tenant_tier": "team",
+      "workspace": "smoke",
+      "tenant_quotas": {
+        "requests_per_minute": 600
+      }
+    }
+  },
+  "steps": [
+    {
+      "name": "create_connection",
+      "method": "POST",
+      "path": "/api/v1/connections",
+      "expected_status": 201,
+      "body": {
+        "name": "smoke-rest-${RUN_ID}",
+        "connector_type": "rest_api",
+        "config": {
+          "base_url": "http://127.0.0.1:8080",
+          "health_path": "/health",
+          "resource_path": "/health"
+        }
+      },
+      "capture": {
+        "connection_id": "/id"
+      },
+      "expect": [
+        {
+          "path": "/id",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "name": "test_connection",
+      "method": "POST",
+      "path": "/api/v1/connections/${connection_id}/test",
+      "expected_status": 200,
+      "expect": [
+        {
+          "path": "/success",
+          "equals": true
+        },
+        {
+          "path": "/latency_ms",
+          "exists": true
+        },
+        {
+          "path": "/details/path",
+          "equals": "/health"
+        }
+      ]
+    },
+    {
+      "name": "create_source_dataset",
+      "method": "POST",
+      "path": "/api/v1/datasets",
+      "expected_status": 201,
+      "body": {
+        "name": "smoke-input-${RUN_ID}",
+        "description": "P2 smoke source dataset",
+        "format": "json",
+        "tags": ["smoke", "p2"]
+      },
+      "capture": {
+        "source_dataset_id": "/id"
+      }
+    },
+    {
+      "name": "sync_connection_to_dataset",
+      "method": "POST",
+      "path": "/api/v1/connections/${connection_id}/sync",
+      "expected_status": 202,
+      "body": {
+        "table_name": "/health",
+        "target_dataset_id": "${source_dataset_id}"
+      },
+      "capture": {
+        "sync_job_id": "/job_id"
+      },
+      "expect": [
+        {
+          "path": "/status",
+          "equals": "pending"
+        }
+      ]
+    },
+    {
+      "name": "wait_for_sync_completion",
+      "method": "GET",
+      "path": "/api/v1/connections/${connection_id}/sync-jobs",
+      "expected_status": 200,
+      "retry_attempts": 20,
+      "retry_delay_ms": 500,
+      "expect": [
+        {
+          "path": "/0/id",
+          "equals": "${sync_job_id}"
+        },
+        {
+          "path": "/0/status",
+          "equals": "completed"
+        },
+        {
+          "path": "/0/result_dataset_version",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "name": "preview_source_dataset",
+      "method": "GET",
+      "path": "/api/v1/datasets/${source_dataset_id}/preview",
+      "expected_status": 200,
+      "retry_attempts": 20,
+      "retry_delay_ms": 500,
+      "expect": [
+        {
+          "path": "/total_rows",
+          "equals": 1
+        },
+        {
+          "path": "/rows/0/status",
+          "equals": "ok"
+        },
+        {
+          "path": "/rows/0/service",
+          "equals": "gateway"
+        }
+      ]
+    },
+    {
+      "name": "create_batch_output_dataset",
+      "method": "POST",
+      "path": "/api/v1/datasets",
+      "expected_status": 201,
+      "body": {
+        "name": "smoke-batch-output-${RUN_ID}",
+        "description": "P2 smoke batch output dataset",
+        "format": "json",
+        "tags": ["smoke", "p2", "batch"]
+      },
+      "capture": {
+        "batch_output_dataset_id": "/id"
+      }
+    },
+    {
+      "name": "create_batch_pipeline",
+      "method": "POST",
+      "path": "/api/v1/pipelines",
+      "expected_status": 201,
+      "body": {
+        "name": "smoke-batch-pipeline-${RUN_ID}",
+        "description": "P2 batch runtime smoke",
+        "status": "active",
+        "retry_policy": {
+          "max_attempts": 2,
+          "retry_on_failure": true,
+          "allow_partial_reexecution": true
+        },
+        "nodes": [
+          {
+            "id": "sql-1",
+            "label": "Smoke SQL transform",
+            "transform_type": "sql",
+            "input_dataset_ids": ["${source_dataset_id}"],
+            "output_dataset_id": "${batch_output_dataset_id}",
+            "config": {
+              "sql": "SELECT service, status, 1 AS batch_flag FROM input_0"
+            }
+          }
+        ]
+      },
+      "capture": {
+        "batch_pipeline_id": "/id"
+      }
+    },
+    {
+      "name": "trigger_batch_run_initial",
+      "method": "POST",
+      "path": "/api/v1/pipelines/${batch_pipeline_id}/run",
+      "expected_status": 201,
+      "body": {
+        "context": {
+          "smoke_run_id": "${RUN_ID}",
+          "phase": "initial"
+        }
+      },
+      "capture": {
+        "batch_run_1_id": "/id"
+      },
+      "expect": [
+        {
+          "path": "/status",
+          "equals": "completed"
+        },
+        {
+          "path": "/execution_context/build/prior_completed_node_count",
+          "equals": 0
+        },
+        {
+          "path": "/node_results/0/status",
+          "equals": "completed"
+        },
+        {
+          "path": "/node_results/0/transform_type",
+          "equals": "sql"
+        },
+        {
+          "path": "/node_results/0/metadata/skipped",
+          "equals": false
+        },
+        {
+          "path": "/node_results/0/metadata/output_dataset_id",
+          "equals": "${batch_output_dataset_id}"
+        }
+      ]
+    },
+    {
+      "name": "preview_batch_output_dataset",
+      "method": "GET",
+      "path": "/api/v1/datasets/${batch_output_dataset_id}/preview",
+      "expected_status": 200,
+      "retry_attempts": 20,
+      "retry_delay_ms": 500,
+      "expect": [
+        {
+          "path": "/total_rows",
+          "equals": 1
+        },
+        {
+          "path": "/rows/0/service",
+          "equals": "gateway"
+        },
+        {
+          "path": "/rows/0/status",
+          "equals": "ok"
+        },
+        {
+          "path": "/rows/0/batch_flag",
+          "equals": 1
+        }
+      ]
+    },
+    {
+      "name": "inspect_batch_lineage",
+      "method": "GET",
+      "path": "/api/v1/lineage/datasets/${batch_output_dataset_id}",
+      "expected_status": 200,
+      "expect": [
+        {
+          "path": "/edges/0/source",
+          "equals": "${source_dataset_id}"
+        },
+        {
+          "path": "/edges/0/target",
+          "equals": "${batch_output_dataset_id}"
+        },
+        {
+          "path": "/edges/0/pipeline_id",
+          "equals": "${batch_pipeline_id}"
+        }
+      ]
+    },
+    {
+      "name": "trigger_batch_run_incremental",
+      "method": "POST",
+      "path": "/api/v1/pipelines/${batch_pipeline_id}/run",
+      "expected_status": 201,
+      "body": {
+        "context": {
+          "smoke_run_id": "${RUN_ID}",
+          "phase": "incremental"
+        }
+      },
+      "capture": {
+        "batch_run_2_id": "/id"
+      },
+      "expect": [
+        {
+          "path": "/status",
+          "equals": "completed"
+        },
+        {
+          "path": "/execution_context/build/prior_completed_node_count",
+          "equals": 1
+        },
+        {
+          "path": "/node_results/0/status",
+          "equals": "skipped"
+        },
+        {
+          "path": "/node_results/0/metadata/skipped",
+          "equals": true
+        }
+      ]
+    },
+    {
+      "name": "inspect_batch_run_incremental",
+      "method": "GET",
+      "path": "/api/v1/pipelines/${batch_pipeline_id}/runs/${batch_run_2_id}",
+      "expected_status": 200,
+      "expect": [
+        {
+          "path": "/status",
+          "equals": "completed"
+        },
+        {
+          "path": "/node_results/0/status",
+          "equals": "skipped"
+        },
+        {
+          "path": "/node_results/0/metadata/output_dataset_id",
+          "equals": "${batch_output_dataset_id}"
+        }
+      ]
+    },
+    {
+      "name": "create_stream_sink_dataset",
+      "method": "POST",
+      "path": "/api/v1/datasets",
+      "expected_status": 201,
+      "body": {
+        "name": "smoke-stream-output-${RUN_ID}",
+        "description": "P2 smoke streaming sink dataset",
+        "format": "json",
+        "tags": ["smoke", "p2", "streaming"]
+      },
+      "capture": {
+        "stream_sink_dataset_id": "/id"
+      }
+    },
+    {
+      "name": "create_stream",
+      "method": "POST",
+      "path": "/api/v1/streaming/streams",
+      "expected_status": 200,
+      "body": {
+        "name": "smoke-http-${RUN_ID}",
+        "description": "P2 manual HTTP stream",
+        "status": "active",
+        "retention_hours": 0,
+        "schema": {
+          "fields": [
+            {
+              "name": "event_time",
+              "data_type": "timestamp",
+              "nullable": false,
+              "semantic_role": "event_time"
+            },
+            {
+              "name": "customer_id",
+              "data_type": "string",
+              "nullable": false,
+              "semantic_role": "join_key"
+            },
+            {
+              "name": "amount",
+              "data_type": "float64",
+              "nullable": false,
+              "semantic_role": "measure"
+            },
+            {
+              "name": "status",
+              "data_type": "string",
+              "nullable": false,
+              "semantic_role": "state"
+            }
+          ],
+          "primary_key": null,
+          "watermark_field": "event_time"
+        },
+        "source_binding": {
+          "connector_type": "http",
+          "endpoint": "http://127.0.0.1:8080/api/v1/streaming/streams/manual",
+          "format": "json",
+          "config": {
+            "mode": "push"
+          }
+        }
+      },
+      "capture": {
+        "stream_id": "/id",
+        "stream_name": "/name"
+      }
+    },
+    {
+      "name": "create_stream_window",
+      "method": "POST",
+      "path": "/api/v1/streaming/windows",
+      "expected_status": 200,
+      "body": {
+        "name": "smoke-window-${RUN_ID}",
+        "description": "P2 tumbling window",
+        "status": "active",
+        "window_type": "tumbling",
+        "duration_seconds": 300,
+        "slide_seconds": 300,
+        "aggregation_keys": ["customer_id"],
+        "measure_fields": ["amount"]
+      },
+      "capture": {
+        "stream_window_id": "/id",
+        "stream_window_name": "/name"
+      }
+    },
+    {
+      "name": "create_topology",
+      "method": "POST",
+      "path": "/api/v1/streaming/topologies",
+      "expected_status": 200,
+      "body": {
+        "name": "smoke-topology-${RUN_ID}",
+        "description": "P2 streaming runtime smoke",
+        "status": "active",
+        "nodes": [
+          {
+            "id": "window-1",
+            "label": "Window aggregate",
+            "node_type": "window",
+            "stream_id": "${stream_id}",
+            "window_id": "${stream_window_id}",
+            "config": {
+              "mode": "aggregate"
+            }
+          }
+        ],
+        "edges": [],
+        "source_stream_ids": ["${stream_id}"],
+        "sink_bindings": [
+          {
+            "connector_type": "dataset",
+            "endpoint": "dataset://${stream_sink_dataset_id}",
+            "format": "json",
+            "config": {
+              "dataset_id": "${stream_sink_dataset_id}"
+            }
+          }
+        ],
+        "state_backend": "rocksdb"
+      },
+      "capture": {
+        "topology_id": "/id"
+      }
+    },
+    {
+      "name": "push_stream_events",
+      "method": "POST",
+      "path": "/api/v1/streaming/streams/${stream_id}/events",
+      "expected_status": 200,
+      "body": {
+        "events": [
+          {
+            "payload": {
+              "customer_id": "cust-1",
+              "amount": 10.0,
+              "status": "received"
+            }
+          },
+          {
+            "payload": {
+              "customer_id": "cust-1",
+              "amount": 32.5,
+              "status": "approved"
+            }
+          }
+        ]
+      },
+      "expect": [
+        {
+          "path": "/stream_id",
+          "equals": "${stream_id}"
+        },
+        {
+          "path": "/accepted_events",
+          "equals": 2
+        },
+        {
+          "path": "/first_sequence_no",
+          "exists": true
+        },
+        {
+          "path": "/last_sequence_no",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "name": "run_topology_initial",
+      "method": "POST",
+      "path": "/api/v1/streaming/topologies/${topology_id}/run",
+      "expected_status": 200,
+      "expect": [
+        {
+          "path": "/status",
+          "equals": "completed"
+        },
+        {
+          "path": "/metrics/input_events",
+          "equals": 2
+        },
+        {
+          "path": "/metrics/output_events",
+          "equals": 1
+        },
+        {
+          "path": "/aggregate_windows/0/window_name",
+          "equals": "${stream_window_name}"
+        },
+        {
+          "path": "/aggregate_windows/0/group_key",
+          "equals": "customer_id:cust-1"
+        },
+        {
+          "path": "/aggregate_windows/0/value",
+          "equals": 42.5
+        },
+        {
+          "path": "/state_snapshot/checkpoint_count",
+          "equals": 1
+        }
+      ]
+    },
+    {
+      "name": "preview_stream_sink_dataset",
+      "method": "GET",
+      "path": "/api/v1/datasets/${stream_sink_dataset_id}/preview",
+      "expected_status": 200,
+      "retry_attempts": 20,
+      "retry_delay_ms": 500,
+      "expect": [
+        {
+          "path": "/total_rows",
+          "equals": 1
+        },
+        {
+          "path": "/rows/0/window_name",
+          "equals": "${stream_window_name}"
+        },
+        {
+          "path": "/rows/0/group_key",
+          "equals": "customer_id:cust-1"
+        },
+        {
+          "path": "/rows/0/value",
+          "equals": 42.5
+        }
+      ]
+    },
+    {
+      "name": "inspect_topology_runtime",
+      "method": "GET",
+      "path": "/api/v1/streaming/topologies/${topology_id}/runtime",
+      "expected_status": 200,
+      "expect": [
+        {
+          "path": "/latest_run/metrics/input_events",
+          "equals": 2
+        },
+        {
+          "path": "/latest_run/metrics/output_events",
+          "equals": 1
+        },
+        {
+          "path": "/latest_events/0/stream_name",
+          "equals": "${stream_name}"
+        }
+      ]
+    },
+    {
+      "name": "run_topology_incremental",
+      "method": "POST",
+      "path": "/api/v1/streaming/topologies/${topology_id}/run",
+      "expected_status": 200,
+      "expect": [
+        {
+          "path": "/status",
+          "equals": "completed"
+        },
+        {
+          "path": "/metrics/input_events",
+          "equals": 0
+        },
+        {
+          "path": "/metrics/output_events",
+          "equals": 0
+        },
+        {
+          "path": "/state_snapshot/checkpoint_count",
+          "equals": 1
+        }
+      ]
+    },
+    {
+      "name": "execute_query",
+      "method": "POST",
+      "path": "/api/v1/queries/execute",
+      "expected_status": 200,
+      "body": {
+        "sql": "SELECT 1 AS smoke_value",
+        "limit": 1,
+        "execution_mode": "local"
+      },
+      "expect": [
+        {
+          "path": "/rows/0/0",
+          "equals": "1"
+        }
+      ]
+    },
+    {
+      "name": "append_audit_event",
+      "method": "POST",
+      "path": "/api/v1/audit/events",
+      "expected_status": 200,
+      "body": {
+        "source_service": "smoke-${RUN_ID}",
+        "channel": "api",
+        "actor": "smoke-runner",
+        "action": "p2-runtime-verified",
+        "resource_type": "topology",
+        "resource_id": "${topology_id}",
+        "status": "success",
+        "severity": "low",
+        "classification": "public",
+        "metadata": {
+          "run_id": "${RUN_ID}",
+          "pipeline_run_id": "${batch_run_1_id}",
+          "topology_id": "${topology_id}"
+        }
+      },
+      "capture": {
+        "audit_event_id": "/id"
+      }
+    },
+    {
+      "name": "list_audit_events",
+      "method": "GET",
+      "path": "/api/v1/audit/events?source_service=smoke-${RUN_ID}",
+      "expected_status": 200,
+      "expect": [
+        {
+          "path": "/items/0/id",
+          "equals": "${audit_event_id}"
+        },
+        {
+          "path": "/items/0/source_service",
+          "equals": "smoke-${RUN_ID}"
+        }
+      ]
+    }
+  ]
+}

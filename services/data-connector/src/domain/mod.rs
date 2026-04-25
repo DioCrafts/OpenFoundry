@@ -1,3 +1,8 @@
+pub mod agent_registry;
+pub mod discovery;
+pub mod egress;
 pub mod scheduler;
 pub mod schema_inference;
+pub mod secret_manager;
 pub mod sync_engine;
+pub mod type_mapping;

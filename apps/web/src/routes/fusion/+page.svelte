@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 
 	import ClusterViewer from '$components/fusion/ClusterViewer.svelte';
+	import FusionSpreadsheet from '$components/fusion/FusionSpreadsheet.svelte';
 	import GoldenRecordView from '$components/fusion/GoldenRecordView.svelte';
 	import ManualReview from '$components/fusion/ManualReview.svelte';
 	import MatchRuleBuilder from '$components/fusion/MatchRuleBuilder.svelte';
@@ -465,5 +466,7 @@
 			/>
 			<GoldenRecordView goldenRecords={goldenRecords} clusterDetail={clusterDetail} />
 		</div>
+
+		<FusionSpreadsheet />
 	{/if}
 </div>

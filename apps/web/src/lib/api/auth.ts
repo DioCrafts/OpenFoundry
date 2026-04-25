@@ -162,6 +162,57 @@ export interface StartSsoLoginResponse {
   authorization_url: string;
 }
 
+export interface SessionScope {
+  allowed_methods: string[];
+  allowed_path_prefixes: string[];
+  allowed_subject_ids: string[];
+  allowed_org_ids: string[];
+  workspace: string | null;
+  classification_clearance: string | null;
+  guest_email: string | null;
+  guest_display_name: string | null;
+}
+
+export interface ScopedSessionRecord {
+  id: string;
+  user_id: string;
+  label: string;
+  session_kind: 'scoped' | 'guest';
+  scope: SessionScope;
+  guest_email: string | null;
+  guest_name: string | null;
+  expires_at: string;
+  revoked_at: string | null;
+  created_at: string;
+}
+
+export interface ScopedSessionWithToken {
+  id: string;
+  label: string;
+  session_kind: 'scoped' | 'guest';
+  scope: SessionScope;
+  token: string;
+  expires_at: string;
+  guest_email: string | null;
+  guest_name: string | null;
+  created_at: string;
+}
+
+export interface HashContentResponse {
+  algorithm: string;
+  digest: string;
+}
+
+export interface SignContentResponse {
+  algorithm: string;
+  signature: string;
+}
+
+export interface VerifySignatureResponse {
+  algorithm: string;
+  valid: boolean;
+}
+
 export function login(data: LoginRequest) {
   return api.post<LoginResponse>('/auth/login', data);
 }
@@ -206,12 +257,67 @@ export function startSsoLogin(slug: string) {
   return api.get<StartSsoLoginResponse>(`/auth/sso/providers/${slug}/start`);
 }
 
-export function completeSsoLogin(data: { code: string; state: string }) {
+export function completeSsoLogin(data: {
+  code?: string;
+  state?: string;
+  saml_response?: string;
+  relay_state?: string;
+}) {
   return api.post<LoginResponse>('/auth/sso/callback', data);
 }
 
 export function listUsers() {
   return api.get<UserProfile[]>('/users');
+}
+
+export function listScopedSessions() {
+  return api.get<ScopedSessionRecord[]>('/auth/sessions');
+}
+
+export function createScopedSession(data: {
+  label: string;
+  permissions?: string[];
+  allowed_methods?: string[];
+  allowed_path_prefixes?: string[];
+  allowed_subject_ids?: string[];
+  allowed_org_ids?: string[];
+  workspace?: string | null;
+  classification_clearance?: string | null;
+  expires_at?: string | null;
+}) {
+  return api.post<ScopedSessionWithToken>('/auth/sessions/scoped', data);
+}
+
+export function createGuestSession(data: {
+  label: string;
+  guest_email: string;
+  guest_name?: string | null;
+  permissions?: string[];
+  allowed_methods?: string[];
+  allowed_path_prefixes?: string[];
+  allowed_subject_ids?: string[];
+  allowed_org_ids?: string[];
+  workspace?: string | null;
+  classification_clearance?: string | null;
+  expires_at?: string | null;
+}) {
+  return api.post<ScopedSessionWithToken>('/auth/sessions/guest', data);
+}
+
+export function revokeScopedSession(id: string) {
+  return api.fetch<void>(`/auth/sessions/${id}`, { method: 'DELETE' });
+}
+
+export function hashCipherContent(data: { content: string; salt?: string | null }) {
+  return api.post<HashContentResponse>('/auth/cipher/hash', data);
+}
+
+export function signCipherContent(data: { content: string; key_material: string }) {
+  return api.post<SignContentResponse>('/auth/cipher/sign', data);
+}
+
+export function verifyCipherSignature(data: { content: string; key_material: string; signature: string }) {
+  return api.post<VerifySignatureResponse>('/auth/cipher/verify', data);
 }
 
 export function updateUser(userId: string, data: Partial<Pick<UserProfile, 'name' | 'organization_id' | 'attributes' | 'mfa_enforced' | 'is_active'>>) {

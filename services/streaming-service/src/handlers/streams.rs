@@ -268,7 +268,9 @@ pub async fn push_events(
     Path(stream_id): Path<Uuid>,
     Json(payload): Json<PushStreamEventsRequest>,
 ) -> ServiceResult<PushStreamEventsResponse> {
-    if payload.events.is_empty() {
+    let PushStreamEventsRequest { events } = payload;
+
+    if events.is_empty() {
         return Err(bad_request("at least one event is required"));
     }
 
@@ -280,7 +282,8 @@ pub async fn push_events(
 
     let mut first_sequence_no = None;
     let mut last_sequence_no = None;
-    for event in payload.events {
+    let accepted_events = events.len();
+    for event in events {
         let event_time = event
             .event_time
             .or_else(|| {
@@ -314,7 +317,7 @@ pub async fn push_events(
 
     Ok(Json(PushStreamEventsResponse {
         stream_id,
-        accepted_events: payload.events.len(),
+        accepted_events,
         first_sequence_no,
         last_sequence_no,
     }))

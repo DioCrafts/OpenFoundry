@@ -206,6 +206,11 @@ export function createCommit(
 		author_name: string;
 		additions?: number;
 		deletions?: number;
+		files?: Array<{
+			path: string;
+			content?: string;
+			delete?: boolean;
+		}>;
 	},
 ) {
 	return api.post<CommitDefinition>(`/code-repos/repositories/${repositoryId}/commits`, body);

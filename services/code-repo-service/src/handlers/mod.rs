@@ -10,10 +10,8 @@ use axum::{Json, http::StatusCode};
 use serde::Serialize;
 
 use crate::models::{
-    branch::BranchRow,
     comment::CommentRow,
-    commit::{CiRunRow, CommitRow},
-    file::FileRow,
+    commit::CiRunRow,
     integration::{IntegrationRow, SyncRunRow},
     merge_request::MergeRequestRow,
     repository::RepositoryRow,
@@ -85,81 +83,6 @@ pub async fn load_all_repositories(
 
     rows.into_iter()
         .map(crate::models::repository::RepositoryDefinition::try_from)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|cause| {
-            sqlx::Error::Decode(Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                cause,
-            )))
-        })
-}
-
-pub async fn load_branches(
-    db: &sqlx::PgPool,
-    repository_id: uuid::Uuid,
-) -> Result<Vec<crate::models::branch::BranchDefinition>, sqlx::Error> {
-    let rows = sqlx::query_as::<_, BranchRow>(
-		"SELECT id, repository_id, name, head_sha, base_branch, is_default, protected, ahead_by, pending_reviews, updated_at
-		 FROM code_repository_branches
-		 WHERE repository_id = $1
-		 ORDER BY is_default DESC, updated_at DESC",
-	)
-	.bind(repository_id)
-	.fetch_all(db)
-	.await?;
-
-    rows.into_iter()
-        .map(crate::models::branch::BranchDefinition::try_from)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|cause| {
-            sqlx::Error::Decode(Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                cause,
-            )))
-        })
-}
-
-pub async fn load_commits(
-    db: &sqlx::PgPool,
-    repository_id: uuid::Uuid,
-) -> Result<Vec<crate::models::commit::CommitDefinition>, sqlx::Error> {
-    let rows = sqlx::query_as::<_, CommitRow>(
-		"SELECT id, repository_id, branch_name, sha, parent_sha, title, description, author_name, author_email, files_changed, additions, deletions, created_at
-		 FROM code_repository_commits
-		 WHERE repository_id = $1
-		 ORDER BY created_at DESC",
-	)
-	.bind(repository_id)
-	.fetch_all(db)
-	.await?;
-
-    rows.into_iter()
-        .map(crate::models::commit::CommitDefinition::try_from)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|cause| {
-            sqlx::Error::Decode(Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                cause,
-            )))
-        })
-}
-
-pub async fn load_files(
-    db: &sqlx::PgPool,
-    repository_id: uuid::Uuid,
-) -> Result<Vec<crate::models::file::RepositoryFile>, sqlx::Error> {
-    let rows = sqlx::query_as::<_, FileRow>(
-		"SELECT id, repository_id, path, branch_name, language, size_bytes, content, last_commit_sha
-		 FROM code_repository_files
-		 WHERE repository_id = $1
-		 ORDER BY path ASC",
-	)
-	.bind(repository_id)
-	.fetch_all(db)
-	.await?;
-
-    rows.into_iter()
-        .map(crate::models::file::RepositoryFile::try_from)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|cause| {
             sqlx::Error::Decode(Box::new(std::io::Error::new(

@@ -2,24 +2,40 @@
   import { onMount } from 'svelte';
   import { page as pageStore } from '$app/stores';
   import {
+    applyRule,
     createActionType,
+    createFunctionPackage,
     createObject,
+    createRule,
     deleteActionType,
     deleteObject,
     executeAction,
+    getMachineryInsights,
+    getObjectView,
     getObjectType,
     listActionTypes,
+    listFunctionPackages,
     listLinkTypes,
     listObjects,
     listProperties,
+    listRules,
+    simulateFunctionPackage,
+    simulateObject,
+    simulateRule,
     validateAction,
     type ActionInputField,
     type ActionOperationKind,
     type ActionType,
     type ExecuteActionResponse,
+    type FunctionCapabilities,
+    type FunctionPackage,
     type LinkType,
+    type MachineryInsight,
     type ObjectInstance,
+    type ObjectSimulationResponse,
+    type ObjectViewResponse,
     type ObjectType,
+    type OntologyRule,
     type Property,
     type ValidateActionResponse,
   } from '$lib/api/ontology';
@@ -88,13 +104,36 @@
         },
       ],
       config: {
-        url: 'https://example.com/functions/enrich',
-        method: 'POST',
-        headers: {
-          'x-openfoundry-action': 'invoke_function',
-        },
+        runtime: 'typescript',
+        source: `export default async function handler(context) {
+  const targetId = context.targetObject?.id;
+  const summary = targetId
+    ? await context.llm.complete({
+        userMessage: \`Summarize the current state of object \${targetId} in one sentence.\`,
+        maxTokens: 128,
+      })
+    : null;
+
+  const related = await context.sdk.ontology.search({
+    query: context.parameters.payload?.query ?? 'customer health',
+    kind: 'object_instance',
+    limit: 5,
+  });
+
+  return {
+    output: {
+      related,
+      summary: summary?.reply ?? null,
+    },
+    object_patch: targetId
+      ? {
+          status: 'reviewed',
+        }
+      : null,
+  };
+}`,
       },
-      notes: 'The HTTP endpoint can return output, object_patch, link, or delete_object instructions.',
+      notes: 'Use either inline TypeScript/Python source or a reusable function package via {"function_package_id":"..."}. Functions can call context.sdk.ontology.* and context.llm.complete(...) based on package capabilities.',
     },
     invoke_webhook: {
       inputSchema: [
@@ -138,6 +177,93 @@
   let selectedTargetObjectId = $state('');
   let validation = $state<ValidateActionResponse | null>(null);
   let execution = $state<ExecuteActionResponse | null>(null);
+  let functionPackages = $state<FunctionPackage[]>([]);
+  let rules = $state<OntologyRule[]>([]);
+  let machineryInsights = $state<MachineryInsight[]>([]);
+  let objectView = $state<ObjectViewResponse | null>(null);
+  let simulation = $state<ObjectSimulationResponse | null>(null);
+
+  let objectViewLoading = $state(false);
+  let simulationLoading = $state(false);
+  let creatingFunctionPackage = $state(false);
+  let creatingRule = $state(false);
+  let functionRuntimeLoading = $state(false);
+  let ruleRuntimeLoading = $state(false);
+
+  let functionFormError = $state('');
+  let functionFormSuccess = $state('');
+  let functionRuntimeError = $state('');
+  let functionRuntimeResult = $state<Record<string, unknown> | null>(null);
+  let ruleFormError = $state('');
+  let ruleFormSuccess = $state('');
+  let ruleRuntimeError = $state('');
+  let ruleRuntimeResult = $state<Record<string, unknown> | null>(null);
+
+  let functionName = $state('');
+  let functionDisplayName = $state('');
+  let functionDescription = $state('');
+  let functionRuntime = $state('typescript');
+  let functionEntrypoint = $state('default');
+  let functionCapabilitiesText = $state(
+    JSON.stringify(
+      {
+        allow_ontology_read: true,
+        allow_ontology_write: true,
+        allow_ai: true,
+        allow_network: false,
+        timeout_seconds: 15,
+        max_source_bytes: 65536,
+      } satisfies FunctionCapabilities,
+      null,
+      2,
+    ),
+  );
+  let functionSourceText = $state(`export default async function handler(context) {
+  const target = context.targetObject;
+  const related = await context.sdk.ontology.search({
+    query: target?.properties?.name ?? 'high risk case',
+    kind: 'object_instance',
+    limit: 5,
+  });
+
+  return {
+    output: {
+      inspectedObjectId: target?.id ?? null,
+      related,
+      capabilities: context.capabilities,
+    },
+  };
+}`);
+  let selectedFunctionPackageId = $state('');
+
+  let ruleName = $state('');
+  let ruleDisplayName = $state('');
+  let ruleDescription = $state('');
+  let ruleEvaluationMode = $state<'advisory' | 'automatic'>('advisory');
+  let ruleTriggerSpecText = $state(
+    JSON.stringify(
+      {
+        equals: { status: 'pending' },
+        numeric_gte: { risk_score: 0.8 },
+        changed_properties: ['status', 'risk_score'],
+      },
+      null,
+      2,
+    ),
+  );
+  let ruleEffectSpecText = $state(
+    JSON.stringify(
+      {
+        object_patch: { priority: 'high' },
+        schedule: { property_name: 'next_review_at', offset_hours: 24 },
+        alert: { severity: 'high', title: 'Escalate review' },
+      },
+      null,
+      2,
+    ),
+  );
+
+  let simulationPatchText = $state('{}');
 
   let actionName = $state('');
   let actionDisplayName = $state('');
@@ -206,6 +332,23 @@
     }
   }
 
+  async function loadObjectInspector(objectId: string) {
+    if (!objectTypeId || !objectId) {
+      objectView = null;
+      return;
+    }
+
+    objectViewLoading = true;
+    try {
+      objectView = await getObjectView(objectTypeId, objectId);
+    } catch (cause) {
+      runtimeError = cause instanceof Error ? cause.message : 'Failed to load object view';
+      objectView = null;
+    } finally {
+      objectViewLoading = false;
+    }
+  }
+
   async function load() {
     if (!objectTypeId) {
       error = 'Missing object type id';
@@ -217,12 +360,24 @@
     error = '';
 
     try {
-      const [nextType, nextProperties, nextLinkTypes, nextObjects, nextActions] = await Promise.all([
+      const [
+        nextType,
+        nextProperties,
+        nextLinkTypes,
+        nextObjects,
+        nextActions,
+        nextFunctionPackages,
+        nextRules,
+        nextMachineryInsights,
+      ] = await Promise.all([
         getObjectType(objectTypeId),
         listProperties(objectTypeId),
         listLinkTypes({ object_type_id: objectTypeId, page: 1, per_page: 100 }),
         listObjects(objectTypeId, { page: 1, per_page: 50 }),
         listActionTypes({ object_type_id: objectTypeId, page: 1, per_page: 100 }),
+        listFunctionPackages({ page: 1, per_page: 100 }),
+        listRules({ object_type_id: objectTypeId, page: 1, per_page: 100 }),
+        getMachineryInsights({ object_type_id: objectTypeId }),
       ]);
 
       objectType = nextType;
@@ -230,7 +385,16 @@
       linkTypes = nextLinkTypes.data;
       objects = nextObjects.data;
       actions = nextActions.data;
+      functionPackages = nextFunctionPackages.data;
+      rules = nextRules.data;
+      machineryInsights = nextMachineryInsights.data;
       syncSelections(nextActions.data, nextObjects.data);
+      selectedFunctionPackageId = nextFunctionPackages.data[0]?.id ?? '';
+      if (selectedTargetObjectId) {
+        await loadObjectInspector(selectedTargetObjectId);
+      } else {
+        objectView = null;
+      }
     } catch (cause) {
       error = cause instanceof Error ? cause.message : 'Failed to load ontology details';
     } finally {
@@ -271,6 +435,8 @@
       await deleteObject(objectTypeId, id);
       if (selectedTargetObjectId === id) {
         selectedTargetObjectId = '';
+        objectView = null;
+        simulation = null;
       }
       await load();
     } catch (cause) {
@@ -391,6 +557,151 @@
     }
   }
 
+  async function handleCreateFunctionPackage(event: Event) {
+    event.preventDefault();
+    if (!objectTypeId) return;
+
+    creatingFunctionPackage = true;
+    functionFormError = '';
+    functionFormSuccess = '';
+
+    try {
+      const capabilities = parseJsonObject(
+        functionCapabilitiesText,
+        'Function capabilities',
+      ) as Partial<FunctionCapabilities>;
+      const created = await createFunctionPackage({
+        name: functionName.trim(),
+        display_name: functionDisplayName.trim() || undefined,
+        description: functionDescription.trim() || undefined,
+        runtime: functionRuntime,
+        source: functionSourceText,
+        entrypoint: functionEntrypoint,
+        capabilities,
+      });
+      selectedFunctionPackageId = created.id;
+      functionFormSuccess = `Created function package ${created.display_name}.`;
+      functionName = '';
+      functionDisplayName = '';
+      functionDescription = '';
+      await load();
+    } catch (cause) {
+      functionFormError = cause instanceof Error ? cause.message : 'Failed to create function package';
+    } finally {
+      creatingFunctionPackage = false;
+    }
+  }
+
+  function useFunctionPackageInActionConfig(packageId: string) {
+    actionOperationKind = 'invoke_function';
+    actionConfigText = formatJson({ function_package_id: packageId });
+  }
+
+  async function handleSimulateFunctionPackage(packageId: string) {
+    if (!objectTypeId) return;
+
+    functionRuntimeLoading = true;
+    functionRuntimeError = '';
+    functionRuntimeResult = null;
+
+    try {
+      const result = await simulateFunctionPackage(packageId, {
+        object_type_id: objectTypeId,
+        target_object_id: selectedTargetObjectId || undefined,
+        parameters: parseJsonObject(actionParametersText, 'Function package parameters'),
+      });
+      functionRuntimeResult = result as unknown as Record<string, unknown>;
+    } catch (cause) {
+      functionRuntimeError = cause instanceof Error ? cause.message : 'Failed to simulate function package';
+    } finally {
+      functionRuntimeLoading = false;
+    }
+  }
+
+  async function handleCreateRule(event: Event) {
+    event.preventDefault();
+    if (!objectTypeId) return;
+
+    creatingRule = true;
+    ruleFormError = '';
+    ruleFormSuccess = '';
+
+    try {
+      const triggerSpec = parseJsonObject(ruleTriggerSpecText, 'Rule trigger spec');
+      const effectSpec = parseJsonObject(ruleEffectSpecText, 'Rule effect spec');
+      const created = await createRule({
+        name: ruleName.trim(),
+        display_name: ruleDisplayName.trim() || undefined,
+        description: ruleDescription.trim() || undefined,
+        object_type_id: objectTypeId,
+        evaluation_mode: ruleEvaluationMode,
+        trigger_spec: triggerSpec,
+        effect_spec: effectSpec,
+      });
+      ruleFormSuccess = `Created rule ${created.display_name}.`;
+      ruleName = '';
+      ruleDisplayName = '';
+      ruleDescription = '';
+      await load();
+    } catch (cause) {
+      ruleFormError = cause instanceof Error ? cause.message : 'Failed to create rule';
+    } finally {
+      creatingRule = false;
+    }
+  }
+
+  async function handleRuleRuntime(ruleId: string, mode: 'simulate' | 'apply') {
+    if (!selectedTargetObjectId) {
+      ruleRuntimeError = 'Select a target object first';
+      return;
+    }
+
+    ruleRuntimeLoading = true;
+    ruleRuntimeError = '';
+    ruleRuntimeResult = null;
+
+    try {
+      const body = {
+        object_id: selectedTargetObjectId,
+        properties_patch: parseJsonObject(simulationPatchText, 'Rule simulation patch'),
+      };
+      const result =
+        mode === 'apply' ? await applyRule(ruleId, body) : await simulateRule(ruleId, body);
+      ruleRuntimeResult = result as unknown as Record<string, unknown>;
+      if (mode === 'apply') {
+        await load();
+      }
+    } catch (cause) {
+      ruleRuntimeError = cause instanceof Error ? cause.message : `Failed to ${mode} rule`;
+    } finally {
+      ruleRuntimeLoading = false;
+    }
+  }
+
+  async function handleSimulateObject() {
+    if (!objectTypeId || !selectedTargetObjectId) {
+      runtimeError = 'Select a target object first';
+      return;
+    }
+
+    simulationLoading = true;
+    runtimeError = '';
+    simulation = null;
+
+    try {
+      simulation = await simulateObject(objectTypeId, selectedTargetObjectId, {
+        action_id: selectedActionId || undefined,
+        action_parameters: parseJsonObject(actionParametersText, 'Simulation action parameters'),
+        properties_patch: parseJsonObject(simulationPatchText, 'Simulation patch'),
+        depth: 2,
+      });
+    } catch (cause) {
+      runtimeError = cause instanceof Error ? cause.message : 'Failed to simulate object';
+    } finally {
+      simulationLoading = false;
+    }
+  }
+
   onMount(() => {
     void load();
   });
@@ -477,6 +788,9 @@
                   {#if property.required}
                     <span class="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">required</span>
                   {/if}
+                  {#if property.time_dependent}
+                    <span class="rounded-full bg-sky-50 px-2 py-0.5 text-xs text-sky-700 dark:bg-sky-950/40 dark:text-sky-300">time-dependent</span>
+                  {/if}
                 </div>
                 {#if property.description}
                   <p class="mt-2 text-sm text-slate-500">{property.description}</p>
@@ -507,6 +821,257 @@
               </div>
             {/each}
           </div>
+        {/if}
+      </section>
+    </div>
+
+    <div class="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+      <section class="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-semibold text-slate-950 dark:text-slate-50">Functions Platform</h2>
+            <p class="mt-1 text-sm text-slate-500">Register reusable TypeScript/Python packages with execution capabilities and reuse them from action types.</p>
+          </div>
+          <span class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{functionPackages.length} packages</span>
+        </div>
+
+        {#if functionFormError}
+          <div class="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
+            {functionFormError}
+          </div>
+        {/if}
+
+        {#if functionFormSuccess}
+          <div class="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300">
+            {functionFormSuccess}
+          </div>
+        {/if}
+
+        <form class="mt-4 space-y-4" onsubmit={handleCreateFunctionPackage}>
+          <div class="grid gap-4 md:grid-cols-2">
+            <div>
+              <label for="function-package-name" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Package name</label>
+              <input
+                id="function-package-name"
+                bind:value={functionName}
+                class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 font-mono text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                placeholder="customer_triage"
+              />
+            </div>
+            <div>
+              <label for="function-package-display-name" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Display name</label>
+              <input
+                id="function-package-display-name"
+                bind:value={functionDisplayName}
+                class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                placeholder="Customer triage"
+              />
+            </div>
+          </div>
+
+          <div class="grid gap-4 md:grid-cols-[1fr_auto_auto]">
+            <div>
+              <label for="function-package-description" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Description</label>
+              <input
+                id="function-package-description"
+                bind:value={functionDescription}
+                class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                placeholder="Reusable object triage flow"
+              />
+            </div>
+            <div>
+              <label for="function-package-runtime" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Runtime</label>
+              <select id="function-package-runtime" bind:value={functionRuntime} class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100">
+                <option value="typescript">typescript</option>
+                <option value="python">python</option>
+              </select>
+            </div>
+            <div>
+              <label for="function-package-entrypoint" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Entrypoint</label>
+              <select id="function-package-entrypoint" bind:value={functionEntrypoint} class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100">
+                <option value="default">default</option>
+                <option value="handler">handler</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid gap-4 lg:grid-cols-2">
+            <div>
+              <label for="function-package-capabilities" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Capabilities JSON</label>
+              <textarea id="function-package-capabilities" bind:value={functionCapabilitiesText} rows={10} class="w-full rounded-2xl border border-slate-300 bg-slate-950 px-4 py-3 font-mono text-xs text-slate-100 dark:border-slate-700" spellcheck="false"></textarea>
+            </div>
+            <div>
+              <label for="function-package-source" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Source</label>
+              <textarea id="function-package-source" bind:value={functionSourceText} rows={10} class="w-full rounded-2xl border border-slate-300 bg-slate-950 px-4 py-3 font-mono text-xs text-slate-100 dark:border-slate-700" spellcheck="false"></textarea>
+            </div>
+          </div>
+
+          <div class="flex justify-end">
+            <button type="submit" disabled={creatingFunctionPackage} class="rounded-full bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+              {creatingFunctionPackage ? 'Saving...' : 'Create function package'}
+            </button>
+          </div>
+        </form>
+
+        <div class="mt-6 space-y-3">
+          {#each functionPackages as functionPackage (functionPackage.id)}
+            <article class={`rounded-2xl border px-4 py-4 ${selectedFunctionPackageId === functionPackage.id ? 'border-indigo-400 bg-indigo-50 dark:border-indigo-500/60 dark:bg-indigo-950/20' : 'border-slate-200 dark:border-slate-800'}`}>
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div class="font-medium text-slate-900 dark:text-slate-100">{functionPackage.display_name}</div>
+                  <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                    <span class="font-mono">{functionPackage.name}</span>
+                    <span class="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">{functionPackage.runtime}</span>
+                    <span class="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">{functionPackage.entrypoint}</span>
+                  </div>
+                  {#if functionPackage.description}
+                    <p class="mt-2 text-sm text-slate-500">{functionPackage.description}</p>
+                  {/if}
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button type="button" class="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800" onclick={() => { selectedFunctionPackageId = functionPackage.id; useFunctionPackageInActionConfig(functionPackage.id); }}>
+                    Use in action
+                  </button>
+                  <button type="button" class="rounded-full bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700" onclick={() => handleSimulateFunctionPackage(functionPackage.id)}>
+                    {functionRuntimeLoading && selectedFunctionPackageId === functionPackage.id ? 'Running...' : 'Simulate'}
+                  </button>
+                </div>
+              </div>
+              <div class="mt-3 grid gap-2 md:grid-cols-2">
+                <div class="rounded-2xl bg-slate-100 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800/70 dark:text-slate-300">
+                  AI: {functionPackage.capabilities.allow_ai ? 'enabled' : 'disabled'} · Network: {functionPackage.capabilities.allow_network ? 'enabled' : 'disabled'}
+                </div>
+                <div class="rounded-2xl bg-slate-100 px-3 py-2 text-xs text-slate-600 dark:bg-slate-800/70 dark:text-slate-300">
+                  Ontology write: {functionPackage.capabilities.allow_ontology_write ? 'enabled' : 'disabled'} · Timeout: {functionPackage.capabilities.timeout_seconds}s
+                </div>
+              </div>
+            </article>
+          {/each}
+        </div>
+
+        {#if functionRuntimeError}
+          <div class="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
+            {functionRuntimeError}
+          </div>
+        {/if}
+
+        {#if functionRuntimeResult}
+          <pre class="mt-4 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">{formatJson(functionRuntimeResult)}</pre>
+        {/if}
+      </section>
+
+      <section class="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-semibold text-slate-950 dark:text-slate-50">Rules & Machinery</h2>
+            <p class="mt-1 text-sm text-slate-500">Model rule triggers, scheduling and alerts, then inspect run history and machinery pressure for this object type.</p>
+          </div>
+          <span class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{rules.length} rules</span>
+        </div>
+
+        {#if ruleFormError}
+          <div class="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
+            {ruleFormError}
+          </div>
+        {/if}
+
+        {#if ruleFormSuccess}
+          <div class="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300">
+            {ruleFormSuccess}
+          </div>
+        {/if}
+
+        <form class="mt-4 space-y-4" onsubmit={handleCreateRule}>
+          <div class="grid gap-4 md:grid-cols-[1fr_1fr_auto]">
+            <div>
+              <label for="ontology-rule-name" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Rule name</label>
+              <input id="ontology-rule-name" bind:value={ruleName} class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 font-mono text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" placeholder="escalate_high_risk" />
+            </div>
+            <div>
+              <label for="ontology-rule-display-name" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Display name</label>
+              <input id="ontology-rule-display-name" bind:value={ruleDisplayName} class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" placeholder="Escalate high risk" />
+            </div>
+            <div>
+              <label for="ontology-rule-mode" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Mode</label>
+              <select id="ontology-rule-mode" bind:value={ruleEvaluationMode} class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100">
+                <option value="advisory">advisory</option>
+                <option value="automatic">automatic</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label for="ontology-rule-description" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Description</label>
+            <input id="ontology-rule-description" bind:value={ruleDescription} class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" placeholder="Escalate any case above the configured risk threshold" />
+          </div>
+
+          <div class="grid gap-4 lg:grid-cols-2">
+            <div>
+              <label for="ontology-rule-trigger-spec" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Trigger spec JSON</label>
+              <textarea id="ontology-rule-trigger-spec" bind:value={ruleTriggerSpecText} rows={9} class="w-full rounded-2xl border border-slate-300 bg-slate-950 px-4 py-3 font-mono text-xs text-slate-100 dark:border-slate-700" spellcheck="false"></textarea>
+            </div>
+            <div>
+              <label for="ontology-rule-effect-spec" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Effect spec JSON</label>
+              <textarea id="ontology-rule-effect-spec" bind:value={ruleEffectSpecText} rows={9} class="w-full rounded-2xl border border-slate-300 bg-slate-950 px-4 py-3 font-mono text-xs text-slate-100 dark:border-slate-700" spellcheck="false"></textarea>
+            </div>
+          </div>
+
+          <div class="flex justify-end">
+            <button type="submit" disabled={creatingRule} class="rounded-full bg-fuchsia-600 px-4 py-2 text-sm font-medium text-white hover:bg-fuchsia-700 disabled:opacity-50">
+              {creatingRule ? 'Saving...' : 'Create rule'}
+            </button>
+          </div>
+        </form>
+
+        <div class="mt-6 grid gap-3 md:grid-cols-2">
+          {#each machineryInsights as insight (insight.rule_id)}
+            <div class="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+              <div class="font-medium text-slate-900 dark:text-slate-100">{insight.display_name}</div>
+              <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-500">
+                <span>Runs: {insight.total_runs}</span>
+                <span>Matched: {insight.matched_runs}</span>
+                <span>Pending schedules: {insight.pending_schedules}</span>
+                <span>Mode: {insight.evaluation_mode}</span>
+              </div>
+            </div>
+          {/each}
+        </div>
+
+        <div class="mt-6 space-y-3">
+          {#each rules as rule (rule.id)}
+            <article class="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div class="font-medium text-slate-900 dark:text-slate-100">{rule.display_name}</div>
+                  <div class="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                    <span class="font-mono">{rule.name}</span>
+                    <span class="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">{rule.evaluation_mode}</span>
+                  </div>
+                  {#if rule.description}
+                    <p class="mt-2 text-sm text-slate-500">{rule.description}</p>
+                  {/if}
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button type="button" class="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800" onclick={() => handleRuleRuntime(rule.id, 'simulate')}>
+                    Simulate
+                  </button>
+                  <button type="button" class="rounded-full bg-fuchsia-600 px-3 py-1 text-xs font-medium text-white hover:bg-fuchsia-700" onclick={() => handleRuleRuntime(rule.id, 'apply')}>
+                    Apply
+                  </button>
+                </div>
+              </div>
+            </article>
+          {/each}
+        </div>
+
+        {#if ruleRuntimeError}
+          <div class="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
+            {ruleRuntimeError}
+          </div>
+        {/if}
+
+        {#if ruleRuntimeResult}
+          <pre class="mt-4 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">{formatJson(ruleRuntimeResult)}</pre>
         {/if}
       </section>
     </div>
@@ -557,7 +1122,7 @@
             </div>
           {:else}
             {#each objects as object (object.id)}
-              <div class="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+              <div id={`object-${object.id}`} class="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
                 <div class="flex flex-wrap items-center justify-between gap-3">
                   <div class="space-y-1">
                     <button
@@ -565,6 +1130,7 @@
                       class={`rounded-full px-3 py-1 text-left text-xs font-medium ${selectedTargetObjectId === object.id ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200'}`}
                       onclick={() => {
                         selectedTargetObjectId = object.id;
+                        void loadObjectInspector(object.id);
                       }}
                     >
                       {selectedTargetObjectId === object.id ? 'Selected target' : 'Use as target'}
@@ -806,6 +1372,7 @@
             <select
               id="selected-target-object"
               bind:value={selectedTargetObjectId}
+              onchange={() => void loadObjectInspector(selectedTargetObjectId)}
               class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
             >
               <option value="">No target object</option>
@@ -922,6 +1489,127 @@
                   </div>
                 {/if}
               </div>
+            </div>
+          {/if}
+        </div>
+      </div>
+    </section>
+
+    <section class="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 class="text-lg font-semibold text-slate-950 dark:text-slate-50">Object View & Simulation</h2>
+          <p class="mt-1 text-sm text-slate-500">Inspect the selected object as a digital twin: graph neighborhood, matching rules, recent machinery runs and projected impact.</p>
+        </div>
+        <div class="rounded-2xl bg-slate-100 px-4 py-3 text-xs text-slate-600 dark:bg-slate-800/70 dark:text-slate-300">
+          {selectedTargetObjectId || 'Select an object from Object Lab first'}
+        </div>
+      </div>
+
+      <div class="mt-4 grid gap-6 xl:grid-cols-[0.92fr_1.08fr]">
+        <div class="space-y-4">
+          <div>
+            <label for="ontology-simulation-patch" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Simulation patch JSON</label>
+            <textarea id="ontology-simulation-patch" bind:value={simulationPatchText} rows={12} class="w-full rounded-2xl border border-slate-300 bg-slate-950 px-4 py-3 font-mono text-xs text-slate-100 dark:border-slate-700" spellcheck="false"></textarea>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              disabled={!selectedTargetObjectId || simulationLoading}
+              class="rounded-full bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50"
+              onclick={handleSimulateObject}
+            >
+              {simulationLoading ? 'Simulating...' : 'Simulate selected object'}
+            </button>
+            {#if selectedTargetObjectId}
+              <button
+                type="button"
+                class="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                onclick={() => void loadObjectInspector(selectedTargetObjectId)}
+              >
+                Refresh inspector
+              </button>
+            {/if}
+          </div>
+
+          {#if simulation}
+            <div class="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+              <div class="flex items-center justify-between gap-3">
+                <h3 class="font-medium text-slate-900 dark:text-slate-100">Simulation result</h3>
+                {#if simulation.deleted}
+                  <span class="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">predicted delete</span>
+                {/if}
+              </div>
+              <pre class="mt-3 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">{formatJson(simulation)}</pre>
+            </div>
+          {/if}
+        </div>
+
+        <div class="space-y-4">
+          {#if objectViewLoading}
+            <div class="rounded-2xl border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-500 dark:border-slate-700">
+              Loading object inspector...
+            </div>
+          {:else if objectView}
+            <div class="grid gap-3 md:grid-cols-2">
+              {#each Object.entries(objectView.summary) as [label, value]}
+                <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                  <div class="text-xs uppercase tracking-[0.2em] text-slate-500">{label.replaceAll('_', ' ')}</div>
+                  <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">{String(value)}</div>
+                </div>
+              {/each}
+            </div>
+
+            <details class="rounded-2xl border border-slate-200 px-4 py-3 dark:border-slate-800">
+              <summary class="cursor-pointer font-medium text-slate-900 dark:text-slate-100">Object snapshot</summary>
+              <pre class="mt-3 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">{formatJson(objectView.object)}</pre>
+            </details>
+
+            <div class="grid gap-4 lg:grid-cols-2">
+              <div class="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                <h3 class="font-medium text-slate-900 dark:text-slate-100">Matching rules</h3>
+                {#if objectView.matching_rules.length === 0}
+                  <p class="mt-3 text-sm text-slate-500">No rules currently match this object.</p>
+                {:else}
+                  <div class="mt-3 space-y-2">
+                    {#each objectView.matching_rules as matchResult (matchResult.rule_id)}
+                      <pre class="overflow-x-auto rounded-2xl bg-slate-950 p-3 text-xs text-slate-100">{formatJson(matchResult)}</pre>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+
+              <div class="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                <h3 class="font-medium text-slate-900 dark:text-slate-100">Applicable actions</h3>
+                <div class="mt-3 flex flex-wrap gap-2">
+                  {#each objectView.applicable_actions as action (action.id)}
+                    <button
+                      type="button"
+                      class={`rounded-full px-3 py-1 text-xs font-medium ${selectedActionId === action.id ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200'}`}
+                      onclick={() => {
+                        selectedActionId = action.id;
+                      }}
+                    >
+                      {action.display_name}
+                    </button>
+                  {/each}
+                </div>
+              </div>
+            </div>
+
+            <details class="rounded-2xl border border-slate-200 px-4 py-3 dark:border-slate-800">
+              <summary class="cursor-pointer font-medium text-slate-900 dark:text-slate-100">Timeline & machinery history</summary>
+              <pre class="mt-3 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">{formatJson(objectView.timeline)}</pre>
+            </details>
+
+            <details class="rounded-2xl border border-slate-200 px-4 py-3 dark:border-slate-800">
+              <summary class="cursor-pointer font-medium text-slate-900 dark:text-slate-100">Graph neighborhood snapshot</summary>
+              <pre class="mt-3 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">{formatJson(objectView.graph)}</pre>
+            </details>
+          {:else}
+            <div class="rounded-2xl border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-500 dark:border-slate-700">
+              Select an object to inspect its graph, rules, timeline, and projected simulations.
             </div>
           {/if}
         </div>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
+  import { askCopilot, type CopilotResponse } from '$lib/api/ai';
   import { listDatasets, type Dataset } from '$lib/api/datasets';
   import {
     createPipeline,
@@ -21,6 +22,13 @@
     type PipelineRun,
     type PipelineScheduleConfig,
   } from '$lib/api/pipelines';
+  import {
+    getRuntime,
+    listTopologies,
+    runTopology,
+    type TopologyDefinition,
+    type TopologyRuntimeSnapshot,
+  } from '$lib/api/streaming';
   import { notifications } from '$stores/notifications';
 
   type PipelineDraft = {
@@ -38,13 +46,26 @@
   let datasets = $state<Dataset[]>([]);
   let runs = $state<PipelineRun[]>([]);
   let columnLineage = $state<ColumnLineageEdge[]>([]);
+  let topologies = $state<TopologyDefinition[]>([]);
+  let topologyRuntime = $state<TopologyRuntimeSnapshot | null>(null);
   let loading = $state(true);
   let saving = $state(false);
   let running = $state(false);
+  let loadingTopologyRuntime = $state(false);
+  let runningTopologyId = $state('');
   let search = $state('');
   let selectedPipelineId = $state('');
+  let selectedTopologyId = $state('');
   let error = $state('');
+  let streamingError = $state('');
+  let copilotQuestion = $state('Design a hybrid pipeline that enriches the latest records, validates drift, and keeps a streaming companion topology healthy.');
+  let copilotLoading = $state(false);
+  let copilotResponse = $state<CopilotResponse | null>(null);
+  let copilotError = $state('');
   let draft = $state<PipelineDraft>(createEmptyPipeline());
+
+  type HybridCanvasMode = 'hybrid' | 'batch';
+  let canvasMode = $state<HybridCanvasMode>('hybrid');
 
   function makeId() {
     if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -62,7 +83,24 @@
           ? { source: 'rows_affected = 0\nresult = "python transform ready"' }
           : transformType === 'wasm'
             ? { module: '(module (func (export "run") (result i32) i32.const 0))', function: 'run' }
-            : { identity_columns: [] };
+            : transformType === 'spark'
+              ? {
+                  endpoint: '',
+                  auth_mode: 'service_jwt',
+                  job_type: 'spark-batch',
+                  cluster_profile: 'shared',
+                  entrypoint: 'main',
+                  source:
+                    'from pyspark.sql import functions as F\n# Remote Spark runner receives config + prepared inputs.\n# Emit result_rows from the external compute service.',
+                }
+              : transformType === 'external'
+                ? {
+                    endpoint: '',
+                    auth_mode: 'none',
+                    job_type: 'external-job',
+                    source: '{\n  "operation": "enrich",\n  "mode": "append"\n}',
+                  }
+                : { identity_columns: [] };
 
     return {
       id: makeId(),
@@ -110,6 +148,17 @@
     return colors[status] || colors.draft;
   }
 
+  function topologyStatusBadge(status: string) {
+    const colors: Record<string, string> = {
+      draft: 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
+      active: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300',
+      running: 'bg-sky-100 text-sky-700 dark:bg-sky-900 dark:text-sky-300',
+      paused: 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300',
+      archived: 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+    };
+    return colors[status] || colors.draft;
+  }
+
   function datasetName(datasetId: string | null) {
     if (!datasetId) return 'No dataset';
     return datasets.find((dataset) => dataset.id === datasetId)?.name ?? datasetId.slice(0, 8);
@@ -120,16 +169,37 @@
     return Array.isArray(mappings) ? mappings as PipelineColumnMapping[] : [];
   }
 
+  function stringConfig(node: PipelineNode, key: string, fallback = '') {
+    return typeof node.config?.[key] === 'string' ? String(node.config[key]) : fallback;
+  }
+
   function identityColumns(node: PipelineNode) {
     const columns = node.config?.['identity_columns'];
     return Array.isArray(columns) ? columns.filter((value): value is string => typeof value === 'string').join(', ') : '';
   }
 
+  function nodeCodeKey(node: PipelineNode) {
+    if (node.transform_type === 'sql') return 'sql';
+    if (node.transform_type === 'wasm') return 'module';
+    return 'source';
+  }
+
   function nodeCode(node: PipelineNode) {
-    if (node.transform_type === 'sql') return typeof node.config?.['sql'] === 'string' ? String(node.config['sql']) : '';
-    if (node.transform_type === 'python') return typeof node.config?.['source'] === 'string' ? String(node.config['source']) : '';
-    if (node.transform_type === 'wasm') return typeof node.config?.['module'] === 'string' ? String(node.config['module']) : '';
+    if (node.transform_type === 'sql') return stringConfig(node, 'sql');
+    if (node.transform_type === 'python' || node.transform_type === 'spark' || node.transform_type === 'external') {
+      return stringConfig(node, 'source');
+    }
+    if (node.transform_type === 'wasm') return stringConfig(node, 'module');
     return '';
+  }
+
+  function nodeCodeLabel(node: PipelineNode) {
+    if (node.transform_type === 'sql') return 'SQL';
+    if (node.transform_type === 'python') return 'Python source';
+    if (node.transform_type === 'wasm') return 'WASM module';
+    if (node.transform_type === 'spark') return 'Remote Spark job spec';
+    if (node.transform_type === 'external') return 'External compute payload';
+    return 'Passthrough config';
   }
 
   function wasmFunction(node: PipelineNode) {
@@ -138,6 +208,19 @@
 
   function branchValue(node: PipelineNode, key: 'input_branch' | 'output_branch') {
     return typeof node.config?.[key] === 'string' ? String(node.config[key]) : '';
+  }
+
+  function pipelineDatasetContext() {
+    return Array.from(new Set(draft.nodes.flatMap((node) => node.input_dataset_ids)));
+  }
+
+  function builderInsights() {
+    return {
+      batchNodes: draft.nodes.length,
+      outputDatasets: new Set(draft.nodes.map((node) => node.output_dataset_id).filter(Boolean)).size,
+      topologyCount: topologies.length,
+      streamingEdges: topologyRuntime?.topology.edges.length ?? 0,
+    };
   }
 
   function updateNode(nodeId: string, updater: (node: PipelineNode) => PipelineNode) {
@@ -160,6 +243,8 @@
     selectedPipelineId = '';
     runs = [];
     columnLineage = [];
+    copilotResponse = null;
+    copilotError = '';
     draft = createEmptyPipeline();
     error = '';
   }
@@ -171,6 +256,105 @@
     ]);
     pipelines = pipelineResponse.data;
     datasets = datasetResponse.data;
+  }
+
+  async function loadTopologyRuntime(id: string) {
+    if (!id) {
+      topologyRuntime = null;
+      selectedTopologyId = '';
+      return;
+    }
+
+    loadingTopologyRuntime = true;
+    streamingError = '';
+    selectedTopologyId = id;
+    try {
+      topologyRuntime = await getRuntime(id);
+    } catch (cause) {
+      console.error('Failed to load topology runtime', cause);
+      streamingError = cause instanceof Error ? cause.message : 'Failed to load topology runtime';
+      topologyRuntime = null;
+    } finally {
+      loadingTopologyRuntime = false;
+    }
+  }
+
+  async function loadStreamingRegistry() {
+    streamingError = '';
+    try {
+      const response = await listTopologies();
+      topologies = response.data;
+      const nextTopologyId =
+        topologies.find((topology) => topology.id === selectedTopologyId)?.id ??
+        topologies[0]?.id ??
+        '';
+      await loadTopologyRuntime(nextTopologyId);
+    } catch (cause) {
+      console.error('Failed to load streaming topologies', cause);
+      streamingError = cause instanceof Error ? cause.message : 'Failed to load streaming topologies';
+      topologies = [];
+      topologyRuntime = null;
+      selectedTopologyId = '';
+    }
+  }
+
+  async function runStreamingTopology(topologyId: string) {
+    if (!topologyId) return;
+    runningTopologyId = topologyId;
+    streamingError = '';
+    try {
+      await runTopology(topologyId);
+      notifications.success('Streaming topology run started');
+      await loadTopologyRuntime(topologyId);
+    } catch (cause) {
+      streamingError = cause instanceof Error ? cause.message : 'Failed to run topology';
+      notifications.error(streamingError);
+    } finally {
+      runningTopologyId = '';
+    }
+  }
+
+  async function requestCopilotPlan() {
+    if (!copilotQuestion.trim()) {
+      notifications.error('Describe what you want the builder to generate first.');
+      return;
+    }
+
+    copilotLoading = true;
+    copilotError = '';
+    try {
+      copilotResponse = await askCopilot({
+        question: copilotQuestion.trim(),
+        dataset_ids: pipelineDatasetContext(),
+        include_sql: true,
+        include_pipeline_plan: true,
+      });
+      notifications.success('Builder copilot updated the draft guidance');
+    } catch (cause) {
+      copilotError = cause instanceof Error ? cause.message : 'Failed to query builder copilot';
+      notifications.error(copilotError);
+    } finally {
+      copilotLoading = false;
+    }
+  }
+
+  function applySuggestedSqlNode() {
+    if (!copilotResponse?.suggested_sql) return;
+    const node = createNode('sql');
+    node.label = 'AI SQL draft';
+    node.config = { ...node.config, sql: copilotResponse.suggested_sql };
+    draft = { ...draft, nodes: [...draft.nodes, node] };
+    notifications.success('AI SQL node added to the pipeline draft');
+  }
+
+  function applyRemoteTemplate(transformType: 'spark' | 'external') {
+    const node = createNode(transformType);
+    const suggestion = copilotResponse?.pipeline_suggestions[0];
+    if (suggestion) {
+      node.label = suggestion.length > 48 ? `${suggestion.slice(0, 45)}...` : suggestion;
+    }
+    draft = { ...draft, nodes: [...draft.nodes, node] };
+    notifications.success(`${transformType === 'spark' ? 'Spark' : 'External compute'} node added`);
   }
 
   async function loadRuns() {
@@ -214,7 +398,7 @@
     loading = true;
     error = '';
     try {
-      await loadRegistry();
+      await Promise.all([loadRegistry(), loadStreamingRegistry()]);
       if (selectedPipelineId) {
         await selectPipeline(selectedPipelineId);
       } else if (pipelines.length > 0) {
@@ -431,7 +615,7 @@
   <div class="flex items-center justify-between">
     <div>
       <h1 class="text-2xl font-bold">Pipeline Enhancements</h1>
-      <p class="mt-1 text-sm text-gray-500">Author SQL, Python, and WASM transforms, schedule runs, track column lineage, and rerun only failed slices.</p>
+      <p class="mt-1 text-sm text-gray-500">Author hybrid batch and streaming flows with SQL, Python, Spark, external compute, in-builder AI assist, lineage, and rerun controls.</p>
     </div>
     <div class="flex gap-2">
       <button type="button" onclick={newPipeline} class="rounded-xl border border-slate-200 px-4 py-2 hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">New pipeline</button>
@@ -572,133 +756,344 @@
         <div class="flex items-center justify-between">
           <div>
             <div class="text-xs uppercase tracking-[0.22em] text-gray-400">Pipeline builder</div>
-            <div class="mt-1 text-sm text-gray-500">Mix SQL, Python, WASM, and passthrough steps, then wire dataset inputs, branches, and lineage mappings.</div>
+            <div class="mt-1 text-sm text-gray-500">Author hybrid batch and streaming orchestration with remote Spark, external compute, in-builder AI assist, and shared operational context.</div>
           </div>
-          <div class="flex gap-2">
+          <div class="flex flex-wrap gap-2">
+            <button type="button" onclick={() => canvasMode = 'hybrid'} class={`rounded-xl px-3 py-2 text-sm ${canvasMode === 'hybrid' ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'border border-slate-200 hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800'}`}>Hybrid view</button>
+            <button type="button" onclick={() => canvasMode = 'batch'} class={`rounded-xl px-3 py-2 text-sm ${canvasMode === 'batch' ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'border border-slate-200 hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800'}`}>Batch only</button>
             <button type="button" onclick={() => addNode('sql')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">+ SQL</button>
             <button type="button" onclick={() => addNode('python')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">+ Python</button>
+            <button type="button" onclick={() => addNode('spark')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">+ Spark</button>
+            <button type="button" onclick={() => addNode('external')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">+ External</button>
             <button type="button" onclick={() => addNode('wasm')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">+ WASM</button>
             <button type="button" onclick={() => addNode('passthrough')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">+ Passthrough</button>
           </div>
         </div>
 
-        <div class="mt-5 space-y-4">
-          {#each draft.nodes as node, index (node.id)}
-            <div class="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 shadow-sm dark:border-gray-700 dark:bg-gray-950/40">
-              <div class="flex items-center justify-between gap-3">
-                <div class="flex items-center gap-3">
-                  <span class="rounded-full bg-white px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-600 dark:bg-gray-900 dark:text-gray-300">{node.transform_type}</span>
-                  <input aria-label="Node label" value={node.label} oninput={(event) => setNodeField(node.id, 'label', (event.currentTarget as HTMLInputElement).value)} class="rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900" />
-                </div>
-                <div class="flex items-center gap-2">
-                  <select aria-label="Transform type" value={node.transform_type} oninput={(event) => setNodeField(node.id, 'transform_type', (event.currentTarget as HTMLSelectElement).value)} class="rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900">
-                    <option value="sql">SQL</option>
-                    <option value="python">Python</option>
-                    <option value="wasm">WASM</option>
-                    <option value="passthrough">Passthrough</option>
-                  </select>
-                  <button type="button" onclick={() => removeNode(node.id)} class="text-sm text-rose-600 hover:underline">Remove</button>
-                </div>
-              </div>
+        <div class="mt-5 grid gap-3 md:grid-cols-4">
+          <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-gray-700 dark:bg-gray-950/40">
+            <div class="text-xs uppercase tracking-[0.22em] text-gray-400">Batch nodes</div>
+            <div class="mt-2 text-2xl font-semibold">{builderInsights().batchNodes}</div>
+            <div class="mt-1 text-xs text-gray-500">Active DAG steps in this draft.</div>
+          </div>
+          <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-gray-700 dark:bg-gray-950/40">
+            <div class="text-xs uppercase tracking-[0.22em] text-gray-400">Outputs</div>
+            <div class="mt-2 text-2xl font-semibold">{builderInsights().outputDatasets}</div>
+            <div class="mt-1 text-xs text-gray-500">Datasets materialized from the flow.</div>
+          </div>
+          <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-gray-700 dark:bg-gray-950/40">
+            <div class="text-xs uppercase tracking-[0.22em] text-gray-400">Streaming topologies</div>
+            <div class="mt-2 text-2xl font-semibold">{builderInsights().topologyCount}</div>
+            <div class="mt-1 text-xs text-gray-500">Companion topologies visible in the same builder.</div>
+          </div>
+          <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-gray-700 dark:bg-gray-950/40">
+            <div class="text-xs uppercase tracking-[0.22em] text-gray-400">Streaming edges</div>
+            <div class="mt-2 text-2xl font-semibold">{builderInsights().streamingEdges}</div>
+            <div class="mt-1 text-xs text-gray-500">Edges on the selected topology runtime view.</div>
+          </div>
+        </div>
 
-              <div class="mt-4 grid gap-4 xl:grid-cols-[0.9fr,1.1fr]">
-                <div class="space-y-4">
-                  <div>
-                    <div class="mb-2 text-sm font-medium">Input datasets</div>
-                    <div class="grid gap-2 md:grid-cols-2">
-                      {#each datasets as dataset (dataset.id)}
-                        <label class="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-gray-700">
-                          <input type="checkbox" checked={node.input_dataset_ids.includes(dataset.id)} onchange={(event) => toggleInputDataset(node.id, dataset.id, (event.currentTarget as HTMLInputElement).checked)} />
-                          <span>{dataset.name}</span>
-                        </label>
-                      {/each}
-                    </div>
+        <div class="mt-5 grid gap-5 xl:grid-cols-[1.25fr,0.75fr]">
+          <div class="space-y-4">
+            {#each draft.nodes as node, index (node.id)}
+              <div class="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 shadow-sm dark:border-gray-700 dark:bg-gray-950/40">
+                <div class="flex items-center justify-between gap-3">
+                  <div class="flex items-center gap-3">
+                    <span class="rounded-full bg-white px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-600 dark:bg-gray-900 dark:text-gray-300">{node.transform_type}</span>
+                    <input aria-label="Node label" value={node.label} oninput={(event) => setNodeField(node.id, 'label', (event.currentTarget as HTMLInputElement).value)} class="rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900" />
                   </div>
-
-                  <div>
-                    <label for={`output-dataset-${node.id}`} class="mb-1 block text-sm font-medium">Output dataset</label>
-                    <select id={`output-dataset-${node.id}`} value={node.output_dataset_id ?? ''} oninput={(event) => setNodeOutputDataset(node.id, (event.currentTarget as HTMLSelectElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
-                      <option value="">Select output dataset</option>
-                      {#each datasets as dataset (dataset.id)}
-                        <option value={dataset.id}>{dataset.name}</option>
-                      {/each}
+                  <div class="flex items-center gap-2">
+                    <select aria-label="Transform type" value={node.transform_type} oninput={(event) => setNodeField(node.id, 'transform_type', (event.currentTarget as HTMLSelectElement).value)} class="rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900">
+                      <option value="sql">SQL</option>
+                      <option value="python">Python</option>
+                      <option value="spark">Spark</option>
+                      <option value="external">External</option>
+                      <option value="wasm">WASM</option>
+                      <option value="passthrough">Passthrough</option>
                     </select>
+                    <button type="button" onclick={() => removeNode(node.id)} class="text-sm text-rose-600 hover:underline">Remove</button>
                   </div>
+                </div>
 
-                  <div class="grid gap-4 md:grid-cols-2">
+                <div class="mt-4 grid gap-4 xl:grid-cols-[0.9fr,1.1fr]">
+                  <div class="space-y-4">
                     <div>
-                      <label for={`input-branch-${node.id}`} class="mb-1 block text-sm font-medium">Input branch</label>
-                      <input id={`input-branch-${node.id}`} value={branchValue(node, 'input_branch')} oninput={(event) => setNodeConfig(node.id, 'input_branch', (event.currentTarget as HTMLInputElement).value)} placeholder="main" class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
-                    </div>
-                    <div>
-                      <label for={`output-branch-${node.id}`} class="mb-1 block text-sm font-medium">Output branch</label>
-                      <input id={`output-branch-${node.id}`} value={branchValue(node, 'output_branch')} oninput={(event) => setNodeConfig(node.id, 'output_branch', (event.currentTarget as HTMLInputElement).value)} placeholder="feature-branch" class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
-                    </div>
-                  </div>
-
-                  {#if index > 0}
-                    <div>
-                      <div class="mb-2 text-sm font-medium">Dependencies</div>
-                      <div class="flex flex-wrap gap-2">
-                        {#each draft.nodes.filter((candidate) => candidate.id !== node.id) as dependency (dependency.id)}
-                          <button type="button" onclick={() => toggleDependency(node.id, dependency.id)} class={`rounded-full border px-3 py-1 text-xs ${node.depends_on.includes(dependency.id) ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 dark:border-gray-700'}`}>
-                            {dependency.label}
-                          </button>
+                      <div class="mb-2 text-sm font-medium">Input datasets</div>
+                      <div class="grid gap-2 md:grid-cols-2">
+                        {#each datasets as dataset (dataset.id)}
+                          <label class="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-gray-700">
+                            <input type="checkbox" checked={node.input_dataset_ids.includes(dataset.id)} onchange={(event) => toggleInputDataset(node.id, dataset.id, (event.currentTarget as HTMLInputElement).checked)} />
+                            <span>{dataset.name}</span>
+                          </label>
                         {/each}
                       </div>
                     </div>
-                  {/if}
-                </div>
 
-                <div class="space-y-4">
-                  <div>
-                    <label for={`node-code-${node.id}`} class="mb-1 block text-sm font-medium">{node.transform_type === 'sql' ? 'SQL' : node.transform_type === 'python' ? 'Python source' : node.transform_type === 'wasm' ? 'WASM module' : 'Passthrough config'}</label>
-                    {#if node.transform_type === 'passthrough'}
-                      <input id={`node-code-${node.id}`} value={identityColumns(node)} oninput={(event) => setIdentityColumns(node.id, (event.currentTarget as HTMLInputElement).value)} placeholder="customer_id, order_id" class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
-                    {:else}
-                      <textarea id={`node-code-${node.id}`} rows="8" value={nodeCode(node)} oninput={(event) => setNodeConfig(node.id, node.transform_type === 'sql' ? 'sql' : node.transform_type === 'python' ? 'source' : 'module', (event.currentTarget as HTMLTextAreaElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-sm dark:border-gray-700 dark:bg-gray-900"></textarea>
+                    <div>
+                      <label for={`output-dataset-${node.id}`} class="mb-1 block text-sm font-medium">Output dataset</label>
+                      <select id={`output-dataset-${node.id}`} value={node.output_dataset_id ?? ''} oninput={(event) => setNodeOutputDataset(node.id, (event.currentTarget as HTMLSelectElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
+                        <option value="">Select output dataset</option>
+                        {#each datasets as dataset (dataset.id)}
+                          <option value={dataset.id}>{dataset.name}</option>
+                        {/each}
+                      </select>
+                    </div>
+
+                    <div class="grid gap-4 md:grid-cols-2">
+                      <div>
+                        <label for={`input-branch-${node.id}`} class="mb-1 block text-sm font-medium">Input branch</label>
+                        <input id={`input-branch-${node.id}`} value={branchValue(node, 'input_branch')} oninput={(event) => setNodeConfig(node.id, 'input_branch', (event.currentTarget as HTMLInputElement).value)} placeholder="main" class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
+                      </div>
+                      <div>
+                        <label for={`output-branch-${node.id}`} class="mb-1 block text-sm font-medium">Output branch</label>
+                        <input id={`output-branch-${node.id}`} value={branchValue(node, 'output_branch')} oninput={(event) => setNodeConfig(node.id, 'output_branch', (event.currentTarget as HTMLInputElement).value)} placeholder="feature-branch" class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
+                      </div>
+                    </div>
+
+                    {#if index > 0}
+                      <div>
+                        <div class="mb-2 text-sm font-medium">Dependencies</div>
+                        <div class="flex flex-wrap gap-2">
+                          {#each draft.nodes.filter((candidate) => candidate.id !== node.id) as dependency (dependency.id)}
+                            <button type="button" onclick={() => toggleDependency(node.id, dependency.id)} class={`rounded-full border px-3 py-1 text-xs ${node.depends_on.includes(dependency.id) ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 dark:border-gray-700'}`}>
+                              {dependency.label}
+                            </button>
+                          {/each}
+                        </div>
+                      </div>
                     {/if}
                   </div>
 
-                  {#if node.transform_type === 'wasm'}
+                  <div class="space-y-4">
                     <div>
-                      <label for={`wasm-function-${node.id}`} class="mb-1 block text-sm font-medium">Exported function</label>
-                      <input id={`wasm-function-${node.id}`} value={wasmFunction(node)} oninput={(event) => setNodeConfig(node.id, 'function', (event.currentTarget as HTMLInputElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
+                      <label for={`node-code-${node.id}`} class="mb-1 block text-sm font-medium">{nodeCodeLabel(node)}</label>
+                      {#if node.transform_type === 'passthrough'}
+                        <input id={`node-code-${node.id}`} value={identityColumns(node)} oninput={(event) => setIdentityColumns(node.id, (event.currentTarget as HTMLInputElement).value)} placeholder="customer_id, order_id" class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
+                      {:else}
+                        <textarea id={`node-code-${node.id}`} rows="8" value={nodeCode(node)} oninput={(event) => setNodeConfig(node.id, nodeCodeKey(node), (event.currentTarget as HTMLTextAreaElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-sm dark:border-gray-700 dark:bg-gray-900"></textarea>
+                      {/if}
                     </div>
-                  {/if}
 
-                  <div class="rounded-xl border border-slate-200 p-4 dark:border-gray-700">
-                    <div class="flex items-center justify-between">
-                      <div class="text-sm font-medium">Column mappings</div>
-                      <button type="button" onclick={() => addColumnMapping(node.id)} class="text-xs text-blue-600 hover:underline">Add mapping</button>
-                    </div>
-                    <div class="mt-3 space-y-3">
-                      {#each columnMappings(node) as mapping, mappingIndex}
-                        <div class="rounded-xl border border-slate-200 p-3 dark:border-gray-700">
-                          <div class="grid gap-3 md:grid-cols-3">
-                            <select aria-label="Source dataset" value={mapping.source_dataset_id ?? ''} oninput={(event) => updateColumnMapping(node.id, mappingIndex, 'source_dataset_id', (event.currentTarget as HTMLSelectElement).value)} class="rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900">
-                              <option value="">Auto source dataset</option>
-                              {#each datasets as dataset (dataset.id)}
-                                <option value={dataset.id}>{dataset.name}</option>
-                              {/each}
-                            </select>
-                            <input aria-label="Source column" value={mapping.source_column} oninput={(event) => updateColumnMapping(node.id, mappingIndex, 'source_column', (event.currentTarget as HTMLInputElement).value)} placeholder="source column" class="rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900" />
-                            <input aria-label="Target column" value={mapping.target_column} oninput={(event) => updateColumnMapping(node.id, mappingIndex, 'target_column', (event.currentTarget as HTMLInputElement).value)} placeholder="target column" class="rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900" />
+                    {#if node.transform_type === 'wasm'}
+                      <div>
+                        <label for={`wasm-function-${node.id}`} class="mb-1 block text-sm font-medium">Exported function</label>
+                        <input id={`wasm-function-${node.id}`} value={wasmFunction(node)} oninput={(event) => setNodeConfig(node.id, 'function', (event.currentTarget as HTMLInputElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
+                      </div>
+                    {/if}
+
+                    {#if node.transform_type === 'spark' || node.transform_type === 'external'}
+                      <div class="rounded-xl border border-slate-200 p-4 dark:border-gray-700">
+                        <div class="grid gap-4 md:grid-cols-2">
+                          <div>
+                            <label for={`endpoint-${node.id}`} class="mb-1 block text-sm font-medium">Remote endpoint</label>
+                            <input id={`endpoint-${node.id}`} value={stringConfig(node, 'endpoint')} oninput={(event) => setNodeConfig(node.id, 'endpoint', (event.currentTarget as HTMLInputElement).value)} placeholder="http://compute.local/jobs/run" class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
                           </div>
-                          <div class="mt-2 flex justify-end">
-                            <button type="button" onclick={() => removeColumnMapping(node.id, mappingIndex)} class="text-xs text-rose-600 hover:underline">Remove</button>
+                          <div>
+                            <label for={`job-type-${node.id}`} class="mb-1 block text-sm font-medium">{node.transform_type === 'spark' ? 'Job type' : 'External job type'}</label>
+                            <input id={`job-type-${node.id}`} value={stringConfig(node, 'job_type', node.transform_type === 'spark' ? 'spark-batch' : 'external-job')} oninput={(event) => setNodeConfig(node.id, 'job_type', (event.currentTarget as HTMLInputElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
+                          </div>
+                          <div>
+                            <label for={`auth-mode-${node.id}`} class="mb-1 block text-sm font-medium">Auth mode</label>
+                            <select id={`auth-mode-${node.id}`} value={stringConfig(node, 'auth_mode', node.transform_type === 'spark' ? 'service_jwt' : 'none')} oninput={(event) => setNodeConfig(node.id, 'auth_mode', (event.currentTarget as HTMLSelectElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
+                              <option value="none">None</option>
+                              <option value="service_jwt">Service JWT</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label for={`profile-${node.id}`} class="mb-1 block text-sm font-medium">{node.transform_type === 'spark' ? 'Cluster profile' : 'Entrypoint'}</label>
+                            <input id={`profile-${node.id}`} value={stringConfig(node, node.transform_type === 'spark' ? 'cluster_profile' : 'entrypoint', node.transform_type === 'spark' ? 'shared' : 'main')} oninput={(event) => setNodeConfig(node.id, node.transform_type === 'spark' ? 'cluster_profile' : 'entrypoint', (event.currentTarget as HTMLInputElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
                           </div>
                         </div>
-                      {/each}
-                      {#if columnMappings(node).length === 0}
-                        <div class="text-xs text-gray-500">No explicit column mappings yet.</div>
-                      {/if}
+                        <div class="mt-3 rounded-xl bg-slate-100 px-3 py-3 text-xs text-slate-600 dark:bg-slate-950/60 dark:text-slate-300">
+                          Remote compute contract: the builder posts `job_type`, full `config`, prepared input rows, and the optional `output_dataset_id`. The remote runner should return JSON with `status`, optional `output`, and optional `result_rows`.
+                        </div>
+                      </div>
+                    {/if}
+
+                    <div class="rounded-xl border border-slate-200 p-4 dark:border-gray-700">
+                      <div class="flex items-center justify-between">
+                        <div class="text-sm font-medium">Column mappings</div>
+                        <button type="button" onclick={() => addColumnMapping(node.id)} class="text-xs text-blue-600 hover:underline">Add mapping</button>
+                      </div>
+                      <div class="mt-3 space-y-3">
+                        {#each columnMappings(node) as mapping, mappingIndex}
+                          <div class="rounded-xl border border-slate-200 p-3 dark:border-gray-700">
+                            <div class="grid gap-3 md:grid-cols-3">
+                              <select aria-label="Source dataset" value={mapping.source_dataset_id ?? ''} oninput={(event) => updateColumnMapping(node.id, mappingIndex, 'source_dataset_id', (event.currentTarget as HTMLSelectElement).value)} class="rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900">
+                                <option value="">Auto source dataset</option>
+                                {#each datasets as dataset (dataset.id)}
+                                  <option value={dataset.id}>{dataset.name}</option>
+                                {/each}
+                              </select>
+                              <input aria-label="Source column" value={mapping.source_column} oninput={(event) => updateColumnMapping(node.id, mappingIndex, 'source_column', (event.currentTarget as HTMLInputElement).value)} placeholder="source column" class="rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900" />
+                              <input aria-label="Target column" value={mapping.target_column} oninput={(event) => updateColumnMapping(node.id, mappingIndex, 'target_column', (event.currentTarget as HTMLInputElement).value)} placeholder="target column" class="rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900" />
+                            </div>
+                            <div class="mt-2 flex justify-end">
+                              <button type="button" onclick={() => removeColumnMapping(node.id, mappingIndex)} class="text-xs text-rose-600 hover:underline">Remove</button>
+                            </div>
+                          </div>
+                        {/each}
+                        {#if columnMappings(node).length === 0}
+                          <div class="text-xs text-gray-500">No explicit column mappings yet.</div>
+                        {/if}
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
+            {/each}
+          </div>
+
+          {#if canvasMode === 'hybrid'}
+            <div class="space-y-4">
+              <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-gray-700 dark:bg-gray-950/40">
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <div class="text-xs uppercase tracking-[0.22em] text-gray-400">AI builder assist</div>
+                    <div class="mt-1 text-sm text-gray-500">Generate starter SQL and node ideas from the datasets already wired into the draft.</div>
+                  </div>
+                  <button type="button" onclick={() => void requestCopilotPlan()} disabled={copilotLoading} class="rounded-xl bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-50 dark:bg-white dark:text-slate-900">
+                    {copilotLoading ? 'Thinking...' : 'Ask Copilot'}
+                  </button>
+                </div>
+
+                <textarea rows="5" bind:value={copilotQuestion} class="mt-4 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm dark:border-gray-700 dark:bg-gray-900"></textarea>
+
+                <div class="mt-3 text-xs text-gray-500">Dataset context: {pipelineDatasetContext().length} linked input dataset(s).</div>
+
+                {#if copilotError}
+                  <div class="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-300">{copilotError}</div>
+                {/if}
+
+                {#if copilotResponse}
+                  <div class="mt-4 space-y-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
+                    <div class="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                      <span class="rounded-full bg-slate-100 px-2.5 py-1 dark:bg-gray-800">{copilotResponse.provider_name}</span>
+                      <span class="rounded-full bg-slate-100 px-2.5 py-1 dark:bg-gray-800">Cache {copilotResponse.cache.hit ? 'hit' : 'miss'}</span>
+                    </div>
+                    <p class="text-sm leading-6 text-slate-700 dark:text-slate-200">{copilotResponse.answer}</p>
+                    {#if copilotResponse.suggested_sql}
+                      <div>
+                        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-gray-400">Suggested SQL</div>
+                        <pre class="mt-2 overflow-x-auto rounded-2xl bg-slate-950 px-4 py-3 text-xs text-cyan-100">{copilotResponse.suggested_sql}</pre>
+                        <button type="button" onclick={applySuggestedSqlNode} class="mt-3 rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">Add SQL node</button>
+                      </div>
+                    {/if}
+                    {#if copilotResponse.pipeline_suggestions.length > 0}
+                      <div>
+                        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-gray-400">Suggested nodes</div>
+                        <div class="mt-2 space-y-2">
+                          {#each copilotResponse.pipeline_suggestions as suggestion}
+                            <div class="rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-gray-700">{suggestion}</div>
+                          {/each}
+                        </div>
+                        <div class="mt-3 flex gap-2">
+                          <button type="button" onclick={() => applyRemoteTemplate('spark')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">Add Spark node</button>
+                          <button type="button" onclick={() => applyRemoteTemplate('external')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">Add External node</button>
+                        </div>
+                      </div>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+
+              <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-gray-700 dark:bg-gray-950/40">
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <div class="text-xs uppercase tracking-[0.22em] text-gray-400">Streaming companion</div>
+                    <div class="mt-1 text-sm text-gray-500">Inspect and run real stream topologies from the same builder lane.</div>
+                  </div>
+                  <button type="button" onclick={() => void loadStreamingRegistry()} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">Refresh</button>
+                </div>
+
+                {#if streamingError}
+                  <div class="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-300">{streamingError}</div>
+                {/if}
+
+                {#if topologies.length === 0}
+                  <div class="mt-4 rounded-xl border border-dashed border-slate-300 px-4 py-8 text-sm text-gray-500 dark:border-gray-700">No streaming topologies yet. Open the streaming area to create one, then come back here for hybrid operations.</div>
+                {:else}
+                  <div class="mt-4 grid gap-4 xl:grid-cols-[0.9fr,1.1fr]">
+                    <div class="space-y-2">
+                      {#each topologies as topology (topology.id)}
+                        <button type="button" onclick={() => void loadTopologyRuntime(topology.id)} class={`w-full rounded-xl border px-3 py-3 text-left ${selectedTopologyId === topology.id ? 'border-sky-500 bg-sky-50 dark:border-sky-400 dark:bg-sky-950/30' : 'border-slate-200 bg-white hover:bg-slate-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800'}`}>
+                          <div class="flex items-center justify-between gap-3">
+                            <div>
+                              <div class="font-medium">{topology.name}</div>
+                              <div class="mt-1 text-xs text-gray-500">{topology.description || 'No description'}</div>
+                            </div>
+                            <span class={`rounded-full px-2.5 py-1 text-xs font-medium ${topologyStatusBadge(topology.status)}`}>{topology.status}</span>
+                          </div>
+                          <div class="mt-2 flex flex-wrap gap-2 text-xs text-gray-500">
+                            <span>{topology.nodes.length} nodes</span>
+                            <span>{topology.edges.length} edges</span>
+                            <span>{topology.source_stream_ids.length} streams</span>
+                          </div>
+                        </button>
+                      {/each}
+                    </div>
+
+                    <div class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
+                      {#if loadingTopologyRuntime}
+                        <div class="py-10 text-center text-sm text-gray-500">Loading runtime...</div>
+                      {:else if topologyRuntime}
+                        <div class="space-y-4">
+                          <div class="flex items-center justify-between gap-3">
+                            <div>
+                              <div class="font-medium">{topologyRuntime.topology.name}</div>
+                              <div class="mt-1 text-xs text-gray-500">{topologyRuntime.topology.state_backend} state backend</div>
+                            </div>
+                            <button type="button" onclick={() => void runStreamingTopology(topologyRuntime?.topology.id ?? '')} disabled={runningTopologyId === (topologyRuntime?.topology.id ?? '')} class="rounded-xl bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-50 dark:bg-white dark:text-slate-900">
+                              {runningTopologyId === (topologyRuntime?.topology.id ?? '') ? 'Running...' : 'Run topology'}
+                            </button>
+                          </div>
+
+                          <div class="grid gap-3 md:grid-cols-2">
+                            <div class="rounded-xl border border-slate-200 p-3 dark:border-gray-700">
+                              <div class="text-xs uppercase tracking-[0.22em] text-gray-400">Latest run</div>
+                              <div class="mt-2 text-sm font-medium">{topologyRuntime.latest_run?.status ?? 'No runs yet'}</div>
+                              <div class="mt-1 text-xs text-gray-500">{topologyRuntime.latest_run ? `${topologyRuntime.latest_run.metrics.input_events} input events` : 'Trigger the topology to capture runtime metrics.'}</div>
+                            </div>
+                            <div class="rounded-xl border border-slate-200 p-3 dark:border-gray-700">
+                              <div class="text-xs uppercase tracking-[0.22em] text-gray-400">Latency</div>
+                              <div class="mt-2 text-sm font-medium">{topologyRuntime.latest_run?.metrics.avg_latency_ms ?? 0} ms avg</div>
+                              <div class="mt-1 text-xs text-gray-500">{topologyRuntime.latest_run?.metrics.throughput_per_second ?? 0} events/s</div>
+                            </div>
+                          </div>
+
+                          <div class="rounded-xl border border-slate-200 p-3 dark:border-gray-700">
+                            <div class="text-xs uppercase tracking-[0.22em] text-gray-400">Live graph shape</div>
+                            <div class="mt-2 grid gap-2 md:grid-cols-3 text-sm">
+                              <div>{topologyRuntime.topology.nodes.length} nodes</div>
+                              <div>{topologyRuntime.topology.edges.length} edges</div>
+                              <div>{topologyRuntime.connector_statuses.length} connectors</div>
+                            </div>
+                          </div>
+
+                          <div class="rounded-xl border border-slate-200 p-3 dark:border-gray-700">
+                            <div class="text-xs uppercase tracking-[0.22em] text-gray-400">Recent events</div>
+                            <div class="mt-2 space-y-2">
+                              {#each topologyRuntime.latest_events.slice(0, 3) as event (event.id)}
+                                <div class="rounded-xl bg-slate-50 px-3 py-2 text-xs dark:bg-gray-950/40">
+                                  <div class="font-medium">{event.stream_name}</div>
+                                  <div class="mt-1 text-gray-500">{event.connector_type} · {new Date(event.processing_time).toLocaleString()}</div>
+                                </div>
+                              {/each}
+                              {#if topologyRuntime.latest_events.length === 0}
+                                <div class="text-xs text-gray-500">No live-tail events captured yet.</div>
+                              {/if}
+                            </div>
+                          </div>
+                        </div>
+                      {:else}
+                        <div class="py-10 text-center text-sm text-gray-500">Select a streaming topology to load its runtime details.</div>
+                      {/if}
+                    </div>
+                  </div>
+                {/if}
+              </div>
             </div>
-          {/each}
+          {/if}
         </div>
       </div>
 

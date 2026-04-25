@@ -1,7 +1,7 @@
 use chrono::{Duration, Utc};
 
 use crate::models::{
-    install::InstallRecord,
+    install::{InstallActivation, InstallRecord},
     listing::ListingDefinition,
     package::{DependencyRequirement, PackageVersion},
 };
@@ -18,19 +18,22 @@ pub fn latest_version(
 }
 
 pub fn install_preview(
+    install_id: uuid::Uuid,
     listing: &ListingDefinition,
     version: &PackageVersion,
     workspace_name: &str,
+    activation: InstallActivation,
 ) -> InstallRecord {
     let now = Utc::now();
     InstallRecord {
-        id: uuid::Uuid::now_v7(),
+        id: install_id,
         listing_id: listing.id,
         listing_name: listing.name.clone(),
         version: version.version.clone(),
         workspace_name: workspace_name.to_string(),
         status: "installed".to_string(),
         dependency_plan: version.dependencies.clone(),
+        activation,
         installed_at: now,
         ready_at: Some(now + Duration::minutes(2)),
     }

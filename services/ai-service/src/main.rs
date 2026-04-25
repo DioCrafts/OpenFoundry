@@ -17,6 +17,7 @@ use tracing_subscriber::EnvFilter;
 pub struct AppState {
     pub db: sqlx::PgPool,
     pub jwt_config: JwtConfig,
+    pub http_client: reqwest::Client,
 }
 
 impl FromRef<AppState> for JwtConfig {
@@ -45,9 +46,14 @@ async fn main() {
         .expect("failed to run migrations");
 
     let jwt_config = JwtConfig::new(&cfg.jwt_secret);
+    let http_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .expect("failed to build HTTP client");
     let state = AppState {
         db: pool,
         jwt_config: jwt_config.clone(),
+        http_client,
     };
 
     let public = Router::new().route("/health", get(|| async { "ok" }));

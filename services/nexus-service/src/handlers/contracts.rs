@@ -6,6 +6,7 @@ use chrono::Utc;
 
 use crate::{
     AppState,
+    domain::governance,
     handlers::{
         ServiceResult, bad_request, db_error, internal_error, load_contract_row, load_contracts,
         load_peers, not_found,
@@ -36,9 +37,23 @@ pub async fn create_contract(
     let peers = load_peers(&state.db)
         .await
         .map_err(|cause| db_error(&cause))?;
-    if !peers.iter().any(|peer| peer.id == request.peer_id) {
-        return Err(bad_request("peer does not exist"));
-    }
+    let peer = peers
+        .iter()
+        .find(|peer| peer.id == request.peer_id)
+        .ok_or_else(|| bad_request("peer does not exist"))?;
+    governance::validate_contract(
+        peer,
+        &request.name,
+        &request.query_template,
+        &request.allowed_purposes,
+        request.max_rows_per_query,
+        &request.replication_mode,
+        request.retention_days,
+        &request.status,
+        request.expires_at,
+        Utc::now(),
+    )
+    .map_err(bad_request)?;
 
     let id = uuid::Uuid::now_v7();
     let now = Utc::now();
@@ -99,6 +114,42 @@ pub async fn update_contract(
     let current =
         SharingContract::try_from(current).map_err(|cause| internal_error(cause.to_string()))?;
     let now = Utc::now();
+    let peer = load_peers(&state.db)
+        .await
+        .map_err(|cause| db_error(&cause))?
+        .into_iter()
+        .find(|peer| peer.id == current.peer_id)
+        .ok_or_else(|| bad_request("contract peer does not exist"))?;
+    let proposed_name = request.name.clone().unwrap_or_else(|| current.name.clone());
+    let proposed_query_template = request
+        .query_template
+        .clone()
+        .unwrap_or_else(|| current.query_template.clone());
+    let proposed_allowed_purposes = request
+        .allowed_purposes
+        .clone()
+        .unwrap_or_else(|| current.allowed_purposes.clone());
+    let proposed_max_rows = request.max_rows_per_query.unwrap_or(current.max_rows_per_query);
+    let proposed_replication_mode = request
+        .replication_mode
+        .clone()
+        .unwrap_or_else(|| current.replication_mode.clone());
+    let proposed_retention_days = request.retention_days.unwrap_or(current.retention_days);
+    let proposed_status = request.status.clone().unwrap_or_else(|| current.status.clone());
+    let proposed_expires_at = request.expires_at.unwrap_or(current.expires_at);
+    governance::validate_contract(
+        &peer,
+        &proposed_name,
+        &proposed_query_template,
+        &proposed_allowed_purposes,
+        proposed_max_rows,
+        &proposed_replication_mode,
+        proposed_retention_days,
+        &proposed_status,
+        proposed_expires_at,
+        now,
+    )
+    .map_err(bad_request)?;
     let allowed_purposes = serde_json::to_value(
         request
             .allowed_purposes
@@ -113,7 +164,7 @@ pub async fn update_contract(
             .unwrap_or(current.data_classes.clone()),
     )
     .map_err(|cause| internal_error(cause.to_string()))?;
-    let status = request.status.clone().unwrap_or(current.status.clone());
+    let status = proposed_status;
     let signed_at = if status == "active" {
         current.signed_at.or(Some(now))
     } else {

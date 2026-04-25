@@ -1,0 +1,36 @@
+{{- if .Values.global.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "open-foundry.fullname" (dict "root" . "serviceName" "gateway") }}
+  namespace: {{ include "open-foundry.namespace" (dict "root" .) }}
+  labels:
+{{ include "open-foundry.commonLabels" (dict "root" . "serviceName" "gateway") | nindent 4 }}
+{{- with .Values.global.ingress.annotations }}
+  annotations:
+{{ toYaml . | indent 4 }}
+{{- end }}
+spec:
+{{- if .Values.global.ingress.className }}
+  ingressClassName: {{ .Values.global.ingress.className }}
+{{- end }}
+{{- with .Values.global.ingress.tls }}
+  tls:
+{{ toYaml . | indent 4 }}
+{{- end }}
+  rules:
+{{- range .Values.global.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+{{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ include "open-foundry.fullname" (dict "root" $ "serviceName" "gateway") }}
+                port:
+                  number: {{ (index $.Values.services "gateway").port }}
+{{- end }}
+{{- end }}
+{{- end }}

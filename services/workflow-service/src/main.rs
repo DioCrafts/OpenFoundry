@@ -16,6 +16,7 @@ pub struct AppState {
     pub db: sqlx::PgPool,
     pub jwt_config: JwtConfig,
     pub notification_service_url: String,
+    pub pipeline_service_url: String,
     pub http_client: reqwest::Client,
 }
 
@@ -54,6 +55,7 @@ async fn main() {
         db: pool,
         jwt_config: jwt_config.clone(),
         notification_service_url: cfg.notification_service_url.clone(),
+        pipeline_service_url: cfg.pipeline_service_url.clone(),
         http_client,
     };
 
@@ -70,6 +72,10 @@ async fn main() {
 
     let public = Router::new()
         .route("/health", get(|| async { "ok" }))
+        .route(
+            "/internal/workflows/{id}/runs/lineage",
+            post(handlers::execute::start_internal_lineage_run),
+        )
         .route(
             "/api/v1/workflows/webhooks/{id}",
             post(handlers::execute::trigger_webhook),

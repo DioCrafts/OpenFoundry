@@ -12,7 +12,8 @@ use crate::{
     domain::executor,
     handlers::crud::load_workflow,
     models::{
-        execution::StartRunRequest, execution::TriggerEventRequest, workflow::WorkflowDefinition,
+        execution::InternalLineageRunRequest, execution::StartRunRequest,
+        execution::TriggerEventRequest, workflow::WorkflowDefinition,
     },
 };
 
@@ -163,5 +164,36 @@ pub async fn run_due_cron_workflows(State(state): State<AppState>) -> impl IntoR
             Json(json!({ "error": error })),
         )
             .into_response(),
+    }
+}
+
+pub async fn start_internal_lineage_run(
+    State(state): State<AppState>,
+    Path(workflow_id): Path<Uuid>,
+    Json(body): Json<InternalLineageRunRequest>,
+) -> impl IntoResponse {
+    let Some(workflow) = (match load_workflow(&state, workflow_id).await {
+        Ok(workflow) => workflow,
+        Err(error) => {
+            tracing::error!("internal lineage run lookup failed: {error}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    }) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    if workflow.status != "active" {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "workflow must be active to run from lineage" })),
+        )
+            .into_response();
+    }
+
+    match executor::execute_workflow_run(&state, &workflow, "lineage_build", None, body.context)
+        .await
+    {
+        Ok(run) => (StatusCode::CREATED, Json(run)).into_response(),
+        Err(error) => (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response(),
     }
 }

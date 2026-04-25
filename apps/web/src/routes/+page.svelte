@@ -28,6 +28,21 @@
         <h2 class="font-semibold">Dashboards</h2>
         <p class="text-sm text-gray-500 mt-1">Compose KPI cards, charts, and tables on a shareable grid</p>
       </a>
+      <a href="/contour" class="block p-6 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 hover:border-indigo-300 transition-colors">
+        <div class="text-2xl mb-2">🧿</div>
+        <h2 class="font-semibold">Contour</h2>
+        <p class="text-sm text-gray-500 mt-1">Top-down analysis boards with transforms, paths, and dataset export</p>
+      </a>
+      <a href="/quiver" class="block p-6 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 hover:border-indigo-300 transition-colors">
+        <div class="text-2xl mb-2">📈</div>
+        <h2 class="font-semibold">Quiver</h2>
+        <p class="text-sm text-gray-500 mt-1">Time-series and ontology analytics with reusable visual functions</p>
+      </a>
+      <a href="/control-panel" class="block p-6 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 hover:border-indigo-300 transition-colors">
+        <div class="text-2xl mb-2">🛠️</div>
+        <h2 class="font-semibold">Control Panel</h2>
+        <p class="text-sm text-gray-500 mt-1">Brand the platform, manage rollout posture, and govern enterprise operations</p>
+      </a>
       <a href="/datasets" class="block p-6 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 hover:border-indigo-300 transition-colors">
         <div class="text-2xl mb-2">🗄️</div>
         <h2 class="font-semibold">Datasets</h2>
@@ -52,6 +67,11 @@
         <div class="text-2xl mb-2">📓</div>
         <h2 class="font-semibold">Notebooks</h2>
         <p class="text-sm text-gray-500 mt-1">Interactive Python and SQL notebooks</p>
+      </a>
+      <a href="/notepad" class="block p-6 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 hover:border-indigo-300 transition-colors">
+        <div class="text-2xl mb-2">📝</div>
+        <h2 class="font-semibold">Notepad</h2>
+        <p class="text-sm text-gray-500 mt-1">Collaborative documents with embeds, exports, and AIP indexing</p>
       </a>
       <a href="/settings" class="block p-6 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 hover:border-indigo-300 transition-colors">
         <div class="text-2xl mb-2">⚙️</div>

@@ -125,6 +125,8 @@ pub fn issue_state(
         auth_methods: vec!["sso_state".to_string()],
         token_use: Some("sso_state".to_string()),
         api_key_id: None,
+        session_kind: None,
+        session_scope: None,
     };
 
     jwt::encode_token(config, &claims).map_err(|error| error.to_string())

@@ -11,6 +11,7 @@ pub struct ToolDefinition {
     pub description: String,
     pub category: String,
     pub execution_mode: String,
+    pub execution_config: Value,
     pub status: String,
     pub input_schema: Value,
     pub output_schema: Value,
@@ -33,6 +34,8 @@ pub struct CreateToolRequest {
     pub category: String,
     #[serde(default = "default_execution_mode")]
     pub execution_mode: String,
+    #[serde(default = "default_json_object")]
+    pub execution_config: Value,
     #[serde(default = "default_tool_status")]
     pub status: String,
     #[serde(default = "default_json_object")]
@@ -49,6 +52,7 @@ pub struct UpdateToolRequest {
     pub description: Option<String>,
     pub category: Option<String>,
     pub execution_mode: Option<String>,
+    pub execution_config: Option<Value>,
     pub status: Option<String>,
     pub input_schema: Option<Value>,
     pub output_schema: Option<Value>,
@@ -62,6 +66,7 @@ pub(crate) struct ToolRow {
     pub description: String,
     pub category: String,
     pub execution_mode: String,
+    pub execution_config: Json<Value>,
     pub status: String,
     pub input_schema: Json<Value>,
     pub output_schema: Json<Value>,
@@ -78,6 +83,7 @@ impl From<ToolRow> for ToolDefinition {
             description: value.description,
             category: value.category,
             execution_mode: value.execution_mode,
+            execution_config: value.execution_config.0,
             status: value.status,
             input_schema: value.input_schema.0,
             output_schema: value.output_schema.0,

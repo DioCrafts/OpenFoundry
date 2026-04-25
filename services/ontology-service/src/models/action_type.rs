@@ -155,6 +155,15 @@ pub struct ExecuteActionRequest {
     pub target_object_id: Option<Uuid>,
     #[serde(default)]
     pub parameters: Value,
+    pub justification: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ExecuteBatchActionRequest {
+    pub target_object_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub parameters: Value,
+    pub justification: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -166,4 +175,13 @@ pub struct ExecuteActionResponse {
     pub object: Option<Value>,
     pub link: Option<Value>,
     pub result: Option<Value>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExecuteBatchActionResponse {
+    pub action: ActionType,
+    pub total: usize,
+    pub succeeded: usize,
+    pub failed: usize,
+    pub results: Vec<Value>,
 }

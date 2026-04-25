@@ -24,4 +24,4 @@ chrono = { workspace = true }
 config = { workspace = true }
 thiserror = { workspace = true }
 reqwest = { workspace = true }
-
+pyo3 = { workspace = true, features = ["abi3-py311"] }

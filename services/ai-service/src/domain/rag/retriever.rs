@@ -12,6 +12,15 @@ pub fn search(
     min_score: f32,
 ) -> Vec<KnowledgeSearchResult> {
     let query_embedding = crate::domain::rag::embedder::embed_text(query);
+    search_with_embedding(&query_embedding, documents, top_k, min_score)
+}
+
+pub fn search_with_embedding(
+    query_embedding: &[f32],
+    documents: &[KnowledgeDocument],
+    top_k: usize,
+    min_score: f32,
+) -> Vec<KnowledgeSearchResult> {
     let mut hits = Vec::new();
 
     for document in documents {

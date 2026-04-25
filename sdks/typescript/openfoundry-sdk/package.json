@@ -1,0 +1,29 @@
+{
+  "description": "Official TypeScript SDK generated from the OpenFoundry OpenAPI contract.",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./react": {
+      "import": "./dist/react.js",
+      "types": "./dist/react.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "license": "Apache-2.0",
+  "main": "./dist/index.js",
+  "name": "@open-foundry/sdk",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p .",
+    "check": "tsc -p . --noEmit"
+  },
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "version": "0.1.0"
+}

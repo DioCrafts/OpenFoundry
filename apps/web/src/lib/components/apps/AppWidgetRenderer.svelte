@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ChartWidget from '$lib/components/dashboard/ChartWidget.svelte';
+	import { executeAgent, type AgentExecutionResponse } from '$lib/api/ai';
 	import TableWidget from '$lib/components/dashboard/TableWidget.svelte';
 	import { getDataset, type Dataset } from '$lib/api/datasets';
 	import type { ObjectInstance } from '$lib/api/ontology';
@@ -11,6 +12,7 @@
 	interface Props {
 		widget: AppWidget;
 		globalFilter?: string;
+		runtimeParameters?: Record<string, string>;
 		onAction?: (event: WidgetEvent, payload?: Record<string, unknown>) => Promise<void> | void;
 	}
 
@@ -21,19 +23,33 @@
 		options?: string[];
 	};
 
-	let { widget, globalFilter = '', onAction }: Props = $props();
+	type ScenarioParameter = {
+		name: string;
+		label: string;
+		type: string;
+		default_value: string;
+		description?: string;
+	};
+
+	let { widget, globalFilter = '', runtimeParameters = {}, onAction }: Props = $props();
 
 	let result = $state<QueryResult | null>(null);
 	let dataset = $state<Dataset | null>(null);
 	let loading = $state(false);
 	let error = $state('');
 	let formState = $state<Record<string, string>>({});
+	let scenarioState = $state<Record<string, string>>({});
+	let agentPrompt = $state('');
+	let agentBusy = $state(false);
+	let agentError = $state('');
+	let agentResponse = $state<AgentExecutionResponse | null>(null);
 
-	const bindingKey = $derived(JSON.stringify(widget.binding ?? null));
-	const content = $derived(stringProp('content', ''));
-	const imageUrl = $derived(stringProp('url', ''));
+	const bindingKey = $derived(JSON.stringify({ binding: widget.binding ?? null, runtimeParameters }));
+	const content = $derived(interpolateTemplate(stringProp('content', ''), runtimeParameters));
+	const imageUrl = $derived(interpolateTemplate(stringProp('url', ''), runtimeParameters));
 	const imageAlt = $derived(stringProp('alt', widget.title));
 	const formFields = $derived(parseFormFields(widget.props.fields));
+	const scenarioParameters = $derived(parseScenarioParameters(widget.props.parameters));
 	const mapPoints = $derived(buildMapPoints(result, widget));
 	const chartWidget = $derived({
 		id: widget.id,
@@ -72,6 +88,37 @@
 	});
 
 	$effect(() => {
+		widget.id;
+		scenarioParameters;
+		scenarioState = Object.fromEntries(
+			scenarioParameters.map((parameter) => [parameter.name, parameter.default_value]),
+		);
+		agentResponse = null;
+		agentError = '';
+		agentPrompt = '';
+	});
+
+	$effect(() => {
+		if (widget.widget_type !== 'scenario' || scenarioParameters.length === 0) {
+			return;
+		}
+
+		const initialState = Object.fromEntries(
+			scenarioParameters.map((parameter) => [parameter.name, parameter.default_value]),
+		);
+		void onAction?.(
+			{
+				id: `${widget.id}-scenario-initial`,
+				trigger: 'scenario_change',
+				action: 'set_parameters',
+				label: 'Apply default scenario parameters',
+				config: {},
+			},
+			initialState,
+		);
+	});
+
+	$effect(() => {
 		bindingKey;
 		void loadBinding();
 	});
@@ -92,7 +139,10 @@
 				if (!widget.binding.query_text) {
 					throw new Error('Query binding requires SQL');
 				}
-				result = await executeQuery(widget.binding.query_text, widget.binding.limit ?? 50);
+				result = await executeQuery(
+					interpolateTemplate(widget.binding.query_text, runtimeParameters),
+					widget.binding.limit ?? 50,
+				);
 				return;
 			}
 
@@ -122,6 +172,13 @@
 	function stringProp(key: string, fallback: string) {
 		const value = widget.props?.[key];
 		return typeof value === 'string' ? value : fallback;
+	}
+
+	function interpolateTemplate(template: string, parameters: Record<string, string>) {
+		return template.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_, key: string) => {
+			const value = parameters[key];
+			return value === undefined ? '' : value;
+		});
 	}
 
 	function numberProp(key: string, fallback: number) {
@@ -154,6 +211,20 @@
 				type: typeof entry.type === 'string' ? entry.type : 'text',
 				options: Array.isArray(entry.options) ? entry.options.map(String) : undefined,
 			}));
+	}
+
+	function parseScenarioParameters(value: unknown): ScenarioParameter[] {
+		if (!Array.isArray(value)) return [];
+		return value
+			.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object'))
+			.map((entry) => ({
+				name: typeof entry.name === 'string' ? entry.name : 'parameter',
+				label: typeof entry.label === 'string' ? entry.label : (typeof entry.name === 'string' ? entry.name : 'Parameter'),
+				type: typeof entry.type === 'string' ? entry.type : 'text',
+				default_value: typeof entry.default_value === 'string' ? entry.default_value : '',
+				description: typeof entry.description === 'string' ? entry.description : undefined,
+			}))
+			.filter((entry) => entry.name.length > 0);
 	}
 
 	function normalizeChartType(value: string) {
@@ -232,7 +303,22 @@
 	}
 
 	async function triggerEvents(trigger: string, payload?: Record<string, unknown>) {
-		for (const event of widget.events.filter((entry) => entry.trigger === trigger)) {
+		const events = widget.events.filter((entry) => entry.trigger === trigger);
+		if (events.length === 0 && trigger === 'scenario_change') {
+			await onAction?.(
+				{
+					id: `${widget.id}-scenario-default`,
+					trigger,
+					action: 'set_parameters',
+					label: 'Apply scenario parameters',
+					config: {},
+				},
+				payload,
+			);
+			return;
+		}
+
+		for (const event of events) {
 			await onAction?.(event, payload);
 		}
 	}
@@ -240,6 +326,62 @@
 	async function handleFormSubmit(event: SubmitEvent) {
 		event.preventDefault();
 		await triggerEvents('submit', formState);
+	}
+
+	async function handleScenarioSubmit(event: SubmitEvent) {
+		event.preventDefault();
+		await triggerEvents('scenario_change', scenarioState);
+	}
+
+	async function resetScenario() {
+		const nextState = Object.fromEntries(
+			scenarioParameters.map((parameter) => [parameter.name, parameter.default_value]),
+		);
+		scenarioState = nextState;
+		await onAction?.(
+			{
+				id: `${widget.id}-scenario-reset`,
+				trigger: 'scenario_change',
+				action: 'clear_parameters',
+				label: 'Reset scenario parameters',
+				config: {},
+			},
+			nextState,
+		);
+	}
+
+	async function runAgent() {
+		agentBusy = true;
+		agentError = '';
+		agentResponse = null;
+
+		try {
+			const agentId = stringProp('agent_id', '').trim();
+			if (!agentId) {
+				throw new Error('Select an agent before running this widget');
+			}
+			if (!agentPrompt.trim()) {
+				throw new Error('Enter a prompt for the embedded agent');
+			}
+
+			agentResponse = await executeAgent(agentId, {
+				user_message: agentPrompt,
+				knowledge_base_id: stringProp('knowledge_base_id', '').trim() || undefined,
+			});
+		} catch (cause) {
+			agentError = cause instanceof Error ? cause.message : 'Agent execution failed';
+		} finally {
+			agentBusy = false;
+		}
+	}
+
+	function scenarioDelta(parameter: ScenarioParameter) {
+		const current = Number(scenarioState[parameter.name] ?? parameter.default_value);
+		const baseline = Number(parameter.default_value);
+		if (!Number.isFinite(current) || !Number.isFinite(baseline)) {
+			return null;
+		}
+		return current - baseline;
 	}
 
 	function contentLines() {
@@ -301,7 +443,7 @@
 				class="rounded-2xl bg-slate-900 px-5 py-3 text-sm font-medium text-white"
 				onclick={() => void triggerEvents('click')}
 			>
-				{stringProp('label', widget.title || 'Run action')}
+				{interpolateTemplate(stringProp('label', widget.title || 'Run action'), runtimeParameters)}
 			</button>
 		</div>
 	{:else if widget.widget_type === 'form'}
@@ -344,6 +486,102 @@
 				</button>
 			</div>
 		</form>
+	{:else if widget.widget_type === 'scenario'}
+		<form class="flex h-full flex-col gap-4" onsubmit={handleScenarioSubmit}>
+			<div>
+				<div class="text-xs uppercase tracking-[0.22em] text-slate-400">Scenario / what-if</div>
+				<div class="mt-1 text-sm text-slate-600">{stringProp('headline', 'Scenario controls')}</div>
+			</div>
+			<div class="grid gap-3 md:grid-cols-2">
+				{#each scenarioParameters as parameter}
+					<label class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+						<span class="block font-medium text-slate-700">{parameter.label}</span>
+						{#if parameter.description}
+							<span class="mt-1 block text-xs text-slate-500">{parameter.description}</span>
+						{/if}
+						<input
+							type={parameter.type}
+							value={scenarioState[parameter.name] ?? parameter.default_value}
+							oninput={(event) => scenarioState = { ...scenarioState, [parameter.name]: (event.currentTarget as HTMLInputElement).value }}
+							class="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2"
+						/>
+						{#if scenarioDelta(parameter) !== null}
+							<div class={`mt-2 text-xs ${Number(scenarioDelta(parameter)) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+								Delta {Number(scenarioDelta(parameter)).toFixed(2)}
+							</div>
+						{/if}
+					</label>
+				{/each}
+			</div>
+			<div class="mt-auto flex flex-wrap gap-3">
+				<button type="submit" class="rounded-xl bg-[var(--app-primary,#0f766e)] px-4 py-2 text-sm font-medium text-white">
+					{stringProp('apply_label', 'Apply scenario')}
+				</button>
+				<button type="button" class="rounded-xl border border-slate-200 px-4 py-2 text-sm" onclick={() => void resetScenario()}>
+					{stringProp('reset_label', 'Reset')}
+				</button>
+			</div>
+		</form>
+	{:else if widget.widget_type === 'agent'}
+		<div class="flex h-full flex-col gap-4">
+			<div class="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+				{stringProp('welcome_message', 'This widget can run a real OpenFoundry agent.')}
+			</div>
+
+			{#if agentError}
+				<div class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{agentError}</div>
+			{/if}
+
+			<textarea
+				rows="5"
+				value={agentPrompt}
+				oninput={(event) => agentPrompt = (event.currentTarget as HTMLTextAreaElement).value}
+				placeholder={stringProp('placeholder', 'Ask the embedded agent a question...')}
+				class="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm"
+			></textarea>
+
+			<div class="flex items-center justify-between gap-3">
+				<div class="text-xs uppercase tracking-[0.2em] text-slate-400">
+					Agent {stringProp('agent_id', '').trim() || 'not selected'}
+				</div>
+				<button
+					type="button"
+					class="rounded-xl bg-[var(--app-primary,#0f766e)] px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+					onclick={() => void runAgent()}
+					disabled={agentBusy}
+				>
+					{agentBusy ? 'Running...' : stringProp('submit_label', 'Run agent')}
+				</button>
+			</div>
+
+			{#if agentResponse}
+				<div class="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
+					<div class="text-xs uppercase tracking-[0.22em] text-slate-400">Agent response</div>
+					<p class="whitespace-pre-wrap text-sm leading-6 text-slate-700">{agentResponse.final_response}</p>
+					{#if agentResponse.used_tool_names.length > 0}
+						<div class="flex flex-wrap gap-2">
+							{#each agentResponse.used_tool_names as toolName}
+								<span class="rounded-full border border-slate-200 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-500">{toolName}</span>
+							{/each}
+						</div>
+					{/if}
+					{#if booleanProp('show_traces', true)}
+						<div class="space-y-2">
+							{#each agentResponse.traces as trace}
+								<div class="rounded-xl bg-slate-50 px-3 py-3 text-xs text-slate-600">
+									<div class="font-semibold text-slate-700">Step {trace.step_number}: {trace.action}</div>
+									<div class="mt-1">{trace.observation}</div>
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			{:else}
+				<div class="flex flex-1 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 text-center text-sm text-slate-500">
+					{stringProp('empty_state', 'Configure an agent to turn this panel into an interactive copilot.')}
+				</div>
+			{/if}
+		</div>
 	{:else if widget.widget_type === 'table'}
 		<div class="min-h-0 flex-1">
 			<TableWidget widget={tableWidget} result={result} globalSearch={globalFilter} />
@@ -375,7 +613,7 @@
 			{:else}
 				<div class="grid flex-1 gap-3 md:grid-cols-2">
 					{#each widget.children as child (child.id)}
-						<AppWidgetRenderer widget={child} globalFilter={globalFilter} onAction={onAction} />
+						<AppWidgetRenderer widget={child} globalFilter={globalFilter} runtimeParameters={runtimeParameters} onAction={onAction} />
 					{/each}
 				</div>
 			{/if}

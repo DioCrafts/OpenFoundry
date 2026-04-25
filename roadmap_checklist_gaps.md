@@ -94,6 +94,10 @@ Sustituir la ejecución “parcial o simulada” por un runtime creíble para ba
 - Los fallos dejan estados trazables y permiten reintento o recuperación.
 - El lineage refleja dependencias reales, no solo metadata decorativa.
 
+Estado a 2026-04-24: cerrado en el alcance mínimo de la fase. Ya hay runtime batch real para `sql`, `python`, `wasm` y `passthrough`, con lectura de datasets reales, materialización de salidas, metadata de build e incrementalidad mínima por fingerprint. También hay streaming real con `push` HTTP, topologías ejecutables, windows, checkpoints persistentes, sink a dataset, hot buffer + cold archive y lineage automático `stream -> dataset`. La validación end-to-end quedó verde en `smoke/scenarios/p2-runtime-critical-path.json` y `smoke/results/p2-runtime-critical-path.json`, incluyendo batch incremental (`skipped`) y rerun streaming sin nuevos eventos (`input_events = 0`).
+
+Lo que queda a partir de aquí ya no es “salir de simulación”, sino hardening y amplitud: Polars/Spark/compute externo, conectores streaming externos persistentes, visualización operativa más rica del job graph, replay avanzado y exposición/UX del lineage de streams.
+
 ## Fase P3: Ontology, Functions y Governance
 
 ### Objetivo
@@ -116,6 +120,10 @@ Dar valor operativo real a la capa semántica. Hoy hay base útil en object type
 - Un usuario autorizado puede ejecutar una action/function sobre objetos reales con auditoría completa.
 - Un usuario no autorizado queda bloqueado de forma verificable.
 - La ontology ya soporta un caso de uso de negocio real, no solo CRUD de tipos.
+
+Estado a 2026-04-25: cerrado en el alcance mínimo de la fase. `ontology-service` ya soporta interfaces, shared properties y `time_dependent`; actions con `permission_key`, `confirmation_required`, ejecución simple y batch; runtime Python inline + Functions HTTP; object set queries + link traversals; y auditoría cross-service en `audit-service`. La validación end-to-end quedó verde en `smoke/scenarios/p3-semantic-governance-critical-path.json` y `smoke/results/p3-semantic-governance-critical-path.json`, incluyendo un `403` cross-org verificable, `400` por falta de justificación, `execute-batch` exitoso, mutación real de objetos y evidencia auditada.
+
+Lo que queda a partir de aquí ya no es salir del placeholder en el core semántico, sino hardening y amplitud: runtime TypeScript, explorer/object views más potentes en frontend, approvals/checkpoints más transversales, y pruebas/políticas más profundas para SSO/OAuth/MFA a nivel plataforma.
 
 ## Fase P4: APIs, SDKs y plataforma de desarrollo
 
@@ -140,6 +148,10 @@ Después de estabilizar el core, toca convertirlo en plataforma consumible por d
 - El servicio de code repos deja de fabricar commits/diffs sintéticos en los caminos principales.
 - Marketplace instala algo que realmente queda activado en la plataforma.
 
+Estado a 2026-04-25: cerrado en el alcance mínimo de la fase. `code-repo-service` ya opera sobre repos Git reales en disco para `init`, ramas, commits, diffs, listado de archivos y CI básica; `of-cli` genera y valida un SDK oficial TypeScript a partir de la OpenAPI versionada; y `marketplace-service` ya activa paquetes `app_template` publicando una app real vía `app-builder-service`. La validación end-to-end quedó verde en `smoke/scenarios/p4-developer-platform-critical-path.json` y `smoke/results/p4-developer-platform-critical-path.json`, cubriendo creación de repo, rama, commit real con archivos, diff, CI y `marketplace install -> runtime` publicado.
+
+Lo que queda a partir de aquí ya no es salir del placeholder en la base developer/platform, sino hardening y amplitud: helpers React más ergonómicos sobre el SDK, SDKs oficiales para Python/Java, Workshop más robusto, recomendaciones/fleet/multi-space en Marketplace y normalización de APIs `v2`/filesystem/admin.
+
 ## Fase P5: AI/ML real
 
 ### Objetivo
@@ -161,6 +173,10 @@ Mover AI/ML desde simulación a producto útil. Esta fase debe llegar después d
 - Un modelo ML puede entrenarse o registrarse, desplegarse y predecir sin rutas sintéticas.
 - AI y ML dejan trazabilidad, costes y errores observables.
 
+Estado a 2026-04-25: cerrado en el alcance mínimo de la fase. `ai-service` ya enruta chat a proveedores HTTP reales por configuración (`openai` compatible, `anthropic messages`, `ollama chat`), soporta embeddings provider-backed para knowledge bases, ejecuta RAG real sobre chunks indexados y permite agents con tools HTTP reales y forwarding de auth. `ml-service` ya puede entrenar modelos tabulares reales sobre registros inline, registrar una `model_version` con pesos/metadata útiles, desplegarla y predecir online o en batch usando ese estado real de modelo. La validación end-to-end quedó verde en `smoke/scenarios/p5-ai-ml-critical-path.json` y `smoke/results/p5-ai-ml-critical-path.json`, cubriendo provider real vía OpenAI-compatible mock, retrieval provider-backed, `chat completion` con citas, agent execution con tool real sobre `/api/v1/ml/deployments/{id}/predict`, entrenamiento real, versionado, deployment y predicción.
+
+Lo que queda a partir de aquí ya no es salir del placeholder del core AI/ML, sino hardening y amplitud: providers privados gestionados de forma enterprise, gobernanza/cost tracking persistente por request, evaluaciones comparativas más ricas, adapters/imports externos reales para modelos, runtimes de training más avanzados y mejor integración de agents con Workshop/Automate/Functions.
+
 ## Fase P6: Analytics y hardening enterprise
 
 ### Objetivo
@@ -181,6 +197,10 @@ Terminar la capa de producto visible y endurecer el despliegue enterprise una ve
 - Existe una experiencia analítica usable sobre datos reales.
 - Hay historia de despliegue reproducible y operable fuera del entorno local.
 - Multi-org y administración dejan de ser “base parcial”.
+
+Estado a 2026-04-25: cerrado en el alcance mínimo de la fase. `report-service` ya genera reportes sobre datasets y capas geoespaciales reales consumidos por HTTP desde `dataset-service` y `geospatial-service`, `auth-service` expone un `control-panel` persistente y la web lo administra desde una ruta dedicada, `nexus-service` endureció contratos/shares/federated queries con validaciones operativas reales y el chart Helm quedó reescrito con wiring interno entre servicios, `serviceAccount`, probes, PDB, ingress, network policy y validación en CI vía `.github/workflows/helm-check.yml`. La validación end-to-end quedó verde en `smoke/scenarios/p6-analytics-enterprise-critical-path.json` y `smoke/results/p6-analytics-enterprise-critical-path.json`, cubriendo dataset real, mapa real, report generation live, `GET/PUT /api/v1/control-panel`, rechazo de share con peer pendiente, share endurecido y bloqueo de consultas federadas mutantes.
+
+Lo que queda a partir de aquí ya no es salir del placeholder P6, sino profundizar: Quiver/Contour más cercanos al producto final, dashboards top-down más ricos, gestión avanzada de recursos/upgrades, policy-driven org mapping/consumer mode y despliegues on-prem/air-gapped aún más cerrados.
 
 ## Qué no priorizar todavía
 
@@ -210,9 +230,9 @@ Estas líneas existen en el checklist, pero hoy no deberían ir delante del core
 
 ### Mes 3
 
-- Ejecutar P2 y arrancar P3.
-- Sacar del modo simulación el flujo batch principal.
-- Dejar preparado el primer caso streaming recuperable.
+- P2 ejecutado; arrancar P3.
+- El flujo batch principal ya está fuera de simulación.
+- El primer caso streaming recuperable ya está validado; ahora toca endurecerlo.
 
 ## Métrica de éxito global
 

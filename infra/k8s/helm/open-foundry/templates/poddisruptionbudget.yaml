@@ -1,0 +1,17 @@
+{{- range $serviceName, $service := .Values.services }}
+{{- if and $service.enabled $.Values.global.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "open-foundry.fullname" (dict "root" $ "serviceName" $serviceName) }}
+  namespace: {{ include "open-foundry.namespace" (dict "root" $) }}
+  labels:
+{{ include "open-foundry.commonLabels" (dict "root" $ "serviceName" $serviceName) | nindent 4 }}
+spec:
+  minAvailable: {{ default $.Values.global.podDisruptionBudget.minAvailable $service.podDisruptionBudgetMinAvailable }}
+  selector:
+    matchLabels:
+{{ include "open-foundry.selectorLabels" (dict "root" $ "serviceName" $serviceName) | nindent 6 }}
+---
+{{- end }}
+{{- end }}

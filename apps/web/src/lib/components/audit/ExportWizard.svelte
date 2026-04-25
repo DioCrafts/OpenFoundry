@@ -28,7 +28,7 @@
 	export let onExportSubject: () => void;
 	export let onEraseSubject: () => void;
 
-	const standards: ComplianceStandard[] = ['soc2', 'iso27001', 'hipaa'];
+	const standards: ComplianceStandard[] = ['soc2', 'iso27001', 'hipaa', 'gdpr', 'itar'];
 
 	function inputValue(event: Event) {
 		return (event.currentTarget as HTMLInputElement).value;

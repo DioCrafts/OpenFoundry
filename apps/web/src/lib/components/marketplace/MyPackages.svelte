@@ -26,6 +26,20 @@
 						<span class="rounded-full bg-white px-2 py-1 text-xs text-stone-600">{dependency.package_slug} {dependency.version_req}</span>
 					{/each}
 				</div>
+				{#if install.activation}
+					<div class="mt-3 rounded-2xl border border-emerald-200 bg-white px-3 py-3 text-sm text-stone-600">
+						<div class="font-medium text-stone-900">Activation</div>
+						<div class="mt-1">{install.activation.kind} • {install.activation.status}</div>
+						{#if install.activation.public_url}
+							<a class="mt-2 inline-flex text-emerald-700 hover:text-emerald-800" href={install.activation.public_url}>
+								Open runtime
+							</a>
+						{/if}
+						{#if install.activation.notes}
+							<p class="mt-2 text-xs text-stone-500">{install.activation.notes}</p>
+						{/if}
+					</div>
+				{/if}
 			</div>
 		{/each}
 	</div>

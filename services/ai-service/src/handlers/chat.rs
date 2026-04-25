@@ -30,7 +30,7 @@ use crate::{
     },
 };
 
-use super::{ServiceResult, bad_request, db_error, not_found};
+use super::{ServiceResult, bad_request, db_error, internal_error, not_found};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CachedChatPayload {
@@ -760,9 +760,14 @@ pub async fn create_chat_completion(
     };
 
     let prompt_used = format!(
-        "{base_prompt}\n\nUser request: {}\n\nRetrieved context count: {}",
+        "{base_prompt}\n\nUser request: {}\n\nRetrieved context count: {}\n\nRetrieved context:\n{}",
         guardrail.redacted_text,
-        knowledge_hits.len()
+        knowledge_hits.len(),
+        knowledge_hits
+            .iter()
+            .map(|hit| format!("- {}: {}", hit.document_title, hit.excerpt))
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 
     let routed = llm::gateway::route_providers(&providers, body.preferred_provider_id, "chat");
@@ -812,7 +817,17 @@ pub async fn create_chat_completion(
         "Guardrails blocked this request. Remove prompt-injection or toxic content and retry."
             .to_string()
     } else {
-        llm::gateway::synthesize_completion(&provider, &prompt_used, &knowledge_hits)
+        llm::runtime::complete_text(
+            &state.http_client,
+            &provider,
+            &base_prompt,
+            &prompt_used,
+            body.temperature,
+            body.max_tokens,
+        )
+        .await
+        .map_err(internal_error)?
+        .text
     };
     let completion_tokens = llm::gateway::estimate_tokens(&reply).min(body.max_tokens);
     let payload = CachedChatPayload {
@@ -921,13 +936,37 @@ pub async fn ask_copilot(
         body.include_pipeline_plan,
     );
 
+    let provider_answer = if guardrail.blocked {
+        "Guardrails blocked this copilot request. Remove unsafe instructions and retry."
+            .to_string()
+    } else {
+        llm::runtime::complete_text(
+            &state.http_client,
+            &provider,
+            "You are OpenFoundry Copilot. Ground answers in retrieval context and suggested platform actions.",
+            &format!(
+                "Question: {}\nDraft answer: {}\nSuggested SQL: {:?}\nPipeline suggestions: {:?}\nOntology hints: {:?}\nKnowledge context:\n{}",
+                body.question,
+                draft.answer,
+                draft.suggested_sql,
+                draft.pipeline_suggestions,
+                draft.ontology_hints,
+                cited_knowledge
+                    .iter()
+                    .map(|hit| format!("- {}: {}", hit.document_title, hit.excerpt))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ),
+            0.2,
+            provider.max_output_tokens.min(512),
+        )
+        .await
+        .map_err(internal_error)?
+        .text
+    };
+
     let payload = CachedCopilotPayload {
-        answer: if guardrail.blocked {
-            "Guardrails blocked this copilot request. Remove unsafe instructions and retry."
-                .to_string()
-        } else {
-            draft.answer.clone()
-        },
+        answer: provider_answer,
         suggested_sql: if guardrail.blocked {
             None
         } else {

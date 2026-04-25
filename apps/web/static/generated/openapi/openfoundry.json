@@ -1409,10 +1409,634 @@
           }
         }
       }
+    },
+    "/api/v2/admin/control-panel": {
+      "get": {
+        "summary": "Get control panel (v2)",
+        "operationId": "rest.admin.v2.getControlPanel",
+        "tags": [
+          "rest.admin.v2"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlPanelSettings"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Update control panel (v2)",
+        "operationId": "rest.admin.v2.updateControlPanel",
+        "tags": [
+          "rest.admin.v2"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateControlPanelRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlPanelSettings"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/admin/groups": {
+      "get": {
+        "summary": "List groups (v2)",
+        "operationId": "rest.admin.v2.listGroups",
+        "tags": [
+          "rest.admin.v2"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminGroupsListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create group (v2)",
+        "operationId": "rest.admin.v2.createGroup",
+        "tags": [
+          "rest.admin.v2"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateGroupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/admin/groups/{id}": {
+      "put": {
+        "summary": "Update group (v2)",
+        "operationId": "rest.admin.v2.updateGroup",
+        "tags": [
+          "rest.admin.v2"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateGroupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/admin/permissions": {
+      "get": {
+        "summary": "List permissions (v2)",
+        "operationId": "rest.admin.v2.listPermissions",
+        "tags": [
+          "rest.admin.v2"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPermissionsListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create permission (v2)",
+        "operationId": "rest.admin.v2.createPermission",
+        "tags": [
+          "rest.admin.v2"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePermissionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Permission"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/admin/policies": {
+      "get": {
+        "summary": "List policies (v2)",
+        "operationId": "rest.admin.v2.listPolicies",
+        "tags": [
+          "rest.admin.v2"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPoliciesListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create policy (v2)",
+        "operationId": "rest.admin.v2.createPolicy",
+        "tags": [
+          "rest.admin.v2"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertPolicyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Policy"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/admin/policies/evaluate": {
+      "post": {
+        "summary": "Evaluate policy (v2)",
+        "operationId": "rest.admin.v2.evaluatePolicy",
+        "tags": [
+          "rest.admin.v2"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvaluatePolicyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyEvaluationResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/admin/policies/{id}": {
+      "patch": {
+        "summary": "Update policy (v2)",
+        "operationId": "rest.admin.v2.updatePolicy",
+        "tags": [
+          "rest.admin.v2"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertPolicyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Policy"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/admin/roles": {
+      "get": {
+        "summary": "List roles (v2)",
+        "operationId": "rest.admin.v2.listRoles",
+        "tags": [
+          "rest.admin.v2"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRolesListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create role (v2)",
+        "operationId": "rest.admin.v2.createRole",
+        "tags": [
+          "rest.admin.v2"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRoleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/admin/roles/{id}": {
+      "put": {
+        "summary": "Update role (v2)",
+        "operationId": "rest.admin.v2.updateRole",
+        "tags": [
+          "rest.admin.v2"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRoleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/admin/users": {
+      "get": {
+        "summary": "List admin users (v2)",
+        "operationId": "rest.admin.v2.listUsers",
+        "tags": [
+          "rest.admin.v2"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUsersListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/admin/users/me": {
+      "get": {
+        "summary": "Get current admin user (v2)",
+        "operationId": "rest.admin.v2.getCurrentUser",
+        "tags": [
+          "rest.admin.v2"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/admin/users/{id}": {
+      "patch": {
+        "summary": "Update admin user (v2)",
+        "operationId": "rest.admin.v2.updateUser",
+        "tags": [
+          "rest.admin.v2"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/filesystem/datasets/{dataset_id}": {
+      "get": {
+        "summary": "List dataset filesystem (v2)",
+        "operationId": "rest.filesystem.v2.getDatasetFilesystem",
+        "tags": [
+          "rest.filesystem.v2"
+        ],
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FilesystemListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AdminGroupsListResponse": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupResponse"
+            }
+          }
+        }
+      },
+      "AdminPermissionsListResponse": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            }
+          }
+        }
+      },
+      "AdminPoliciesListResponse": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Policy"
+            }
+          }
+        }
+      },
+      "AdminRolesListResponse": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RoleResponse"
+            }
+          }
+        }
+      },
+      "AdminUsersListResponse": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserResponse"
+            }
+          }
+        }
+      },
+      "AppBrandingSettings": {
+        "type": "object",
+        "properties": {
+          "accent_color": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "favicon_url": {
+            "type": "string"
+          },
+          "logo_url": {
+            "type": "string"
+          },
+          "primary_color": {
+            "type": "string"
+          },
+          "show_powered_by": {
+            "type": "boolean"
+          }
+        }
+      },
       "AssignRoleRequest": {
         "type": "object",
         "properties": {
@@ -1535,6 +2159,64 @@
           }
         }
       },
+      "ControlPanelSettings": {
+        "type": "object",
+        "properties": {
+          "allow_self_signup": {
+            "type": "boolean"
+          },
+          "allowed_email_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "announcement_banner": {
+            "type": "string"
+          },
+          "default_app_branding": {
+            "$ref": "#/components/schemas/AppBrandingSettings"
+          },
+          "default_region": {
+            "type": "string"
+          },
+          "deployment_mode": {
+            "type": "string"
+          },
+          "docs_url": {
+            "type": "string"
+          },
+          "maintenance_mode": {
+            "type": "boolean"
+          },
+          "platform_name": {
+            "type": "string"
+          },
+          "release_channel": {
+            "type": "string"
+          },
+          "restricted_operations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status_page_url": {
+            "type": "string"
+          },
+          "support_email": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_by": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "CreateCellRequest": {
         "type": "object",
         "properties": {
@@ -1589,6 +2271,24 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          }
+        }
+      },
+      "CreateGroupRequest": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         }
@@ -1653,6 +2353,20 @@
           }
         }
       },
+      "CreatePermissionRequest": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "resource": {
+            "type": "string"
+          }
+        }
+      },
       "CreatePipelineRequest": {
         "type": "object",
         "properties": {
@@ -1699,6 +2413,24 @@
           },
           "validation_rules_json": {
             "type": "string"
+          }
+        }
+      },
+      "CreateRoleRequest": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "permission_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         }
       },
@@ -1886,6 +2618,21 @@
           }
         }
       },
+      "EvaluatePolicyRequest": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "resource": {
+            "type": "string"
+          },
+          "resource_attributes": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        }
+      },
       "ExecuteCellRequest": {
         "type": "object",
         "properties": {
@@ -1952,6 +2699,109 @@
           },
           "nullable": {
             "type": "boolean"
+          }
+        }
+      },
+      "FilesystemBreadcrumb": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      },
+      "FilesystemEntry": {
+        "type": "object",
+        "properties": {
+          "content_type": {
+            "type": "string"
+          },
+          "entry_type": {
+            "type": "string"
+          },
+          "last_modified": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "storage_path": {
+            "type": "string"
+          }
+        }
+      },
+      "FilesystemListResponse": {
+        "type": "object",
+        "properties": {
+          "active_branch": {
+            "type": "string"
+          },
+          "breadcrumbs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FilesystemBreadcrumb"
+            }
+          },
+          "current_version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "dataset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FilesystemEntry"
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FilesystemEntry"
+            }
+          },
+          "requested_path": {
+            "type": "string"
+          },
+          "root": {
+            "type": "string"
+          },
+          "sections": {
+            "$ref": "#/components/schemas/FilesystemSections"
+          }
+        }
+      },
+      "FilesystemSections": {
+        "type": "object",
+        "properties": {
+          "branches": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "versions": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "views": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -2026,6 +2876,42 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/DatasetVersion"
+            }
+          }
+        }
+      },
+      "GroupResponse": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "member_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
             }
           }
         }
@@ -2540,6 +3426,28 @@
           }
         }
       },
+      "Permission": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "resource": {
+            "type": "string"
+          }
+        }
+      },
       "Pipeline": {
         "type": "object",
         "properties": {
@@ -2633,6 +3541,77 @@
             "$ref": "#/components/schemas/Uuid"
           },
           "status": {
+            "type": "string"
+          }
+        }
+      },
+      "Policy": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "conditions": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": {
+            "type": "string"
+          },
+          "effect": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "resource": {
+            "type": "string"
+          },
+          "row_filter": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PolicyEvaluationResult": {
+        "type": "object",
+        "properties": {
+          "allowed": {
+            "type": "boolean"
+          },
+          "deny_policy_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "matched_policy_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "row_filter": {
             "type": "string"
           }
         }
@@ -2808,6 +3787,38 @@
           },
           "name": {
             "type": "string"
+          }
+        }
+      },
+      "RoleResponse": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "permission_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -3027,6 +4038,56 @@
           }
         }
       },
+      "UpdateControlPanelRequest": {
+        "type": "object",
+        "properties": {
+          "allow_self_signup": {
+            "type": "boolean"
+          },
+          "allowed_email_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "announcement_banner": {
+            "type": "string"
+          },
+          "default_app_branding": {
+            "$ref": "#/components/schemas/AppBrandingSettings"
+          },
+          "default_region": {
+            "type": "string"
+          },
+          "deployment_mode": {
+            "type": "string"
+          },
+          "docs_url": {
+            "type": "string"
+          },
+          "maintenance_mode": {
+            "type": "boolean"
+          },
+          "platform_name": {
+            "type": "string"
+          },
+          "release_channel": {
+            "type": "string"
+          },
+          "restricted_operations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status_page_url": {
+            "type": "string"
+          },
+          "support_email": {
+            "type": "string"
+          }
+        }
+      },
       "UpdateDatasetRequest": {
         "type": "object",
         "properties": {
@@ -3043,6 +4104,21 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          }
+        }
+      },
+      "UpdateGroupRequest": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "role_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         }
@@ -3107,6 +4183,73 @@
           }
         }
       },
+      "UpdateRoleRequest": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "permission_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      },
+      "UpdateUserRequest": {
+        "type": "object",
+        "properties": {
+          "attributes": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "mfa_enforced": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "organization_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "UpsertPolicyRequest": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "conditions": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "description": {
+            "type": "string"
+          },
+          "effect": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "resource": {
+            "type": "string"
+          },
+          "row_filter": {
+            "type": "string"
+          }
+        }
+      },
       "UserInfo": {
         "type": "object",
         "properties": {
@@ -3118,6 +4261,63 @@
           },
           "name": {
             "type": "string"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "UserResponse": {
+        "type": "object",
+        "properties": {
+          "attributes": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "auth_source": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "email": {
+            "type": "string"
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "mfa_enabled": {
+            "type": "boolean"
+          },
+          "mfa_enforced": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "organization_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "roles": {
             "type": "array",

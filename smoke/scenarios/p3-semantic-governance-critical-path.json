@@ -1,0 +1,466 @@
+{
+  "base_url": "http://127.0.0.1:8080",
+  "default_headers": {
+    "content-type": "application/json"
+  },
+  "variables": {
+    "ORG_ALPHA": "11111111-1111-7111-8111-111111111111",
+    "ORG_BETA": "22222222-2222-7222-8222-222222222222"
+  },
+  "auth": {
+    "type": "dev_jwt",
+    "secret_env": "JWT_SECRET",
+    "roles": ["operator"],
+    "permissions": ["cases:resolve"],
+    "org_id": "11111111-1111-7111-8111-111111111111",
+    "attributes": {
+      "classification_clearance": "pii",
+      "workspace": "smoke-p3"
+    }
+  },
+  "steps": [
+    {
+      "name": "create_reviewable_interface",
+      "method": "POST",
+      "path": "/api/v1/ontology/interfaces",
+      "expected_status": 201,
+      "body": {
+        "name": "reviewable_${RUN_ID}",
+        "display_name": "Reviewable ${RUN_ID}",
+        "description": "P3 smoke reviewable interface"
+      },
+      "capture": {
+        "interface_id": "/id"
+      }
+    },
+    {
+      "name": "create_review_history_property",
+      "method": "POST",
+      "path": "/api/v1/ontology/interfaces/${interface_id}/properties",
+      "expected_status": 201,
+      "body": {
+        "name": "review_history",
+        "display_name": "Review history",
+        "description": "Chronological review events",
+        "property_type": "json",
+        "required": false,
+        "time_dependent": true,
+        "default_value": []
+      },
+      "expect": [
+        {
+          "path": "/time_dependent",
+          "equals": true
+        }
+      ]
+    },
+    {
+      "name": "create_case_type",
+      "method": "POST",
+      "path": "/api/v1/ontology/types",
+      "expected_status": 201,
+      "body": {
+        "name": "case_${RUN_ID}",
+        "display_name": "Case ${RUN_ID}",
+        "description": "P3 smoke case type",
+        "primary_key_property": "status"
+      },
+      "capture": {
+        "case_type_id": "/id"
+      }
+    },
+    {
+      "name": "attach_interface_to_case_type",
+      "method": "POST",
+      "path": "/api/v1/ontology/types/${case_type_id}/interfaces/${interface_id}",
+      "expected_status": 201,
+      "expect": [
+        {
+          "path": "/interface_id",
+          "equals": "${interface_id}"
+        }
+      ]
+    },
+    {
+      "name": "create_case_status_property",
+      "method": "POST",
+      "path": "/api/v1/ontology/types/${case_type_id}/properties",
+      "expected_status": 201,
+      "body": {
+        "name": "status",
+        "display_name": "Status",
+        "property_type": "string",
+        "required": true,
+        "default_value": "open"
+      }
+    },
+    {
+      "name": "create_case_decision_property",
+      "method": "POST",
+      "path": "/api/v1/ontology/types/${case_type_id}/properties",
+      "expected_status": 201,
+      "body": {
+        "name": "decision",
+        "display_name": "Decision",
+        "property_type": "string",
+        "required": false
+      }
+    },
+    {
+      "name": "create_case_owner_count_property",
+      "method": "POST",
+      "path": "/api/v1/ontology/types/${case_type_id}/properties",
+      "expected_status": 201,
+      "body": {
+        "name": "owner_count",
+        "display_name": "Owner count",
+        "property_type": "integer",
+        "required": true,
+        "default_value": 0
+      }
+    },
+    {
+      "name": "create_case_peer_count_property",
+      "method": "POST",
+      "path": "/api/v1/ontology/types/${case_type_id}/properties",
+      "expected_status": 201,
+      "body": {
+        "name": "peer_case_count",
+        "display_name": "Peer case count",
+        "property_type": "integer",
+        "required": true,
+        "default_value": 0
+      }
+    },
+    {
+      "name": "create_analyst_type",
+      "method": "POST",
+      "path": "/api/v1/ontology/types",
+      "expected_status": 201,
+      "body": {
+        "name": "analyst_${RUN_ID}",
+        "display_name": "Analyst ${RUN_ID}",
+        "description": "P3 smoke analyst type"
+      },
+      "capture": {
+        "analyst_type_id": "/id"
+      }
+    },
+    {
+      "name": "create_analyst_name_property",
+      "method": "POST",
+      "path": "/api/v1/ontology/types/${analyst_type_id}/properties",
+      "expected_status": 201,
+      "body": {
+        "name": "name",
+        "display_name": "Name",
+        "property_type": "string",
+        "required": true
+      }
+    },
+    {
+      "name": "create_analyst_object",
+      "method": "POST",
+      "path": "/api/v1/ontology/types/${analyst_type_id}/objects",
+      "expected_status": 201,
+      "body": {
+        "properties": {
+          "name": "Analyst A"
+        },
+        "marking": "confidential"
+      },
+      "capture": {
+        "analyst_id": "/id"
+      }
+    },
+    {
+      "name": "create_case_one",
+      "method": "POST",
+      "path": "/api/v1/ontology/types/${case_type_id}/objects",
+      "expected_status": 201,
+      "body": {
+        "properties": {
+          "status": "open",
+          "owner_count": 0,
+          "peer_case_count": 0
+        },
+        "marking": "confidential"
+      },
+      "capture": {
+        "case_one_id": "/id"
+      },
+      "expect": [
+        {
+          "path": "/organization_id",
+          "equals": "${ORG_ALPHA}"
+        },
+        {
+          "path": "/marking",
+          "equals": "confidential"
+        }
+      ]
+    },
+    {
+      "name": "create_case_two",
+      "method": "POST",
+      "path": "/api/v1/ontology/types/${case_type_id}/objects",
+      "expected_status": 201,
+      "body": {
+        "properties": {
+          "status": "open",
+          "owner_count": 0,
+          "peer_case_count": 0
+        },
+        "marking": "confidential"
+      },
+      "capture": {
+        "case_two_id": "/id"
+      }
+    },
+    {
+      "name": "create_case_assignment_link_type",
+      "method": "POST",
+      "path": "/api/v1/ontology/links",
+      "expected_status": 201,
+      "body": {
+        "name": "assigned_to_${RUN_ID}",
+        "display_name": "Assigned to ${RUN_ID}",
+        "description": "P3 smoke ownership link",
+        "source_type_id": "${case_type_id}",
+        "target_type_id": "${analyst_type_id}",
+        "cardinality": "many_to_many"
+      },
+      "capture": {
+        "assignment_link_type_id": "/id"
+      }
+    },
+    {
+      "name": "link_case_one_to_analyst",
+      "method": "POST",
+      "path": "/api/v1/ontology/links/${assignment_link_type_id}/instances",
+      "expected_status": 201,
+      "body": {
+        "source_object_id": "${case_one_id}",
+        "target_object_id": "${analyst_id}"
+      }
+    },
+    {
+      "name": "link_case_two_to_analyst",
+      "method": "POST",
+      "path": "/api/v1/ontology/links/${assignment_link_type_id}/instances",
+      "expected_status": 201,
+      "body": {
+        "source_object_id": "${case_two_id}",
+        "target_object_id": "${analyst_id}"
+      }
+    },
+    {
+      "name": "create_resolve_action",
+      "method": "POST",
+      "path": "/api/v1/ontology/actions",
+      "expected_status": 201,
+      "body": {
+        "name": "resolve_case_${RUN_ID}",
+        "display_name": "Resolve case ${RUN_ID}",
+        "description": "P3 smoke action",
+        "object_type_id": "${case_type_id}",
+        "operation_kind": "invoke_function",
+        "confirmation_required": true,
+        "permission_key": "cases:resolve",
+        "input_schema": [
+          {
+            "name": "decision",
+            "display_name": "Decision",
+            "property_type": "string",
+            "required": true
+          }
+        ],
+        "config": {
+          "runtime": "python",
+          "source": "history = list((target_object or {}).get('properties', {}).get('review_history') or [])\nhistory.append({'decision': parameters['decision'], 'justification': justification, 'at': context_now})\nobject_patch = {'status': 'resolved', 'decision': parameters['decision'], 'owner_count': len(linked_objects), 'peer_case_count': len(object_set), 'review_history': history}\nresult = {'status': 'resolved', 'linked_objects': len(linked_objects), 'peer_case_count': len(object_set)}"
+        }
+      },
+      "capture": {
+        "action_id": "/id"
+      }
+    },
+    {
+      "name": "validate_resolve_action",
+      "method": "POST",
+      "path": "/api/v1/ontology/actions/${action_id}/validate",
+      "expected_status": 200,
+      "body": {
+        "target_object_id": "${case_one_id}",
+        "parameters": {
+          "decision": "approve"
+        }
+      },
+      "expect": [
+        {
+          "path": "/valid",
+          "equals": true
+        },
+        {
+          "path": "/preview/runtime",
+          "equals": "python"
+        }
+      ]
+    },
+    {
+      "name": "deny_cross_org_action_execution",
+      "method": "POST",
+      "path": "/api/v1/ontology/actions/${action_id}/execute",
+      "expected_status": 403,
+      "auth": {
+        "type": "dev_jwt",
+        "secret_env": "JWT_SECRET",
+        "roles": ["analyst"],
+        "permissions": ["cases:resolve"],
+        "org_id": "22222222-2222-7222-8222-222222222222",
+        "attributes": {
+          "classification_clearance": "pii",
+          "workspace": "smoke-p3-denied"
+        }
+      },
+      "body": {
+        "target_object_id": "${case_one_id}",
+        "parameters": {
+          "decision": "approve"
+        },
+        "justification": "cross-org attempt"
+      }
+    },
+    {
+      "name": "require_justification_for_action",
+      "method": "POST",
+      "path": "/api/v1/ontology/actions/${action_id}/execute",
+      "expected_status": 400,
+      "body": {
+        "target_object_id": "${case_one_id}",
+        "parameters": {
+          "decision": "approve"
+        }
+      }
+    },
+    {
+      "name": "batch_execute_resolve_action",
+      "method": "POST",
+      "path": "/api/v1/ontology/actions/${action_id}/execute-batch",
+      "expected_status": 200,
+      "body": {
+        "target_object_ids": ["${case_one_id}", "${case_two_id}"],
+        "parameters": {
+          "decision": "approve"
+        },
+        "justification": "resolved from smoke"
+      },
+      "expect": [
+        {
+          "path": "/succeeded",
+          "equals": 2
+        },
+        {
+          "path": "/failed",
+          "equals": 0
+        },
+        {
+          "path": "/results/0/status",
+          "equals": "succeeded"
+        }
+      ]
+    },
+    {
+      "name": "query_resolved_cases",
+      "method": "POST",
+      "path": "/api/v1/ontology/types/${case_type_id}/objects/query",
+      "expected_status": 200,
+      "body": {
+        "equals": {
+          "status": "resolved"
+        }
+      },
+      "expect": [
+        {
+          "path": "/total",
+          "equals": 2
+        }
+      ]
+    },
+    {
+      "name": "get_case_one_after_batch",
+      "method": "GET",
+      "path": "/api/v1/ontology/types/${case_type_id}/objects/${case_one_id}",
+      "expected_status": 200,
+      "expect": [
+        {
+          "path": "/properties/status",
+          "equals": "resolved"
+        },
+        {
+          "path": "/properties/decision",
+          "equals": "approve"
+        },
+        {
+          "path": "/properties/owner_count",
+          "equals": 1
+        },
+        {
+          "path": "/properties/peer_case_count",
+          "equals": 2
+        },
+        {
+          "path": "/properties/review_history/0/decision",
+          "equals": "approve"
+        },
+        {
+          "path": "/organization_id",
+          "equals": "${ORG_ALPHA}"
+        },
+        {
+          "path": "/marking",
+          "equals": "confidential"
+        }
+      ]
+    },
+    {
+      "name": "list_case_one_neighbors",
+      "method": "GET",
+      "path": "/api/v1/ontology/types/${case_type_id}/objects/${case_one_id}/neighbors",
+      "expected_status": 200,
+      "expect": [
+        {
+          "path": "/data/0/object/properties/name",
+          "equals": "Analyst A"
+        }
+      ]
+    },
+    {
+      "name": "list_ontology_audit_events",
+      "method": "GET",
+      "path": "/api/v1/audit/events?source_service=ontology-service",
+      "expected_status": 200,
+      "expect": [
+        {
+          "path": "/items/0/source_service",
+          "equals": "ontology-service"
+        },
+        {
+          "path": "/items/0/action",
+          "equals": "ontology.action.execute"
+        },
+        {
+          "path": "/items/0/status",
+          "equals": "success"
+        },
+        {
+          "path": "/items/0/metadata/action_id",
+          "equals": "${action_id}"
+        },
+        {
+          "path": "/items/0/metadata/justification",
+          "equals": "resolved from smoke"
+        }
+      ]
+    }
+  ]
+}

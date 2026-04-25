@@ -7,6 +7,8 @@
 		createAppFromTemplate,
 		deleteApp,
 		getApp,
+		importSlatePackage,
+		getSlatePackage,
 		listApps,
 		listAppTemplates,
 		listAppVersions,
@@ -20,14 +22,24 @@
 		type AppTemplate,
 		type AppVersion,
 		type AppWidget,
+		type SlatePackageFile,
+		type SlatePackageResponse,
 		type WidgetBinding,
 		type WidgetCatalogItem,
 		type WidgetEvent,
 	} from '$lib/api/apps';
+	import { listAgents, type AgentDefinition } from '$lib/api/ai';
+	import { listRepositories, type RepositoryDefinition } from '$lib/api/code-repos';
 	import { listDatasets, type Dataset } from '$lib/api/datasets';
 	import { listObjectTypes, type ObjectType } from '$lib/api/ontology';
 	import { notifications } from '$stores/notifications';
-	import { cloneValue, createEmptyAppDraft, createPage, createWidgetFromCatalog } from '$lib/utils/apps';
+	import {
+		cloneValue,
+		createEmptyAppDraft,
+		createPage,
+		createWidgetFromCatalog,
+		seedSlateWorkspace,
+	} from '$lib/utils/apps';
 
 	type BuilderState = {
 		loading: boolean;
@@ -41,7 +53,10 @@
 	let widgetCatalog = $state<WidgetCatalogItem[]>([]);
 	let datasets = $state<Dataset[]>([]);
 	let objectTypes = $state<ObjectType[]>([]);
+	let agents = $state<AgentDefinition[]>([]);
+	let repositories = $state<RepositoryDefinition[]>([]);
 	let versions = $state<AppVersion[]>([]);
+	let slatePackage = $state<SlatePackageResponse | null>(null);
 	let search = $state('');
 	let selectedAppId = $state('');
 	let selectedPageId = $state('');
@@ -51,6 +66,8 @@
 	let previewUrl = $state('');
 	let draggedWidgetType = $state('');
 	let draggedWidgetId = $state('');
+	let selectedWorkspaceFilePath = $state('');
+	let newWorkspaceFilePath = $state('');
 	let draft = $state<AppDefinition>(createEmptyAppDraft());
 	let builderState = $state<BuilderState>({
 		loading: true,
@@ -97,17 +114,21 @@
 		draft = cloneValue(nextDraft);
 		selectedPageId = nextDraft.pages[0]?.id ?? '';
 		selectedWidgetId = nextDraft.pages[0]?.widgets[0]?.id ?? '';
+		selectedWorkspaceFilePath = nextDraft.settings.slate.workspace.files[0]?.path ?? '';
+		newWorkspaceFilePath = '';
 		publishNotes = '';
 		syncSelection();
 	}
 
 	async function loadRegistry() {
-		const [appResponse, templateResponse, catalogResponse, datasetResponse, typeResponse] = await Promise.all([
+		const [appResponse, templateResponse, catalogResponse, datasetResponse, typeResponse, agentResponse, repositoryResponse] = await Promise.all([
 			listApps({ search: search || undefined, per_page: 50 }),
 			listAppTemplates(),
 			listWidgetCatalog(),
 			listDatasets({ per_page: 100 }),
 			listObjectTypes({ per_page: 100 }).catch(() => ({ data: [] as ObjectType[], total: 0, page: 1, per_page: 100 })),
+			listAgents().catch(() => ({ data: [] as AgentDefinition[], total: 0 })),
+			listRepositories().catch(() => ({ items: [] as RepositoryDefinition[] })),
 		]);
 
 		apps = appResponse.data;
@@ -115,17 +136,21 @@
 		widgetCatalog = catalogResponse;
 		datasets = datasetResponse.data;
 		objectTypes = typeResponse.data;
+		agents = agentResponse.data;
+		repositories = repositoryResponse.items;
 	}
 
 	async function loadPreviewState(appId: string) {
-		const [previewResponse, versionsResponse] = await Promise.all([
+		const [previewResponse, versionsResponse, slateResponse] = await Promise.all([
 			previewApp(appId).catch(() => null),
 			listAppVersions(appId).catch(() => ({ data: [] as AppVersion[] })),
+			getSlatePackage(appId).catch(() => null),
 		]);
 
 		previewEmbed = previewResponse?.embed.iframe_html ?? '';
 		previewUrl = previewResponse?.embed.url ?? '';
 		versions = versionsResponse.data;
+		slatePackage = slateResponse;
 	}
 
 	async function selectApp(id: string) {
@@ -159,6 +184,7 @@
 		previewEmbed = '';
 		previewUrl = '';
 		versions = [];
+		slatePackage = null;
 		resetDraft(createEmptyAppDraft());
 	}
 
@@ -222,6 +248,154 @@
 			await selectApp(app.id);
 		} catch (cause) {
 			builderState.error = cause instanceof Error ? cause.message : 'Failed to save app';
+		} finally {
+			builderState.saving = false;
+		}
+	}
+
+	function workspaceFiles() {
+		return draft.settings.slate.workspace.files;
+	}
+
+	function selectedWorkspaceFile() {
+		return workspaceFiles().find((file) => file.path === selectedWorkspaceFilePath) ?? workspaceFiles()[0] ?? null;
+	}
+
+	function syncWorkspaceSelection() {
+		const files = workspaceFiles();
+		if (files.length === 0) {
+			selectedWorkspaceFilePath = '';
+			return;
+		}
+		if (!files.some((file) => file.path === selectedWorkspaceFilePath)) {
+			selectedWorkspaceFilePath = files[0].path;
+		}
+	}
+
+	function setWorkspaceFiles(files: SlatePackageFile[]) {
+		draft = {
+			...draft,
+			settings: {
+				...draft.settings,
+				slate: {
+					...draft.settings.slate,
+					workspace: {
+						...draft.settings.slate.workspace,
+						enabled: true,
+						files,
+					},
+				},
+			},
+		};
+		syncWorkspaceSelection();
+	}
+
+	function seedWorkspaceFromSlateExport() {
+		if (!slatePackage) {
+			notifications.warning('Save the app first to generate a Slate package');
+			return;
+		}
+		setWorkspaceFiles(seedSlateWorkspace(slatePackage.files));
+		notifications.success('Slate package copied into the in-platform workspace');
+	}
+
+	function updateWorkspaceFile(path: string, patch: Partial<SlatePackageFile>) {
+		setWorkspaceFiles(
+			workspaceFiles().map((file) => file.path === path ? { ...file, ...patch } : file),
+		);
+	}
+
+	function addWorkspaceFile() {
+		const path = newWorkspaceFilePath.trim();
+		if (!path) {
+			notifications.warning('Add a path for the new workspace file');
+			return;
+		}
+		if (workspaceFiles().some((file) => file.path === path)) {
+			notifications.warning('That workspace file already exists');
+			return;
+		}
+		const nextFile: SlatePackageFile = {
+			path,
+			language: inferWorkspaceLanguage(path),
+			content: '',
+		};
+		setWorkspaceFiles([...workspaceFiles(), nextFile]);
+		selectedWorkspaceFilePath = path;
+		newWorkspaceFilePath = '';
+	}
+
+	function removeWorkspaceFile(path: string) {
+		setWorkspaceFiles(workspaceFiles().filter((file) => file.path !== path));
+	}
+
+	function inferWorkspaceLanguage(path: string) {
+		const extension = path.split('.').pop()?.toLowerCase() ?? '';
+		if (extension === 'json') return 'json';
+		if (extension === 'md') return 'markdown';
+		if (extension === 'ts' || extension === 'tsx') return 'typescript';
+		if (extension === 'js' || extension === 'jsx') return 'javascript';
+		if (extension === 'py') return 'python';
+		if (extension === 'toml') return 'toml';
+		return 'text';
+	}
+
+	function quiverEmbedUrl() {
+		const config = draft.settings.slate.quiver_embed;
+		if (!config.enabled || !config.primary_type_id) {
+			return '';
+		}
+		const query = new URLSearchParams({
+			embedded: '1',
+			primary_type_id: config.primary_type_id,
+		});
+		if (config.secondary_type_id) query.set('secondary_type_id', config.secondary_type_id);
+		if (config.join_field) query.set('join_field', config.join_field);
+		if (config.secondary_join_field) query.set('secondary_join_field', config.secondary_join_field);
+		if (config.date_field) query.set('date_field', config.date_field);
+		if (config.metric_field) query.set('metric_field', config.metric_field);
+		if (config.group_field) query.set('group_field', config.group_field);
+		if (config.selected_group) query.set('selected_group', config.selected_group);
+		return `/quiver?${query.toString()}`;
+	}
+
+	async function applyWorkspaceRoundTrip() {
+		if (!draft.id) {
+			await saveCurrentApp();
+		}
+
+		if (!draft.id) {
+			builderState.error = 'Save the app before applying the Slate workspace';
+			return;
+		}
+
+		if (workspaceFiles().length === 0) {
+			builderState.error = 'Seed the workspace from Slate export or add at least one file';
+			return;
+		}
+
+		builderState.saving = true;
+		builderState.error = '';
+		try {
+			const response = await importSlatePackage(draft.id, {
+				framework: draft.settings.slate.framework,
+				package_name: draft.settings.slate.package_name,
+				entry_file: draft.settings.slate.entry_file,
+				sdk_import: draft.settings.slate.sdk_import,
+				repository_id: draft.settings.slate.workspace.repository_id,
+				layout: draft.settings.slate.workspace.layout,
+				runtime: draft.settings.slate.workspace.runtime,
+				dev_command: draft.settings.slate.workspace.dev_command,
+				preview_command: draft.settings.slate.workspace.preview_command,
+				files: workspaceFiles(),
+			});
+			resetDraft(response.app);
+			slatePackage = response.slate_package;
+			selectedAppId = response.app.id;
+			await loadPreviewState(response.app.id);
+			notifications.success('Slate workspace applied back into Workshop');
+		} catch (cause) {
+			builderState.error = cause instanceof Error ? cause.message : 'Failed to apply Slate workspace';
 		} finally {
 			builderState.saving = false;
 		}
@@ -410,16 +584,20 @@
 
 	function addEvent() {
 		updateSelectedWidget((widget) => ({
-			...widget,
-			events: [
-				...widget.events,
-				{
-					id: crypto.randomUUID(),
-					trigger: widget.widget_type === 'form' ? 'submit' : 'click',
-					action: 'navigate',
-					label: '',
-					config: { path: '/' },
-				},
+				...widget,
+				events: [
+					...widget.events,
+					{
+						id: crypto.randomUUID(),
+						trigger: widget.widget_type === 'form'
+							? 'submit'
+							: widget.widget_type === 'scenario'
+								? 'scenario_change'
+								: 'click',
+						action: 'navigate',
+						label: '',
+						config: { path: '/' },
+					},
 			],
 		}));
 	}
@@ -481,6 +659,57 @@
 			});
 	}
 
+	function serializeScenarioParameters(widget: AppWidget | undefined) {
+		if (!widget || !Array.isArray(widget.props.parameters)) return '';
+		return widget.props.parameters
+			.map((parameter) => {
+				if (!parameter || typeof parameter !== 'object') return '';
+				const candidate = parameter as Record<string, unknown>;
+				return [
+					candidate.name,
+					candidate.label,
+					candidate.type,
+					candidate.default_value,
+					candidate.description,
+				]
+					.map((value) => typeof value === 'string' ? value : '')
+					.join('|');
+			})
+			.filter(Boolean)
+			.join('\n');
+	}
+
+	function parseScenarioParameters(text: string) {
+		return text
+			.split('\n')
+			.map((line) => line.trim())
+			.filter(Boolean)
+			.map((line) => {
+				const [name, label, type, defaultValue, description] = line.split('|').map((part) => part.trim());
+				return {
+					name: name || 'parameter',
+					label: label || name || 'Parameter',
+					type: type || 'text',
+					default_value: defaultValue || '',
+					description: description || undefined,
+				};
+			});
+	}
+
+	function setBuilderExperience(experience: string) {
+		draft = {
+			...draft,
+			settings: {
+				...draft.settings,
+				builder_experience: experience,
+				slate: {
+					...draft.settings.slate,
+					enabled: experience === 'slate',
+				},
+			},
+		};
+	}
+
 	function widgetBindingType(widget: AppWidget | undefined) {
 		return widget?.binding?.source_type ?? 'static';
 	}
@@ -488,6 +717,11 @@
 	$effect(() => {
 		draft.pages.length;
 		syncSelection();
+	});
+
+	$effect(() => {
+		draft.settings.slate.workspace.files.length;
+		syncWorkspaceSelection();
 	});
 
 	onMount(() => {
@@ -724,6 +958,200 @@
 						<pre class="overflow-auto whitespace-pre-wrap">{previewEmbed}</pre>
 					</div>
 				{/if}
+
+				{#if draft.settings.builder_experience === 'slate' && slatePackage}
+					<div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
+						<div class="flex flex-wrap items-center justify-between gap-3">
+							<div>
+								<div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Slate package</div>
+								<div class="mt-1 text-sm text-slate-500">Generated React starter backed by `@open-foundry/sdk/react`.</div>
+							</div>
+							<div class="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-500 dark:border-slate-700">{slatePackage.package_name}</div>
+						</div>
+						<div class="mt-4 grid gap-4 xl:grid-cols-2">
+							{#each slatePackage.files as file (file.path)}
+								<div class="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
+									<div class="flex items-center justify-between border-b border-slate-200 px-4 py-3 text-xs uppercase tracking-[0.18em] text-slate-400 dark:border-slate-800">
+										<span>{file.path}</span>
+										<span>{file.language}</span>
+									</div>
+									<pre class="overflow-auto p-4 text-xs text-slate-700 dark:text-slate-200">{file.content}</pre>
+								</div>
+							{/each}
+						</div>
+					</div>
+				{/if}
+
+				{#if draft.settings.builder_experience === 'slate'}
+					<div class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-950">
+						<div class="flex flex-wrap items-start justify-between gap-3">
+							<div>
+								<div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Developer workspace</div>
+								<div class="mt-1 text-sm text-slate-500">Edit the managed Slate files in-platform, keep a repo binding, and push the package back into Workshop with the round-trip manifest.</div>
+							</div>
+							<div class="flex flex-wrap gap-2">
+								<button type="button" class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-900" onclick={seedWorkspaceFromSlateExport}>
+									Seed from export
+								</button>
+								<button type="button" class="rounded-xl bg-slate-900 px-3 py-2 text-sm text-white dark:bg-slate-100 dark:text-slate-950" onclick={() => void applyWorkspaceRoundTrip()}>
+									Apply to Workshop
+								</button>
+							</div>
+						</div>
+
+						<div class="mt-4 grid gap-4 xl:grid-cols-[280px,1fr]">
+							<div class="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
+								<label class="text-sm">
+									<span class="mb-1 block text-slate-500">Workspace repository</span>
+									<select value={draft.settings.slate.workspace.repository_id ?? ''} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, slate: { ...draft.settings.slate, workspace: { ...draft.settings.slate.workspace, repository_id: (event.currentTarget as HTMLSelectElement).value || null } } } }} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-950">
+										<option value="">Detached workspace</option>
+										{#each repositories as repository (repository.id)}
+											<option value={repository.id}>{repository.name} • {repository.slug}</option>
+										{/each}
+									</select>
+								</label>
+
+								<div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+									<label class="text-sm">
+										<span class="mb-1 block text-slate-500">Layout</span>
+										<select value={draft.settings.slate.workspace.layout} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, slate: { ...draft.settings.slate, workspace: { ...draft.settings.slate.workspace, layout: (event.currentTarget as HTMLSelectElement).value } } } }} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-950">
+											<option value="split">Split</option>
+											<option value="stacked">Stacked</option>
+											<option value="focus">Focus editor</option>
+										</select>
+									</label>
+									<label class="text-sm">
+										<span class="mb-1 block text-slate-500">Runtime</span>
+										<select value={draft.settings.slate.workspace.runtime} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, slate: { ...draft.settings.slate, workspace: { ...draft.settings.slate.workspace, runtime: (event.currentTarget as HTMLSelectElement).value } } } }} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-950">
+											<option value="typescript-react">TypeScript + React</option>
+											<option value="python">Python</option>
+											<option value="hybrid">Hybrid</option>
+										</select>
+									</label>
+								</div>
+
+								<label class="text-sm">
+									<span class="mb-1 block text-slate-500">Dev command</span>
+									<input type="text" value={draft.settings.slate.workspace.dev_command} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, slate: { ...draft.settings.slate, workspace: { ...draft.settings.slate.workspace, dev_command: (event.currentTarget as HTMLInputElement).value } } } }} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-950" />
+								</label>
+								<label class="text-sm">
+									<span class="mb-1 block text-slate-500">Preview command</span>
+									<input type="text" value={draft.settings.slate.workspace.preview_command} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, slate: { ...draft.settings.slate, workspace: { ...draft.settings.slate.workspace, preview_command: (event.currentTarget as HTMLInputElement).value } } } }} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-950" />
+								</label>
+
+								<div class="rounded-2xl border border-slate-200 bg-white p-3 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-950">
+									<div class="font-semibold uppercase tracking-[0.18em] text-slate-400">Managed files</div>
+									<div class="mt-2">{workspaceFiles().length} file(s) persisted with this app</div>
+									<div class="mt-1">Manifest path: `.openfoundry/workshop.json`</div>
+								</div>
+							</div>
+
+							<div class={`grid gap-4 ${draft.settings.slate.workspace.layout === 'stacked' ? 'grid-cols-1' : draft.settings.slate.workspace.layout === 'focus' ? 'grid-cols-1' : 'xl:grid-cols-[1.1fr,0.9fr]'}`}>
+								<div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
+									<div class="flex flex-wrap items-center justify-between gap-3">
+										<div>
+											<div class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Editor</div>
+											<div class="mt-1 text-sm text-slate-500">This is the managed source package that can be round-tripped back into Workshop.</div>
+										</div>
+										<div class="flex gap-2">
+											<input type="text" bind:value={newWorkspaceFilePath} placeholder="src/new-file.tsx" class="rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950" />
+											<button type="button" class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800" onclick={addWorkspaceFile}>Add file</button>
+										</div>
+									</div>
+
+									{#if workspaceFiles().length === 0}
+										<div class="mt-4 rounded-2xl border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-500 dark:border-slate-700">
+											Seed the workspace from the generated Slate package to start editing in-platform.
+										</div>
+									{:else}
+										<div class="mt-4 grid gap-4 xl:grid-cols-[220px,1fr]">
+											<div class="space-y-2">
+												{#each workspaceFiles() as file (file.path)}
+													<button type="button" class={`w-full rounded-2xl border px-3 py-3 text-left text-sm ${selectedWorkspaceFilePath === file.path ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20' : 'border-slate-200 bg-white hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:hover:bg-slate-900'}`} onclick={() => selectedWorkspaceFilePath = file.path}>
+														<div class="font-medium text-slate-900 dark:text-slate-100">{file.path}</div>
+														<div class="mt-1 text-xs text-slate-500">{file.language}</div>
+													</button>
+												{/each}
+											</div>
+
+											{#if selectedWorkspaceFile()}
+												<div class="space-y-3">
+													<div class="flex flex-wrap items-center justify-between gap-3">
+														<div class="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-500 dark:border-slate-700">{selectedWorkspaceFile()?.path}</div>
+														<button type="button" class="rounded-xl border border-rose-200 px-3 py-2 text-xs text-rose-600 hover:bg-rose-50 dark:border-rose-900/40 dark:hover:bg-rose-950/20" onclick={() => removeWorkspaceFile(selectedWorkspaceFile()?.path ?? '')}>
+															Remove file
+														</button>
+													</div>
+													<textarea rows="22" value={selectedWorkspaceFile()?.content ?? ''} oninput={(event) => updateWorkspaceFile(selectedWorkspaceFile()?.path ?? '', { content: (event.currentTarget as HTMLTextAreaElement).value })} class="min-h-[420px] w-full rounded-2xl border border-slate-200 bg-slate-950 px-4 py-3 font-mono text-xs text-slate-100 dark:border-slate-700"></textarea>
+												</div>
+											{/if}
+										</div>
+									{/if}
+								</div>
+
+								{#if draft.settings.slate.workspace.layout !== 'focus'}
+									<div class="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
+										<div class="flex items-center justify-between gap-3">
+											<div>
+												<div class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Embedded Quiver</div>
+												<div class="mt-1 text-sm text-slate-500">Keep ontology analytics visible while you shape the pro-code workspace.</div>
+											</div>
+											<label class="flex items-center gap-2 text-sm text-slate-500">
+												<input type="checkbox" checked={draft.settings.slate.quiver_embed.enabled} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, slate: { ...draft.settings.slate, quiver_embed: { ...draft.settings.slate.quiver_embed, enabled: (event.currentTarget as HTMLInputElement).checked } } } }} />
+												<span>Enable</span>
+											</label>
+										</div>
+
+										<div class="grid gap-3 sm:grid-cols-2">
+											<label class="text-sm">
+												<span class="mb-1 block text-slate-500">Primary type</span>
+												<select value={draft.settings.slate.quiver_embed.primary_type_id ?? ''} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, slate: { ...draft.settings.slate, quiver_embed: { ...draft.settings.slate.quiver_embed, primary_type_id: (event.currentTarget as HTMLSelectElement).value || null } } } }} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-950">
+													<option value="">Select object type</option>
+													{#each objectTypes as objectType (objectType.id)}
+														<option value={objectType.id}>{objectType.display_name}</option>
+													{/each}
+												</select>
+											</label>
+											<label class="text-sm">
+												<span class="mb-1 block text-slate-500">Secondary type</span>
+												<select value={draft.settings.slate.quiver_embed.secondary_type_id ?? ''} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, slate: { ...draft.settings.slate, quiver_embed: { ...draft.settings.slate.quiver_embed, secondary_type_id: (event.currentTarget as HTMLSelectElement).value || null } } } }} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-950">
+													<option value="">None</option>
+													{#each objectTypes as objectType (objectType.id)}
+														<option value={objectType.id}>{objectType.display_name}</option>
+													{/each}
+												</select>
+											</label>
+											<label class="text-sm">
+												<span class="mb-1 block text-slate-500">Date field</span>
+												<input type="text" value={draft.settings.slate.quiver_embed.date_field ?? ''} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, slate: { ...draft.settings.slate, quiver_embed: { ...draft.settings.slate.quiver_embed, date_field: (event.currentTarget as HTMLInputElement).value || null } } } }} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-950" />
+											</label>
+											<label class="text-sm">
+												<span class="mb-1 block text-slate-500">Metric field</span>
+												<input type="text" value={draft.settings.slate.quiver_embed.metric_field ?? ''} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, slate: { ...draft.settings.slate, quiver_embed: { ...draft.settings.slate.quiver_embed, metric_field: (event.currentTarget as HTMLInputElement).value || null } } } }} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-950" />
+											</label>
+											<label class="text-sm">
+												<span class="mb-1 block text-slate-500">Group field</span>
+												<input type="text" value={draft.settings.slate.quiver_embed.group_field ?? ''} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, slate: { ...draft.settings.slate, quiver_embed: { ...draft.settings.slate.quiver_embed, group_field: (event.currentTarget as HTMLInputElement).value || null } } } }} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-950" />
+											</label>
+											<label class="text-sm">
+												<span class="mb-1 block text-slate-500">Join field</span>
+												<input type="text" value={draft.settings.slate.quiver_embed.join_field ?? ''} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, slate: { ...draft.settings.slate, quiver_embed: { ...draft.settings.slate.quiver_embed, join_field: (event.currentTarget as HTMLInputElement).value || null } } } }} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-950" />
+											</label>
+										</div>
+
+										{#if quiverEmbedUrl()}
+											<iframe src={quiverEmbedUrl()} title="Quiver embed" class="h-[420px] w-full rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950"></iframe>
+										{:else}
+											<div class="rounded-2xl border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-500 dark:border-slate-700">
+												Choose a primary object type to turn on the embedded Quiver panel.
+											</div>
+										{/if}
+									</div>
+								{/if}
+							</div>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</section>
 
@@ -771,6 +1199,77 @@
 						<span class="mb-1 block text-slate-500">Radius</span>
 						<input type="number" min="0" value={draft.theme.border_radius} oninput={(event) => draft = { ...draft, theme: { ...draft.theme, border_radius: Number((event.currentTarget as HTMLInputElement).value) || 0 } }} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900" />
 					</label>
+				</div>
+			</div>
+
+			<div class="rounded-2xl border border-slate-200 p-4 dark:border-slate-700">
+				<div class="text-xs uppercase tracking-[0.22em] text-slate-400">Experience mode</div>
+				<div class="mt-4 space-y-4">
+					<label class="text-sm">
+						<span class="mb-1 block text-slate-500">Builder experience</span>
+						<select value={draft.settings.builder_experience} oninput={(event) => setBuilderExperience((event.currentTarget as HTMLSelectElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+							<option value="workshop">Workshop</option>
+							<option value="slate">Slate</option>
+						</select>
+					</label>
+
+					<div class="grid gap-3 sm:grid-cols-2">
+						<label class="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-slate-700">
+							<span class="text-slate-500">Consumer mode</span>
+							<input type="checkbox" checked={draft.settings.consumer_mode.enabled} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, consumer_mode: { ...draft.settings.consumer_mode, enabled: (event.currentTarget as HTMLInputElement).checked } } }} />
+						</label>
+						<label class="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-slate-700">
+							<span class="text-slate-500">Guest access</span>
+							<input type="checkbox" checked={draft.settings.consumer_mode.allow_guest_access} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, consumer_mode: { ...draft.settings.consumer_mode, allow_guest_access: (event.currentTarget as HTMLInputElement).checked } } }} />
+						</label>
+					</div>
+
+					{#if draft.settings.consumer_mode.enabled}
+						<div class="grid gap-3 sm:grid-cols-2">
+							<label class="text-sm sm:col-span-2">
+								<span class="mb-1 block text-slate-500">Portal title</span>
+								<input type="text" value={draft.settings.consumer_mode.portal_title ?? ''} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, consumer_mode: { ...draft.settings.consumer_mode, portal_title: (event.currentTarget as HTMLInputElement).value || null } } }} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900" />
+							</label>
+							<label class="text-sm sm:col-span-2">
+								<span class="mb-1 block text-slate-500">Portal subtitle</span>
+								<textarea rows="3" value={draft.settings.consumer_mode.portal_subtitle ?? ''} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, consumer_mode: { ...draft.settings.consumer_mode, portal_subtitle: (event.currentTarget as HTMLTextAreaElement).value || null } } }} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"></textarea>
+							</label>
+							<label class="text-sm">
+								<span class="mb-1 block text-slate-500">CTA label</span>
+								<input type="text" value={draft.settings.consumer_mode.primary_cta_label ?? ''} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, consumer_mode: { ...draft.settings.consumer_mode, primary_cta_label: (event.currentTarget as HTMLInputElement).value || null } } }} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900" />
+							</label>
+							<label class="text-sm">
+								<span class="mb-1 block text-slate-500">CTA URL</span>
+								<input type="text" value={draft.settings.consumer_mode.primary_cta_url ?? ''} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, consumer_mode: { ...draft.settings.consumer_mode, primary_cta_url: (event.currentTarget as HTMLInputElement).value || null } } }} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900" />
+							</label>
+						</div>
+					{/if}
+
+					{#if draft.settings.builder_experience === 'slate'}
+						<div class="rounded-2xl bg-slate-50 p-4 dark:bg-slate-900">
+							<div class="text-xs uppercase tracking-[0.22em] text-slate-400">Slate starter</div>
+							<div class="mt-3 grid gap-3 sm:grid-cols-2">
+								<label class="text-sm">
+									<span class="mb-1 block text-slate-500">Framework</span>
+									<select value={draft.settings.slate.framework} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, slate: { ...draft.settings.slate, framework: (event.currentTarget as HTMLSelectElement).value } } }} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-950">
+										<option value="react">React</option>
+									</select>
+								</label>
+								<label class="text-sm">
+									<span class="mb-1 block text-slate-500">Package name</span>
+									<input type="text" value={draft.settings.slate.package_name} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, slate: { ...draft.settings.slate, package_name: (event.currentTarget as HTMLInputElement).value } } }} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-950" />
+								</label>
+								<label class="text-sm">
+									<span class="mb-1 block text-slate-500">Entry file</span>
+									<input type="text" value={draft.settings.slate.entry_file} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, slate: { ...draft.settings.slate, entry_file: (event.currentTarget as HTMLInputElement).value } } }} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-950" />
+								</label>
+								<label class="text-sm">
+									<span class="mb-1 block text-slate-500">SDK import</span>
+									<input type="text" value={draft.settings.slate.sdk_import} oninput={(event) => draft = { ...draft, settings: { ...draft.settings, slate: { ...draft.settings.slate, sdk_import: (event.currentTarget as HTMLInputElement).value } } }} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-950" />
+								</label>
+							</div>
+						</div>
+					{/if}
 				</div>
 			</div>
 
@@ -846,47 +1345,57 @@
 						<div class="rounded-2xl border border-slate-200 p-3 dark:border-slate-700">
 							<div class="text-xs uppercase tracking-[0.22em] text-slate-400">Binding</div>
 							<div class="mt-3 space-y-3">
-								<label class="text-sm">
-									<span class="mb-1 block text-slate-500">Source type</span>
-									<select value={widgetBindingType(selectedWidget())} oninput={(event) => updateSelectedWidgetBinding((binding) => ({ ...binding, source_type: (event.currentTarget as HTMLSelectElement).value }))} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
-										<option value="static">Static</option>
-										<option value="dataset">Dataset</option>
-										<option value="query">Query</option>
-										<option value="ontology">Ontology</option>
-									</select>
-								</label>
+								{#if selectedWidget()?.widget_type === 'agent'}
+									<div class="rounded-xl bg-slate-50 px-3 py-3 text-sm text-slate-500">
+										Agent widgets use `agent_id` and optional `knowledge_base_id` props instead of dataset/query bindings.
+									</div>
+								{:else if selectedWidget()?.widget_type === 'scenario'}
+									<div class="rounded-xl bg-slate-50 px-3 py-3 text-sm text-slate-500">
+										Scenario widgets drive runtime parameters for the rest of the app and do not need a direct data source.
+									</div>
+								{:else}
+									<label class="text-sm">
+										<span class="mb-1 block text-slate-500">Source type</span>
+										<select value={widgetBindingType(selectedWidget())} oninput={(event) => updateSelectedWidgetBinding((binding) => ({ ...binding, source_type: (event.currentTarget as HTMLSelectElement).value }))} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+											<option value="static">Static</option>
+											<option value="dataset">Dataset</option>
+											<option value="query">Query</option>
+											<option value="ontology">Ontology</option>
+										</select>
+									</label>
 
-								{#if widgetBindingType(selectedWidget()) === 'dataset'}
+									{#if widgetBindingType(selectedWidget()) === 'dataset'}
+										<label class="text-sm">
+											<span class="mb-1 block text-slate-500">Dataset</span>
+											<select value={selectedWidget()?.binding?.source_id ?? ''} oninput={(event) => updateSelectedWidgetBinding((binding) => ({ ...binding, source_id: (event.currentTarget as HTMLSelectElement).value }))} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+												<option value="">Select dataset</option>
+												{#each datasets as dataset (dataset.id)}
+													<option value={dataset.id}>{dataset.name}</option>
+												{/each}
+											</select>
+										</label>
+									{:else if widgetBindingType(selectedWidget()) === 'ontology'}
+										<label class="text-sm">
+											<span class="mb-1 block text-slate-500">Object type</span>
+											<select value={selectedWidget()?.binding?.source_id ?? ''} oninput={(event) => updateSelectedWidgetBinding((binding) => ({ ...binding, source_id: (event.currentTarget as HTMLSelectElement).value }))} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+												<option value="">Select object type</option>
+												{#each objectTypes as objectType (objectType.id)}
+													<option value={objectType.id}>{objectType.display_name}</option>
+												{/each}
+											</select>
+										</label>
+									{:else if widgetBindingType(selectedWidget()) === 'query'}
+										<label class="text-sm">
+											<span class="mb-1 block text-slate-500">SQL query</span>
+											<textarea rows="5" value={selectedWidget()?.binding?.query_text ?? ''} oninput={(event) => updateSelectedWidgetBinding((binding) => ({ ...binding, query_text: (event.currentTarget as HTMLTextAreaElement).value }))} class="w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-900"></textarea>
+										</label>
+									{/if}
+
 									<label class="text-sm">
-										<span class="mb-1 block text-slate-500">Dataset</span>
-										<select value={selectedWidget()?.binding?.source_id ?? ''} oninput={(event) => updateSelectedWidgetBinding((binding) => ({ ...binding, source_id: (event.currentTarget as HTMLSelectElement).value }))} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
-											<option value="">Select dataset</option>
-											{#each datasets as dataset (dataset.id)}
-												<option value={dataset.id}>{dataset.name}</option>
-											{/each}
-										</select>
-									</label>
-								{:else if widgetBindingType(selectedWidget()) === 'ontology'}
-									<label class="text-sm">
-										<span class="mb-1 block text-slate-500">Object type</span>
-										<select value={selectedWidget()?.binding?.source_id ?? ''} oninput={(event) => updateSelectedWidgetBinding((binding) => ({ ...binding, source_id: (event.currentTarget as HTMLSelectElement).value }))} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
-											<option value="">Select object type</option>
-											{#each objectTypes as objectType (objectType.id)}
-												<option value={objectType.id}>{objectType.display_name}</option>
-											{/each}
-										</select>
-									</label>
-								{:else if widgetBindingType(selectedWidget()) === 'query'}
-									<label class="text-sm">
-										<span class="mb-1 block text-slate-500">SQL query</span>
-										<textarea rows="5" value={selectedWidget()?.binding?.query_text ?? ''} oninput={(event) => updateSelectedWidgetBinding((binding) => ({ ...binding, query_text: (event.currentTarget as HTMLTextAreaElement).value }))} class="w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-900"></textarea>
+										<span class="mb-1 block text-slate-500">Limit</span>
+										<input type="number" min="1" value={selectedWidget()?.binding?.limit ?? 25} oninput={(event) => updateSelectedWidgetBinding((binding) => ({ ...binding, limit: Number((event.currentTarget as HTMLInputElement).value) || 25 }))} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900" />
 									</label>
 								{/if}
-
-								<label class="text-sm">
-									<span class="mb-1 block text-slate-500">Limit</span>
-									<input type="number" min="1" value={selectedWidget()?.binding?.limit ?? 25} oninput={(event) => updateSelectedWidgetBinding((binding) => ({ ...binding, limit: Number((event.currentTarget as HTMLInputElement).value) || 25 }))} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900" />
-								</label>
 							</div>
 						</div>
 
@@ -984,6 +1493,46 @@
 								<textarea rows="5" value={serializeFormFields(selectedWidget())} oninput={(event) => updateSelectedWidgetProps('fields', parseFormFields((event.currentTarget as HTMLTextAreaElement).value))} class="w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-900"></textarea>
 								<span class="mt-1 block text-xs text-slate-400">Format: `name|Label|type|option1,option2`</span>
 							</label>
+						{:else if selectedWidget()?.widget_type === 'scenario'}
+							<div class="space-y-3">
+								<label class="text-sm">
+									<span class="mb-1 block text-slate-500">Headline</span>
+									<input type="text" value={String(selectedWidget()?.props.headline ?? '')} oninput={(event) => updateSelectedWidgetProps('headline', (event.currentTarget as HTMLInputElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900" />
+								</label>
+								<label class="text-sm">
+									<span class="mb-1 block text-slate-500">Parameters</span>
+									<textarea rows="6" value={serializeScenarioParameters(selectedWidget())} oninput={(event) => updateSelectedWidgetProps('parameters', parseScenarioParameters((event.currentTarget as HTMLTextAreaElement).value))} class="w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-900"></textarea>
+									<span class="mt-1 block text-xs text-slate-400">Format: `name|Label|type|default|description`</span>
+								</label>
+							</div>
+						{:else if selectedWidget()?.widget_type === 'agent'}
+							<div class="grid gap-3 sm:grid-cols-2">
+								<label class="text-sm sm:col-span-2">
+									<span class="mb-1 block text-slate-500">Agent</span>
+									<select value={String(selectedWidget()?.props.agent_id ?? '')} oninput={(event) => updateSelectedWidgetProps('agent_id', (event.currentTarget as HTMLSelectElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+										<option value="">Select active agent</option>
+										{#each agents as agent (agent.id)}
+											<option value={agent.id}>{agent.name}</option>
+										{/each}
+									</select>
+								</label>
+								<label class="text-sm sm:col-span-2">
+									<span class="mb-1 block text-slate-500">Welcome message</span>
+									<textarea rows="3" value={String(selectedWidget()?.props.welcome_message ?? '')} oninput={(event) => updateSelectedWidgetProps('welcome_message', (event.currentTarget as HTMLTextAreaElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"></textarea>
+								</label>
+								<label class="text-sm sm:col-span-2">
+									<span class="mb-1 block text-slate-500">Prompt placeholder</span>
+									<input type="text" value={String(selectedWidget()?.props.placeholder ?? '')} oninput={(event) => updateSelectedWidgetProps('placeholder', (event.currentTarget as HTMLInputElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900" />
+								</label>
+								<label class="text-sm">
+									<span class="mb-1 block text-slate-500">Knowledge base id</span>
+									<input type="text" value={String(selectedWidget()?.props.knowledge_base_id ?? '')} oninput={(event) => updateSelectedWidgetProps('knowledge_base_id', (event.currentTarget as HTMLInputElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900" />
+								</label>
+								<label class="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-slate-700">
+									<span class="text-slate-500">Show traces</span>
+									<input type="checkbox" checked={Boolean(selectedWidget()?.props.show_traces ?? true)} oninput={(event) => updateSelectedWidgetProps('show_traces', (event.currentTarget as HTMLInputElement).checked)} />
+								</label>
+							</div>
 						{:else if selectedWidget()?.widget_type === 'container'}
 							<label class="text-sm">
 								<span class="mb-1 block text-slate-500">Container title</span>
@@ -1008,6 +1557,7 @@
 														<option value="click">Click</option>
 														<option value="submit">Submit</option>
 														<option value="change">Change</option>
+														<option value="scenario_change">Scenario change</option>
 													</select>
 												</label>
 												<label class="text-sm">
@@ -1017,6 +1567,8 @@
 														<option value="filter">Filter</option>
 														<option value="open_link">Open link</option>
 														<option value="execute_query">Execute query</option>
+														<option value="set_parameters">Set runtime parameters</option>
+														<option value="clear_parameters">Clear runtime parameters</option>
 													</select>
 												</label>
 												<label class="text-sm sm:col-span-2">
@@ -1048,6 +1600,14 @@
 														<span class="mb-1 block text-slate-500">SQL</span>
 														<textarea rows="4" value={String(event.config.sql ?? '')} oninput={(e) => updateEventConfig(event.id, 'sql', (e.currentTarget as HTMLTextAreaElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-900"></textarea>
 													</label>
+												{:else if event.action === 'set_parameters'}
+													<div class="rounded-xl bg-slate-50 px-3 py-3 text-sm text-slate-500 sm:col-span-2">
+														This action forwards the widget payload as runtime parameters for the rest of the app.
+													</div>
+												{:else if event.action === 'clear_parameters'}
+													<div class="rounded-xl bg-slate-50 px-3 py-3 text-sm text-slate-500 sm:col-span-2">
+														This action clears all active runtime parameters before the next query or interaction.
+													</div>
 												{/if}
 											</div>
 

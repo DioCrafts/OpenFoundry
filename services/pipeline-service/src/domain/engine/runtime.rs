@@ -5,8 +5,8 @@ use std::{
     str::from_utf8,
 };
 
-use base64::Engine as _;
 use auth_middleware::jwt::{build_access_claims, encode_token};
+use base64::Engine as _;
 use bytes::Bytes;
 use datafusion::{
     arrow::{array::RecordBatch, util::display::array_value_to_string},
@@ -14,7 +14,10 @@ use datafusion::{
 };
 use pyo3::{prelude::*, types::PyDict};
 use query_engine::context::QueryContext;
-use reqwest::multipart::{Form, Part};
+use reqwest::{
+    header::{HeaderName, HeaderValue},
+    multipart::{Form, Part},
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::fs;
@@ -63,6 +66,13 @@ pub struct PythonExecutionResult {
     pub output_dataset_version: Option<i32>,
 }
 
+#[derive(Debug)]
+pub struct RemoteComputeExecutionResult {
+    pub rows_affected: Option<u64>,
+    pub output: Value,
+    pub output_dataset_version: Option<i32>,
+}
+
 #[derive(Debug, Deserialize)]
 struct RemoteDataset {
     id: Uuid,
@@ -79,6 +89,27 @@ struct PreparedInput {
     alias: String,
     metadata: DatasetInputMetadata,
     rows: Vec<Value>,
+}
+
+#[derive(Debug, Serialize)]
+struct RemoteComputeRequest {
+    job_type: String,
+    pipeline_node_id: String,
+    pipeline_node_label: String,
+    transform_type: String,
+    config: Value,
+    inputs: Vec<PreparedInput>,
+    output_dataset_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RemoteComputeResponse {
+    status: Option<String>,
+    rows_affected: Option<u64>,
+    output: Option<Value>,
+    result_rows: Option<Value>,
+    run_id: Option<String>,
+    worker_id: Option<String>,
 }
 
 struct PreparedQueryContext {
@@ -115,7 +146,8 @@ pub async fn load_node_inputs(
             ));
         }
 
-        let remote = serde_json::from_str::<RemoteDataset>(&body).map_err(|error| error.to_string())?;
+        let remote =
+            serde_json::from_str::<RemoteDataset>(&body).map_err(|error| error.to_string())?;
         let storage_path = format!("{}/v{}", remote.storage_path, remote.current_version);
         let bytes = state
             .storage
@@ -255,44 +287,45 @@ pub async fn execute_python_transform(
     let prepared_json =
         serde_json::to_string(&prepared_inputs).map_err(|error| error.to_string())?;
 
-    let execution = Python::with_gil(|py| -> Result<(Option<u64>, Value, Option<Vec<Value>>), String> {
-        let locals = PyDict::new_bound(py);
-        locals
-            .set_item("config_json", node.config.to_string())
-            .map_err(|error| error.to_string())?;
-        locals
-            .set_item("prepared_inputs_json", prepared_json.clone())
-            .map_err(|error| error.to_string())?;
-        locals
-            .set_item(
-                "input_dataset_ids",
-                node.input_dataset_ids
-                    .iter()
-                    .map(Uuid::to_string)
-                    .collect::<Vec<_>>(),
-            )
-            .map_err(|error| error.to_string())?;
-        locals
-            .set_item(
-                "output_dataset_id",
-                node.output_dataset_id.map(|id| id.to_string()),
-            )
-            .map_err(|error| error.to_string())?;
+    let execution = Python::with_gil(
+        |py| -> Result<(Option<u64>, Value, Option<Vec<Value>>), String> {
+            let locals = PyDict::new_bound(py);
+            locals
+                .set_item("config_json", node.config.to_string())
+                .map_err(|error| error.to_string())?;
+            locals
+                .set_item("prepared_inputs_json", prepared_json.clone())
+                .map_err(|error| error.to_string())?;
+            locals
+                .set_item(
+                    "input_dataset_ids",
+                    node.input_dataset_ids
+                        .iter()
+                        .map(Uuid::to_string)
+                        .collect::<Vec<_>>(),
+                )
+                .map_err(|error| error.to_string())?;
+            locals
+                .set_item(
+                    "output_dataset_id",
+                    node.output_dataset_id.map(|id| id.to_string()),
+                )
+                .map_err(|error| error.to_string())?;
 
-        py.run_bound(
+            py.run_bound(
             "import io, json, sys\nconfig = json.loads(config_json)\nprepared_inputs = json.loads(prepared_inputs_json)\ninput_datasets = prepared_inputs\ninput_rows = prepared_inputs[0]['rows'] if prepared_inputs else []\n_buf = io.StringIO()\n_real_stdout = sys.stdout\nsys.stdout = _buf",
             None,
             Some(&locals),
         )
         .map_err(|error| error.to_string())?;
 
-        let execution = py.run_bound(source, None, Some(&locals));
-        let stdout = py
-            .eval_bound("_buf.getvalue()", None, Some(&locals))
-            .ok()
-            .and_then(|value| value.extract::<String>().ok())
-            .unwrap_or_default();
-        let rows_affected = py
+            let execution = py.run_bound(source, None, Some(&locals));
+            let stdout = py
+                .eval_bound("_buf.getvalue()", None, Some(&locals))
+                .ok()
+                .and_then(|value| value.extract::<String>().ok())
+                .unwrap_or_default();
+            let rows_affected = py
             .eval_bound(
                 "int(rows_affected) if 'rows_affected' in locals() and rows_affected is not None else None",
                 None,
@@ -301,16 +334,16 @@ pub async fn execute_python_transform(
             .ok()
             .and_then(|value| value.extract::<Option<u64>>().ok())
             .flatten();
-        let result = py
-            .eval_bound(
-                "str(result) if 'result' in locals() and result is not None else None",
-                None,
-                Some(&locals),
-            )
-            .ok()
-            .and_then(|value| value.extract::<Option<String>>().ok())
-            .flatten();
-        let result_rows_json = py
+            let result = py
+                .eval_bound(
+                    "str(result) if 'result' in locals() and result is not None else None",
+                    None,
+                    Some(&locals),
+                )
+                .ok()
+                .and_then(|value| value.extract::<Option<String>>().ok())
+                .flatten();
+            let result_rows_json = py
             .eval_bound(
                 "json.dumps(result_rows) if 'result_rows' in locals() and result_rows is not None else None",
                 None,
@@ -320,30 +353,34 @@ pub async fn execute_python_transform(
             .and_then(|value| value.extract::<Option<String>>().ok())
             .flatten();
 
-        let _ = py.run_bound("sys.stdout = _real_stdout", None, Some(&locals));
+            let _ = py.run_bound("sys.stdout = _real_stdout", None, Some(&locals));
 
-        match execution {
-            Ok(_) => {
-                let result_rows = result_rows_json
-                    .map(|raw| serde_json::from_str::<Value>(&raw).map_err(|error| error.to_string()))
-                    .transpose()?
-                    .map(normalize_result_rows)
-                    .transpose()?;
-                Ok((
-                    rows_affected.or_else(|| result_rows.as_ref().map(|rows| rows.len() as u64)),
-                    json!({
-                        "stdout": stdout,
-                        "result": result,
-                        "sample_rows": result_rows
-                            .as_ref()
-                            .map(|rows| rows.iter().take(10).cloned().collect::<Vec<_>>()),
-                    }),
-                    result_rows,
-                ))
+            match execution {
+                Ok(_) => {
+                    let result_rows = result_rows_json
+                        .map(|raw| {
+                            serde_json::from_str::<Value>(&raw).map_err(|error| error.to_string())
+                        })
+                        .transpose()?
+                        .map(normalize_result_rows)
+                        .transpose()?;
+                    Ok((
+                        rows_affected
+                            .or_else(|| result_rows.as_ref().map(|rows| rows.len() as u64)),
+                        json!({
+                            "stdout": stdout,
+                            "result": result,
+                            "sample_rows": result_rows
+                                .as_ref()
+                                .map(|rows| rows.iter().take(10).cloned().collect::<Vec<_>>()),
+                        }),
+                        result_rows,
+                    ))
+                }
+                Err(error) => Err(format!("{error}")),
             }
-            Err(error) => Err(format!("{error}")),
-        }
-    })?;
+        },
+    )?;
 
     let output_dataset_version = match (node.output_dataset_id, execution.2.as_ref()) {
         (Some(dataset_id), Some(rows)) => {
@@ -387,7 +424,11 @@ pub async fn execute_passthrough_transform(
                 dataset_id,
                 &primary_input.bytes,
                 &primary_input.metadata.format,
-                format!("{}.{}", node.id, file_extension(&primary_input.metadata.format)),
+                format!(
+                    "{}.{}",
+                    node.id,
+                    file_extension(&primary_input.metadata.format)
+                ),
             )
             .await?,
         ),
@@ -403,6 +444,155 @@ pub async fn execute_passthrough_transform(
         }),
         output_dataset_version,
     ))
+}
+
+pub async fn execute_remote_compute_transform(
+    state: &AppState,
+    actor_id: Uuid,
+    node: &PipelineNode,
+    inputs: &[LoadedDataset],
+    default_job_type: &str,
+) -> Result<RemoteComputeExecutionResult, String> {
+    let prepared_inputs = prepare_python_inputs(node, inputs).await?;
+    let (endpoint, request_payload) =
+        build_remote_compute_request(node, prepared_inputs, default_job_type)?;
+
+    let mut request = state.http_client.post(&endpoint).json(&request_payload);
+    if node
+        .config
+        .get("auth_mode")
+        .and_then(Value::as_str)
+        .unwrap_or("none")
+        == "service_jwt"
+    {
+        request = request.bearer_auth(issue_service_token(state, actor_id)?);
+    }
+    if let Some(headers) = node.config.get("headers").and_then(Value::as_object) {
+        for (name, value) in headers {
+            let header_value = value
+                .as_str()
+                .ok_or_else(|| format!("header '{name}' must be a string"))?;
+            let header_name =
+                HeaderName::from_bytes(name.as_bytes()).map_err(|error| error.to_string())?;
+            let header_value =
+                HeaderValue::from_str(header_value).map_err(|error| error.to_string())?;
+            request = request.header(header_name, header_value);
+        }
+    }
+
+    let response = request.send().await.map_err(|error| error.to_string())?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!(
+            "remote compute request failed with HTTP {status}: {body}"
+        ));
+    }
+
+    let payload =
+        serde_json::from_str::<RemoteComputeResponse>(&body).map_err(|error| error.to_string())?;
+    let (rows_affected, output, result_rows) =
+        prepare_remote_compute_output(payload, &endpoint, &request_payload.job_type)?;
+
+    let output_dataset_version = match (node.output_dataset_id, result_rows.as_ref()) {
+        (Some(dataset_id), Some(rows)) => {
+            Some(upload_json_rows(state, actor_id, dataset_id, &node.id, rows).await?)
+        }
+        (Some(_), None) => {
+            return Err(
+                "remote compute transform with output_dataset_id must return 'result_rows'"
+                    .to_string(),
+            );
+        }
+        (None, _) => None,
+    };
+
+    Ok(RemoteComputeExecutionResult {
+        rows_affected,
+        output,
+        output_dataset_version,
+    })
+}
+
+fn build_remote_compute_request(
+    node: &PipelineNode,
+    prepared_inputs: Vec<PreparedInput>,
+    default_job_type: &str,
+) -> Result<(String, RemoteComputeRequest), String> {
+    let endpoint = node
+        .config
+        .get("endpoint")
+        .or_else(|| node.config.get("url"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            format!(
+                "{default_job_type} transform has no 'endpoint' or 'url' config"
+            )
+        })?
+        .to_string();
+    let job_type = node
+        .config
+        .get("job_type")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(default_job_type)
+        .to_string();
+
+    Ok((
+        endpoint,
+        RemoteComputeRequest {
+            job_type,
+            pipeline_node_id: node.id.clone(),
+            pipeline_node_label: node.label.clone(),
+            transform_type: node.transform_type.clone(),
+            config: node.config.clone(),
+            inputs: prepared_inputs,
+            output_dataset_id: node.output_dataset_id,
+        },
+    ))
+}
+
+fn prepare_remote_compute_output(
+    payload: RemoteComputeResponse,
+    endpoint: &str,
+    job_type: &str,
+) -> Result<(Option<u64>, Value, Option<Vec<Value>>), String> {
+    if let Some(remote_status) = payload.status.as_deref() {
+        let normalized = remote_status.to_ascii_lowercase();
+        if !matches!(normalized.as_str(), "completed" | "success" | "ok") {
+            return Err(format!(
+                "remote compute job reported non-success status '{remote_status}'"
+            ));
+        }
+    }
+
+    let result_rows = payload.result_rows.map(normalize_result_rows).transpose()?;
+    let rows_affected = payload
+        .rows_affected
+        .or_else(|| result_rows.as_ref().map(|rows| rows.len() as u64));
+
+    let mut output = payload.output.unwrap_or_else(|| {
+        json!({
+            "endpoint": endpoint,
+            "job_type": job_type,
+            "rows": rows_affected,
+        })
+    });
+    if let Some(object) = output.as_object_mut() {
+        if let Some(run_id) = payload.run_id {
+            object.entry("run_id".to_string()).or_insert_with(|| json!(run_id));
+        }
+        if let Some(worker_id) = payload.worker_id {
+            object
+                .entry("worker_id".to_string())
+                .or_insert_with(|| json!(worker_id));
+        }
+    }
+
+    Ok((rows_affected, output, result_rows))
 }
 
 pub fn execute_wasm_transform(node: &PipelineNode) -> Result<(Option<u64>, Value), String> {
@@ -580,7 +770,9 @@ async fn register_dataset_alias(
             .register_parquet(alias, file_path)
             .await
             .map_err(|error| error.to_string()),
-        other => Err(format!("unsupported dataset format for pipeline input: {other}")),
+        other => Err(format!(
+            "unsupported dataset format for pipeline input: {other}"
+        )),
     }
 }
 
@@ -679,7 +871,10 @@ fn dataset_aliases(node: &PipelineNode, index: usize, input: &LoadedDataset) -> 
     ];
     aliases.sort();
     aliases.dedup();
-    aliases.into_iter().map(|alias| sanitize_alias(&alias)).collect()
+    aliases
+        .into_iter()
+        .map(|alias| sanitize_alias(&alias))
+        .collect()
 }
 
 fn preferred_alias(node: &PipelineNode, index: usize, input: &LoadedDataset) -> String {
@@ -782,7 +977,8 @@ fn normalize_json_bytes(data: &[u8]) -> Result<Vec<u8>, String> {
         match parsed {
             Value::Array(rows) => {
                 for row in rows {
-                    lines.push_str(&serde_json::to_string(&row).map_err(|error| error.to_string())?);
+                    lines
+                        .push_str(&serde_json::to_string(&row).map_err(|error| error.to_string())?);
                     lines.push('\n');
                 }
             }
@@ -833,5 +1029,91 @@ fn quote_identifier(value: &str) -> String {
 async fn cleanup_paths(paths: Vec<PathBuf>) {
     for path in paths {
         let _ = fs::remove_file(path).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn remote_compute_request_uses_node_config_and_inputs() {
+        let node = PipelineNode {
+            id: "node_spark".to_string(),
+            label: "Remote Spark".to_string(),
+            transform_type: "spark".to_string(),
+            config: json!({
+                "endpoint": "http://compute.local/jobs/run",
+                "job_type": "spark-batch"
+            }),
+            depends_on: Vec::new(),
+            input_dataset_ids: Vec::new(),
+            output_dataset_id: None,
+        };
+
+        let prepared_inputs = vec![PreparedInput {
+            alias: "orders".to_string(),
+            metadata: DatasetInputMetadata {
+                dataset_id: Uuid::nil(),
+                name: "orders".to_string(),
+                format: "json".to_string(),
+                version: 1,
+                row_count: 1,
+                size_bytes: 32,
+            },
+            rows: vec![json!({ "order_id": 1 })],
+        }];
+
+        let (endpoint, request) = build_remote_compute_request(&node, prepared_inputs, "spark")
+            .expect("request should build");
+        assert_eq!(endpoint, "http://compute.local/jobs/run");
+        assert_eq!(request.job_type, "spark-batch");
+        assert_eq!(request.pipeline_node_id, "node_spark");
+        assert_eq!(request.transform_type, "spark");
+        assert_eq!(request.inputs.len(), 1);
+        assert_eq!(request.inputs[0].alias, "orders");
+    }
+
+    #[test]
+    fn remote_compute_output_parses_rows_and_metadata() {
+        let payload = RemoteComputeResponse {
+            status: Some("completed".to_string()),
+            rows_affected: Some(2),
+            output: Some(json!({ "engine": "spark" })),
+            result_rows: Some(json!([{ "value": 1 }, { "value": 2 }])),
+            run_id: Some("spark-run-1".to_string()),
+            worker_id: Some("executor-a".to_string()),
+        };
+
+        let (rows_affected, output, rows) =
+            prepare_remote_compute_output(payload, "http://compute.local/jobs/run", "spark")
+                .expect("output should parse");
+        assert_eq!(rows_affected, Some(2));
+        assert_eq!(output["engine"], json!("spark"));
+        assert_eq!(output["run_id"], json!("spark-run-1"));
+        assert_eq!(output["worker_id"], json!("executor-a"));
+        assert_eq!(rows.expect("rows should exist").len(), 2);
+    }
+
+    #[test]
+    fn remote_compute_request_requires_endpoint() {
+        let node = PipelineNode {
+            id: "node_external".to_string(),
+            label: "External compute".to_string(),
+            transform_type: "external".to_string(),
+            config: json!({}),
+            depends_on: Vec::new(),
+            input_dataset_ids: Vec::new(),
+            output_dataset_id: None,
+        };
+
+        let error = build_remote_compute_request(
+            &node,
+            Vec::new(),
+            "external",
+        )
+        .expect_err("missing endpoint should fail");
+
+        assert!(error.contains("endpoint"));
     }
 }

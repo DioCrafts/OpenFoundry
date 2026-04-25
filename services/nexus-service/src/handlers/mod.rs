@@ -2,12 +2,17 @@ pub mod consume;
 pub mod contracts;
 pub mod peers;
 pub mod shares;
+pub mod spaces;
 
 use axum::{Json, http::StatusCode};
 use serde::Serialize;
 
 use crate::models::{
-    access_grant::AccessGrantRow, contract::ContractRow, peer::PeerRow, share::SharedDatasetRow,
+    access_grant::AccessGrantRow,
+    contract::ContractRow,
+    peer::PeerRow,
+    share::SharedDatasetRow,
+    space::SpaceRow,
     sync_status::SyncStatusRow,
 };
 
@@ -54,7 +59,7 @@ pub async fn load_peers(
     db: &sqlx::PgPool,
 ) -> Result<Vec<crate::models::peer::PeerOrganization>, sqlx::Error> {
     let rows = sqlx::query_as::<_, PeerRow>(
-		"SELECT id, slug, display_name, region, endpoint_url, auth_mode, trust_level, public_key_fingerprint, shared_scopes, status, last_handshake_at, created_at, updated_at
+		"SELECT id, slug, display_name, organization_type, region, endpoint_url, auth_mode, trust_level, public_key_fingerprint, shared_scopes, status, lifecycle_stage, admin_contacts, last_handshake_at, created_at, updated_at
 		 FROM nexus_peers
 		 ORDER BY updated_at DESC",
 	)
@@ -77,7 +82,7 @@ pub async fn load_peer_row(
     id: uuid::Uuid,
 ) -> Result<Option<PeerRow>, sqlx::Error> {
     sqlx::query_as::<_, PeerRow>(
-		"SELECT id, slug, display_name, region, endpoint_url, auth_mode, trust_level, public_key_fingerprint, shared_scopes, status, last_handshake_at, created_at, updated_at
+		"SELECT id, slug, display_name, organization_type, region, endpoint_url, auth_mode, trust_level, public_key_fingerprint, shared_scopes, status, lifecycle_stage, admin_contacts, last_handshake_at, created_at, updated_at
 		 FROM nexus_peers WHERE id = $1",
 	)
 	.bind(id)
@@ -124,7 +129,7 @@ pub async fn load_shares(
     db: &sqlx::PgPool,
 ) -> Result<Vec<crate::models::share::SharedDataset>, sqlx::Error> {
     let rows = sqlx::query_as::<_, SharedDatasetRow>(
-		"SELECT id, contract_id, provider_peer_id, consumer_peer_id, dataset_name, selector, provider_schema, consumer_schema, sample_rows, replication_mode, status, last_sync_at, created_at, updated_at
+		"SELECT id, contract_id, provider_peer_id, consumer_peer_id, provider_space_id, consumer_space_id, dataset_name, selector, provider_schema, consumer_schema, sample_rows, replication_mode, status, last_sync_at, created_at, updated_at
 		 FROM nexus_shares
 		 ORDER BY updated_at DESC",
 	)
@@ -147,8 +152,43 @@ pub async fn load_share_row(
     id: uuid::Uuid,
 ) -> Result<Option<SharedDatasetRow>, sqlx::Error> {
     sqlx::query_as::<_, SharedDatasetRow>(
-		"SELECT id, contract_id, provider_peer_id, consumer_peer_id, dataset_name, selector, provider_schema, consumer_schema, sample_rows, replication_mode, status, last_sync_at, created_at, updated_at
+		"SELECT id, contract_id, provider_peer_id, consumer_peer_id, provider_space_id, consumer_space_id, dataset_name, selector, provider_schema, consumer_schema, sample_rows, replication_mode, status, last_sync_at, created_at, updated_at
 		 FROM nexus_shares WHERE id = $1",
+	)
+	.bind(id)
+	.fetch_optional(db)
+	.await
+}
+
+pub async fn load_spaces(
+    db: &sqlx::PgPool,
+) -> Result<Vec<crate::models::space::NexusSpace>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, SpaceRow>(
+		"SELECT id, slug, display_name, description, space_kind, owner_peer_id, region, member_peer_ids, governance_tags, status, created_at, updated_at
+		 FROM nexus_spaces
+		 ORDER BY updated_at DESC",
+	)
+	.fetch_all(db)
+	.await?;
+
+    rows.into_iter()
+        .map(crate::models::space::NexusSpace::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|cause| {
+            sqlx::Error::Decode(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                cause,
+            )))
+        })
+}
+
+pub async fn load_space_row(
+    db: &sqlx::PgPool,
+    id: uuid::Uuid,
+) -> Result<Option<SpaceRow>, sqlx::Error> {
+    sqlx::query_as::<_, SpaceRow>(
+		"SELECT id, slug, display_name, description, space_kind, owner_peer_id, region, member_peer_ids, governance_tags, status, created_at, updated_at
+		 FROM nexus_spaces WHERE id = $1",
 	)
 	.bind(id)
 	.fetch_optional(db)

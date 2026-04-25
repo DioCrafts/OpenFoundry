@@ -1,0 +1,33 @@
+name: CI — Helm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/k8s/helm/**"
+      - ".github/workflows/helm-check.yml"
+      - "justfile"
+  pull_request:
+    branches: [main]
+    paths:
+      - "infra/k8s/helm/**"
+      - ".github/workflows/helm-check.yml"
+      - "justfile"
+
+jobs:
+  helm:
+    name: Helm Lint & Template
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+      - name: Helm lint
+        run: helm lint infra/k8s/helm/open-foundry -f infra/k8s/helm/open-foundry/values.yaml -f infra/k8s/helm/open-foundry/values-dev.yaml
+      - name: Render base chart
+        run: helm template open-foundry infra/k8s/helm/open-foundry --namespace openfoundry -f infra/k8s/helm/open-foundry/values.yaml >/tmp/open-foundry-base.yaml
+      - name: Render staging chart
+        run: helm template open-foundry infra/k8s/helm/open-foundry --namespace openfoundry -f infra/k8s/helm/open-foundry/values.yaml -f infra/k8s/helm/open-foundry/values-staging.yaml >/tmp/open-foundry-staging.yaml
+      - name: Render prod chart
+        run: helm template open-foundry infra/k8s/helm/open-foundry --namespace openfoundry -f infra/k8s/helm/open-foundry/values.yaml -f infra/k8s/helm/open-foundry/values-prod.yaml >/tmp/open-foundry-prod.yaml

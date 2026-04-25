@@ -64,6 +64,8 @@ pub struct NexusOverview {
     pub active_peer_count: i64,
     pub contract_count: i64,
     pub active_contract_count: i64,
+    pub private_space_count: i64,
+    pub shared_space_count: i64,
     pub share_count: i64,
     pub federated_access_count: i64,
     pub encrypted_share_count: i64,

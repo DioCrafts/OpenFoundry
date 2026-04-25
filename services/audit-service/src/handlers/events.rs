@@ -2,12 +2,13 @@ use axum::{
     Json,
     extract::{Path, Query, State},
 };
+use auth_middleware::layer::AuthUser;
 use chrono::{Duration, Utc};
 use serde::Deserialize;
 
 use crate::{
     AppState,
-    domain::{alerting, collector, immutable_log},
+    domain::{alerting, collector, immutable_log, sds, security},
     handlers::{
         ServiceResult, bad_request, db_error, internal_error, load_event_row, load_events,
         load_policies,
@@ -16,6 +17,7 @@ use crate::{
         audit_event::{AppendAuditEventRequest, AuditEvent, AuditOverview, EventListResponse},
         data_classification::AnomalyAlert,
         policy::CollectorStatus,
+        sensitive_data::{SensitiveDataScanRequest, SensitiveDataScanResponse},
     },
 };
 
@@ -26,10 +28,16 @@ pub struct EventQuery {
     pub classification: Option<String>,
 }
 
-pub async fn get_overview(State(state): State<AppState>) -> ServiceResult<AuditOverview> {
-    let events = load_events(&state.db)
+pub async fn get_overview(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+) -> ServiceResult<AuditOverview> {
+    let events = security::filter_events_for_claims(
+        load_events(&state.db)
         .await
-        .map_err(|cause| db_error(&cause))?;
+        .map_err(|cause| db_error(&cause))?,
+        &claims,
+    );
     let policies = load_policies(&state.db)
         .await
         .map_err(|cause| db_error(&cause))?;
@@ -56,10 +64,14 @@ pub async fn get_overview(State(state): State<AppState>) -> ServiceResult<AuditO
 pub async fn list_events(
     Query(query): Query<EventQuery>,
     State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
 ) -> ServiceResult<EventListResponse> {
-    let events = load_events(&state.db)
+    let events = security::filter_events_for_claims(
+        load_events(&state.db)
         .await
-        .map_err(|cause| db_error(&cause))?;
+        .map_err(|cause| db_error(&cause))?,
+        &claims,
+    );
     let items = events
         .into_iter()
         .filter(|event| {
@@ -87,9 +99,12 @@ pub async fn list_events(
     Ok(Json(EventListResponse {
         items,
         anomalies: alerting::detect_anomalies(
-            &load_events(&state.db)
+            &security::filter_events_for_claims(
+                load_events(&state.db)
                 .await
                 .map_err(|cause| db_error(&cause))?,
+                &claims,
+            ),
         ),
     }))
 }
@@ -97,12 +112,16 @@ pub async fn list_events(
 pub async fn get_event(
     Path(id): Path<uuid::Uuid>,
     State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
 ) -> ServiceResult<AuditEvent> {
     let row = load_event_row(&state.db, id)
         .await
         .map_err(|cause| db_error(&cause))?
         .ok_or_else(|| crate::handlers::not_found("audit event not found"))?;
     let event = AuditEvent::try_from(row).map_err(|cause| internal_error(cause.to_string()))?;
+    if !security::can_access_event(&event, &claims) {
+        return Err(crate::handlers::not_found("audit event not found"));
+    }
     Ok(Json(event))
 }
 
@@ -199,4 +218,13 @@ pub async fn list_anomalies(State(state): State<AppState>) -> ServiceResult<Vec<
         .await
         .map_err(|cause| db_error(&cause))?;
     Ok(Json(alerting::detect_anomalies(&events)))
+}
+
+pub async fn scan_sensitive_data(
+    Json(request): Json<SensitiveDataScanRequest>,
+) -> ServiceResult<SensitiveDataScanResponse> {
+    if request.content.trim().is_empty() {
+        return Err(bad_request("content is required"));
+    }
+    Ok(Json(sds::scan(&request)))
 }

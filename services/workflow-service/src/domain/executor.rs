@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::{
     AppState,
-    domain::branching,
+    domain::{branching, lineage},
     models::{
         approval::WorkflowApproval,
         execution::WorkflowRun,
@@ -27,6 +27,10 @@ pub async fn execute_workflow_run(
     let Some(first_step) = steps.first() else {
         return Err("workflow must define at least one step".to_string());
     };
+
+    if let Err(error) = lineage::sync_workflow_lineage(state, workflow).await {
+        tracing::warn!(workflow_id = %workflow.id, "workflow lineage sync before run failed: {error}");
+    }
 
     let run = sqlx::query_as::<_, WorkflowRun>(
         r#"INSERT INTO workflow_runs (id, workflow_id, trigger_type, status, started_by, current_step_id, context)

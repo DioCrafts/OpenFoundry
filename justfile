@@ -99,6 +99,49 @@ openapi-gen:
 openapi-check:
     cargo run -p of-cli -- docs validate-openapi --input apps/web/static/generated/openapi/openfoundry.json
 
+# Generate the official TypeScript SDK from the checked-in OpenAPI contract
+sdk-typescript-gen:
+    cargo run -p of-cli -- docs generate-sdk-typescript --input apps/web/static/generated/openapi/openfoundry.json --output sdks/typescript/openfoundry-sdk
+
+# Validate checked-in SDK output against the current OpenAPI contract
+sdk-typescript-check:
+    cargo run -p of-cli -- docs validate-sdk-typescript --input apps/web/static/generated/openapi/openfoundry.json --output sdks/typescript/openfoundry-sdk
+
+# Typecheck the generated SDK with the existing frontend TypeScript toolchain
+sdk-typescript-typecheck:
+    cd apps/web && pnpm exec tsc -p ../../sdks/typescript/openfoundry-sdk/tsconfig.json --noEmit
+
+# Generate the official Python SDK from the checked-in OpenAPI contract
+sdk-python-gen:
+    cargo run -p of-cli -- docs generate-sdk-python --input apps/web/static/generated/openapi/openfoundry.json --output sdks/python/openfoundry-sdk
+
+# Validate checked-in Python SDK output against the current OpenAPI contract
+sdk-python-check:
+    cargo run -p of-cli -- docs validate-sdk-python --input apps/web/static/generated/openapi/openfoundry.json --output sdks/python/openfoundry-sdk
+
+# Compile the generated Python SDK to catch syntax/import issues
+sdk-python-compile:
+    python3 -m compileall sdks/python/openfoundry-sdk
+
+# Generate the official Java SDK from the checked-in OpenAPI contract
+sdk-java-gen:
+    cargo run -p of-cli -- docs generate-sdk-java --input apps/web/static/generated/openapi/openfoundry.json --output sdks/java/openfoundry-sdk
+
+# Validate checked-in Java SDK output against the current OpenAPI contract
+sdk-java-check:
+    cargo run -p of-cli -- docs validate-sdk-java --input apps/web/static/generated/openapi/openfoundry.json --output sdks/java/openfoundry-sdk
+
+# Compile the generated Java SDK sources (requires JDK 17+)
+sdk-java-compile:
+    find sdks/java/openfoundry-sdk/src/main/java -name '*.java' -print0 | xargs -0 javac --release 17
+
+# Validate the Helm chart across base/dev/staging/prod overlays
+helm-check:
+    helm lint infra/k8s/helm/open-foundry -f infra/k8s/helm/open-foundry/values.yaml -f infra/k8s/helm/open-foundry/values-dev.yaml
+    helm template open-foundry infra/k8s/helm/open-foundry --namespace openfoundry -f infra/k8s/helm/open-foundry/values.yaml >/tmp/open-foundry-base.yaml
+    helm template open-foundry infra/k8s/helm/open-foundry --namespace openfoundry -f infra/k8s/helm/open-foundry/values.yaml -f infra/k8s/helm/open-foundry/values-staging.yaml >/tmp/open-foundry-staging.yaml
+    helm template open-foundry infra/k8s/helm/open-foundry --namespace openfoundry -f infra/k8s/helm/open-foundry/values.yaml -f infra/k8s/helm/open-foundry/values-prod.yaml >/tmp/open-foundry-prod.yaml
+
 # Generate Terraform provider schema for docs and portal consumption
 terraform-schema:
     cargo run -p of-cli -- terraform schema --output infra/terraform/providers/openfoundry/provider.schema.json
@@ -110,7 +153,23 @@ bench-critical-paths:
 
 # Run the critical-path smoke suite against a live stack
 smoke-critical-paths:
-    cargo run -p of-cli -- smoke run --scenario smoke/scenarios/p0-critical-path.json --output smoke/results/p0-critical-path.json
+    cargo run -p of-cli -- smoke run --scenario smoke/scenarios/p2-runtime-critical-path.json --output smoke/results/p2-runtime-critical-path.json
+
+# Run the semantic/governance smoke suite against a live stack
+smoke-p3-semantic-governance:
+    cargo run -p of-cli -- smoke run --scenario smoke/scenarios/p3-semantic-governance-critical-path.json --output smoke/results/p3-semantic-governance-critical-path.json
+
+# Run the developer platform smoke suite against a live stack
+smoke-p4-developer-platform:
+    cargo run -p of-cli -- smoke run --scenario smoke/scenarios/p4-developer-platform-critical-path.json --output smoke/results/p4-developer-platform-critical-path.json
+
+# Run the AI/ML smoke suite against a live stack
+smoke-p5-ai-ml:
+    cargo run -p of-cli -- smoke run --scenario smoke/scenarios/p5-ai-ml-critical-path.json --output smoke/results/p5-ai-ml-critical-path.json
+
+# Run the analytics/control-panel/nexus/enterprise smoke suite against a live stack
+smoke-p6-analytics-enterprise:
+    cargo run -p of-cli -- smoke run --scenario smoke/scenarios/p6-analytics-enterprise-critical-path.json --output smoke/results/p6-analytics-enterprise-critical-path.json
 
 # Lint proto files
 proto-lint:
@@ -183,7 +242,7 @@ ci-frontend: fe-lint fe-check fe-test-unit fe-build
 # ── CI ───────────────────────────────────────────────────────
 
 # Run full CI checks locally
-ci: lint test proto-lint openapi-check ci-frontend
+ci: lint test proto-lint openapi-check sdk-typescript-check sdk-typescript-typecheck sdk-python-check sdk-python-compile ci-frontend
     @echo "✅ All CI checks passed"
 
 # ── Cleanup ──────────────────────────────────────────────────

@@ -80,12 +80,24 @@ async fn main() {
             get(handlers::events::list_anomalies),
         )
         .route(
+            "/api/v1/audit/sds/scan",
+            axum::routing::post(handlers::events::scan_sensitive_data),
+        )
+        .route(
             "/api/v1/audit/classifications",
             get(handlers::policies::list_classifications),
         )
         .route(
             "/api/v1/audit/policies",
             get(handlers::policies::list_policies).post(handlers::policies::create_policy),
+        )
+        .route(
+            "/api/v1/audit/governance/templates",
+            get(handlers::policies::list_governance_templates),
+        )
+        .route(
+            "/api/v1/audit/governance/templates/{slug}/apply",
+            axum::routing::post(handlers::policies::apply_governance_template),
         )
         .route(
             "/api/v1/audit/policies/{id}",

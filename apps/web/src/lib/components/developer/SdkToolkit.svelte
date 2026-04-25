@@ -21,6 +21,9 @@
 		'cargo run -p of-cli -- deploy plan gateway --environment staging',
 		'cargo run -p of-cli -- script render "deploy {{service}} to {{env}}" --var service=gateway --var env=prod',
 		'cargo run -p of-cli -- docs generate-openapi --output apps/web/static/generated/openapi/openfoundry.json',
+		'cargo run -p of-cli -- docs generate-sdk-typescript --input apps/web/static/generated/openapi/openfoundry.json --output sdks/typescript/openfoundry-sdk',
+		'cargo run -p of-cli -- docs generate-sdk-python --input apps/web/static/generated/openapi/openfoundry.json --output sdks/python/openfoundry-sdk',
+		'cargo run -p of-cli -- docs generate-sdk-java --input apps/web/static/generated/openapi/openfoundry.json --output sdks/java/openfoundry-sdk',
 		'cargo run -p of-cli -- terraform schema --output apps/web/static/generated/terraform/openfoundry-provider.json',
 	];
 
@@ -31,7 +34,7 @@
 		},
 		{
 			title: 'Generate API contracts for SDK consumers',
-			focus: 'Regenerate the OpenAPI document from proto services and hand it to external client generators without touching handwritten docs.',
+			focus: 'Regenerate the OpenAPI document and the official TypeScript, Python, and Java SDKs from the same checked-in contract without touching handwritten docs.',
 		},
 		{
 			title: 'Codify audit and Nexus surfaces with Terraform',
@@ -40,6 +43,10 @@
 		{
 			title: 'Bootstrap a WASM widget package',
 			focus: 'Scaffold a new widget crate, fill in the manifest, and prepare the distribution assets consumed by app builder.',
+		},
+		{
+			title: 'Ship a Slate React starter',
+			focus: 'Use `@open-foundry/sdk/react` hooks plus the generated Slate package to move from Workshop into a pro-code React app quickly.',
 		},
 	];
 </script>
@@ -50,13 +57,13 @@
 			<div class="text-xs font-semibold uppercase tracking-[0.28em] text-amber-600">SDK + CLI</div>
 			<h2 class="mt-2 text-2xl font-semibold text-slate-950">Build plugins and automate delivery</h2>
 			<p class="mt-2 max-w-3xl text-sm text-slate-600">
-				The `plugin-sdk` crate standardizes Rust + WASM manifests for connectors, transforms, and widgets. The `of` CLI scaffolds projects, renders deployment scripts, emits proto-derived docs, and generates Terraform metadata for platform automation.
+				The `plugin-sdk` crate standardizes Rust + WASM manifests for connectors, transforms, and widgets. The `of` CLI scaffolds projects, renders deployment scripts, emits proto-derived docs, generates the official TypeScript, Python, and Java SDKs, and now includes React-friendly helpers for Slate-style apps on top of the TypeScript SDK.
 			</p>
 		</div>
 
 		<div class="rounded-3xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
 			<div class="font-semibold">Included in Milestone 5.2</div>
-			<div class="mt-1 text-amber-800">SDK crate, CLI commands, generated docs, Terraform schema, and portal surfaces.</div>
+			<div class="mt-1 text-amber-800">SDK crate, official TypeScript/Python/Java SDKs, React hooks for Slate apps, CLI commands, generated docs, Terraform schema, and portal surfaces.</div>
 		</div>
 	</div>
 

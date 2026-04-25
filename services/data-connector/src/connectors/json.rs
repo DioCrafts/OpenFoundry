@@ -5,7 +5,11 @@ use std::time::Instant;
 use serde_json::{Value, json};
 use tokio::fs;
 
-use super::{ConnectionTestResult, SyncPayload};
+use super::{ConnectionTestResult, SyncPayload, add_source_signature, virtual_table_response};
+use crate::{
+    AppState,
+    models::registration::{VirtualTableQueryRequest, VirtualTableQueryResponse},
+};
 
 pub fn validate_config(config: &Value) -> Result<(), String> {
     if config.get("url").is_none() && config.get("path").is_none() {
@@ -14,10 +18,13 @@ pub fn validate_config(config: &Value) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn test_connection(config: &Value) -> Result<ConnectionTestResult, String> {
+pub async fn test_connection(
+    state: &AppState,
+    config: &Value,
+) -> Result<ConnectionTestResult, String> {
     validate_config(config)?;
     let started = Instant::now();
-    let bytes = read_source(config).await?;
+    let bytes = read_source(state, config).await?;
     let row_count = count_rows(&bytes)?;
 
     Ok(ConnectionTestResult {
@@ -32,12 +39,16 @@ pub async fn test_connection(config: &Value) -> Result<ConnectionTestResult, Str
     })
 }
 
-pub async fn fetch_dataset(config: &Value, selector: &str) -> Result<SyncPayload, String> {
+pub async fn fetch_dataset(
+    state: &AppState,
+    config: &Value,
+    selector: &str,
+) -> Result<SyncPayload, String> {
     validate_config(config)?;
-    let bytes = read_source(config).await?;
+    let bytes = read_source(state, config).await?;
     let row_count = count_rows(&bytes)?;
 
-    Ok(SyncPayload {
+    let mut payload = SyncPayload {
         bytes,
         format: "json".to_string(),
         rows_synced: row_count,
@@ -46,10 +57,37 @@ pub async fn fetch_dataset(config: &Value, selector: &str) -> Result<SyncPayload
             "source": source_label(config),
             "rows": row_count,
         }),
-    })
+    };
+    add_source_signature(&mut payload);
+    Ok(payload)
 }
 
-async fn read_source(config: &Value) -> Result<Vec<u8>, String> {
+pub async fn query_virtual_table(
+    state: &AppState,
+    config: &Value,
+    request: &VirtualTableQueryRequest,
+) -> Result<VirtualTableQueryResponse, String> {
+    let bytes = read_source(state, config).await?;
+    let payload = serde_json::from_slice::<Value>(&bytes).map_err(|error| error.to_string())?;
+    let rows = if let Some(array) = payload.as_array() {
+        array.clone()
+    } else {
+        vec![payload]
+    }
+    .into_iter()
+    .take(request.limit.unwrap_or(50).clamp(1, 500))
+    .collect::<Vec<_>>();
+
+    Ok(virtual_table_response(
+        &request.selector,
+        rows,
+        json!({
+            "source": source_label(config),
+        }),
+    ))
+}
+
+async fn read_source(state: &AppState, config: &Value) -> Result<Vec<u8>, String> {
     if let Some(path) = config.get("path").and_then(Value::as_str) {
         return fs::read(path).await.map_err(|error| error.to_string());
     }
@@ -58,16 +96,22 @@ async fn read_source(config: &Value) -> Result<Vec<u8>, String> {
         .get("url")
         .and_then(Value::as_str)
         .ok_or_else(|| "json connector requires either 'url' or 'path'".to_string())?;
-    let response = reqwest::get(url).await.map_err(|error| error.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!("JSON source returned HTTP {}", response.status()));
+    let response = super::http_runtime::get(
+        state,
+        config,
+        reqwest::Url::parse(url).map_err(|error| error.to_string())?,
+        super::http_runtime::header_map(config)?,
+        config
+            .get("bearer_token")
+            .and_then(Value::as_str)
+            .map(|value| value.to_string()),
+        None,
+    )
+    .await?;
+    if !(200..300).contains(&response.status) {
+        return Err(format!("JSON source returned HTTP {}", response.status));
     }
-
-    response
-        .bytes()
-        .await
-        .map(|bytes| bytes.to_vec())
-        .map_err(|error| error.to_string())
+    Ok(response.bytes)
 }
 
 fn count_rows(bytes: &[u8]) -> Result<i64, String> {

@@ -25,7 +25,7 @@ struct SmokeSuite {
     steps: Vec<SmokeStep>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum SmokeAuth {
     DevJwt {
@@ -50,6 +50,8 @@ struct SmokeStep {
     name: String,
     method: String,
     path: String,
+    #[serde(default)]
+    auth: Option<SmokeAuth>,
     #[serde(default)]
     headers: BTreeMap<String, String>,
     #[serde(default)]
@@ -210,11 +212,6 @@ pub async fn run_suite(scenario_path: &Path, output_path: &Path) -> Result<()> {
 
     let started_at_epoch_ms = epoch_ms()?;
     let mut context = ExecutionContext::new(variables)?;
-    let auth_header = auth
-        .as_ref()
-        .map(SmokeAuth::authorization_header)
-        .transpose()?;
-
     let client = Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .build()
@@ -252,7 +249,7 @@ pub async fn run_suite(scenario_path: &Path, output_path: &Path) -> Result<()> {
             &client,
             &context,
             &default_headers,
-            auth_header.as_deref(),
+            auth.as_ref(),
             &url,
             step,
         )
@@ -302,7 +299,7 @@ async fn execute_step(
     client: &Client,
     context: &ExecutionContext,
     default_headers: &BTreeMap<String, String>,
-    auth_header: Option<&str>,
+    suite_auth: Option<&SmokeAuth>,
     url: &str,
     step: SmokeStep,
 ) -> std::result::Result<StepOutcome, (SmokeStepReport, String)> {
@@ -315,7 +312,7 @@ async fn execute_step(
             client,
             context,
             default_headers,
-            auth_header,
+            suite_auth,
             url,
             step.clone(),
         )
@@ -345,7 +342,7 @@ async fn execute_step_once(
     client: &Client,
     context: &ExecutionContext,
     default_headers: &BTreeMap<String, String>,
-    auth_header: Option<&str>,
+    suite_auth: Option<&SmokeAuth>,
     url: &str,
     step: SmokeStep,
 ) -> std::result::Result<StepOutcome, (SmokeStepReport, String)> {
@@ -431,7 +428,30 @@ async fn execute_step_once(
     }
 
     if !has_authorization {
-        if let Some(auth_header) = auth_header {
+        let auth_header = step
+            .auth
+            .as_ref()
+            .or(suite_auth)
+            .map(SmokeAuth::authorization_header)
+            .transpose()
+            .map_err(|error| {
+                let report = SmokeStepReport {
+                    name: step.name.clone(),
+                    method: step.method.clone(),
+                    path: step.path.clone(),
+                    url: url.to_string(),
+                    expected_status: step.expected_status,
+                    actual_status: None,
+                    assertions: Vec::new(),
+                    captured: BTreeMap::new(),
+                    response_preview: None,
+                };
+                (
+                    report,
+                    format!("step '{}' failed to build authorization header: {error}", step.name),
+                )
+            })?;
+        if let Some(auth_header) = auth_header.as_deref() {
             request = request.header("authorization", auth_header);
         }
     }

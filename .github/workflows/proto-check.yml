@@ -1,12 +1,12 @@
-name: Proto — Lint, Breaking & OpenAPI
+name: Proto — Lint, Breaking, OpenAPI & SDK
 
 on:
   push:
     branches: [main]
-    paths: ["proto/**", "tools/of-cli/**", "apps/web/static/generated/openapi/**", "Cargo.*", ".github/workflows/proto-check.yml", "justfile"]
+    paths: ["proto/**", "tools/of-cli/**", "apps/web/static/generated/openapi/**", "sdks/typescript/openfoundry-sdk/**", "sdks/python/openfoundry-sdk/**", "sdks/java/openfoundry-sdk/**", "apps/web/package.json", "package.json", "pnpm-lock.yaml", "Cargo.*", ".github/workflows/proto-check.yml", "justfile"]
   pull_request:
     branches: [main]
-    paths: ["proto/**", "tools/of-cli/**", "apps/web/static/generated/openapi/**", "Cargo.*", ".github/workflows/proto-check.yml", "justfile"]
+    paths: ["proto/**", "tools/of-cli/**", "apps/web/static/generated/openapi/**", "sdks/typescript/openfoundry-sdk/**", "sdks/python/openfoundry-sdk/**", "sdks/java/openfoundry-sdk/**", "apps/web/package.json", "package.json", "pnpm-lock.yaml", "Cargo.*", ".github/workflows/proto-check.yml", "justfile"]
 
 jobs:
   lint:
@@ -29,3 +29,49 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Validate generated OpenAPI
         run: cargo run -p of-cli -- docs validate-openapi --input apps/web/static/generated/openapi/openfoundry.json
+
+  sdk-typescript:
+    name: TypeScript SDK Drift & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: cargo run -p of-cli -- docs validate-sdk-typescript --input apps/web/static/generated/openapi/openfoundry.json --output sdks/typescript/openfoundry-sdk
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir apps/web exec tsc -p ../../sdks/typescript/openfoundry-sdk/tsconfig.json --noEmit
+
+  sdk-python:
+    name: Python SDK Drift & Compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: cargo run -p of-cli -- docs validate-sdk-python --input apps/web/static/generated/openapi/openfoundry.json --output sdks/python/openfoundry-sdk
+      - run: python -m compileall sdks/python/openfoundry-sdk
+
+  sdk-java:
+    name: Java SDK Drift & Compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - run: cargo run -p of-cli -- docs validate-sdk-java --input apps/web/static/generated/openapi/openfoundry.json --output sdks/java/openfoundry-sdk
+      - run: find sdks/java/openfoundry-sdk/src/main/java -name '*.java' -print0 | xargs -0 javac --release 17

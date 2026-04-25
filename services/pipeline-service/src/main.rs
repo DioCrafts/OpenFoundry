@@ -18,6 +18,7 @@ pub struct AppState {
     pub jwt_config: JwtConfig,
     pub http_client: reqwest::Client,
     pub dataset_service_url: String,
+    pub workflow_service_url: String,
     pub storage: std::sync::Arc<dyn StorageBackend>,
     pub distributed_pipeline_workers: usize,
 }
@@ -79,6 +80,7 @@ async fn main() {
         jwt_config: jwt_config.clone(),
         http_client,
         dataset_service_url: cfg.dataset_service_url.clone(),
+        workflow_service_url: cfg.workflow_service_url.clone(),
         storage,
         distributed_pipeline_workers: cfg.distributed_pipeline_workers.max(1),
     };
@@ -96,10 +98,19 @@ async fn main() {
         }
     });
 
-    let public = Router::new().route(
-        "/health",
-        get(|| async { axum::Json(HealthStatus::ok("pipeline-service")) }),
-    );
+    let public = Router::new()
+        .route(
+            "/health",
+            get(|| async { axum::Json(HealthStatus::ok("pipeline-service")) }),
+        )
+        .route(
+            "/internal/lineage/workflows/{workflow_id}/sync",
+            post(handlers::lineage::sync_workflow_lineage),
+        )
+        .route(
+            "/internal/lineage/workflows/{workflow_id}",
+            delete(handlers::lineage::delete_workflow_lineage),
+        );
 
     let protected = Router::new()
         // Pipeline CRUD
@@ -126,6 +137,14 @@ async fn main() {
         .route(
             "/api/v1/lineage/datasets/{dataset_id}/columns",
             get(handlers::lineage::get_dataset_column_lineage),
+        )
+        .route(
+            "/api/v1/lineage/datasets/{dataset_id}/impact",
+            get(handlers::lineage::get_dataset_lineage_impact),
+        )
+        .route(
+            "/api/v1/lineage/datasets/{dataset_id}/builds",
+            post(handlers::lineage::trigger_dataset_lineage_builds),
         )
         .route("/api/v1/lineage", get(handlers::lineage::get_full_lineage))
         .layer(middleware::from_fn_with_state(

@@ -39,6 +39,60 @@
 	function pretty(value: string) {
 		return value.replaceAll('_', ' ');
 	}
+
+	function presetSettings(settings: Record<string, unknown>) {
+		return JSON.stringify(settings, null, 2);
+	}
+
+	function applyPreset(preset: 'rust' | 'react' | 'python') {
+		if (preset === 'react') {
+			onDraftChange({
+				name: 'Slate React App',
+				slug: 'slate-react-app',
+				description: 'React + OpenFoundry SDK starter ready for Slate delivery.',
+				package_kind: 'app_template',
+				settings_text: presetSettings({
+					runtime: 'typescript-react',
+					entry_file: 'src/App.tsx',
+					sdk_import: '@open-foundry/sdk/react',
+					workspace_layout: 'split',
+					dev_command: 'pnpm dev',
+					preview_command: 'pnpm build',
+					ci_required: false,
+				}),
+			});
+			return;
+		}
+
+		if (preset === 'python') {
+			onDraftChange({
+				name: 'Python Agent Package',
+				slug: 'python-agent-package',
+				description: 'Python starter for automation, agents, or ML-adjacent workflows.',
+				package_kind: 'ai_agent',
+				settings_text: presetSettings({
+					runtime: 'python',
+					entry_file: 'src/python_agent_package/main.py',
+					dev_command: 'python -m python_agent_package',
+					preview_command: 'python -m compileall src',
+					ci_required: true,
+				}),
+			});
+			return;
+		}
+
+		onDraftChange({
+			name: 'Foundry Widget Kit',
+			slug: 'foundry-widget-kit',
+			description: 'Shared widget primitives ready for marketplace publication.',
+			package_kind: 'widget',
+			settings_text: presetSettings({
+				runtime: 'rust',
+				default_path: 'src/lib.rs',
+				ci_required: true,
+			}),
+		});
+	}
 </script>
 
 <section class="rounded-3xl border border-stone-200 bg-white p-5 shadow-sm shadow-stone-200/60">
@@ -106,6 +160,21 @@
 					<button class="rounded-full border border-stone-600 px-4 py-2 text-sm font-medium text-stone-200 transition hover:border-stone-400 hover:bg-stone-800" onclick={onReset} disabled={busy}>New draft</button>
 					<button class="rounded-full bg-sky-500 px-4 py-2 text-sm font-semibold text-stone-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-sky-200" onclick={onSave} disabled={busy}>{draft.id ? 'Update repo' : 'Create repo'}</button>
 				</div>
+			</div>
+
+			<div class="grid gap-2 md:grid-cols-3">
+				<button class="rounded-2xl border border-stone-700 bg-stone-900 px-4 py-3 text-left text-sm transition hover:border-sky-400" onclick={() => applyPreset('rust')} disabled={busy}>
+					<div class="font-semibold text-stone-100">Rust package</div>
+					<div class="mt-1 text-stone-400">Keep the current Git + Cargo flow for connectors, transforms, or widgets.</div>
+				</button>
+				<button class="rounded-2xl border border-stone-700 bg-stone-900 px-4 py-3 text-left text-sm transition hover:border-sky-400" onclick={() => applyPreset('react')} disabled={busy}>
+					<div class="font-semibold text-stone-100">React Slate app</div>
+					<div class="mt-1 text-stone-400">Scaffold TypeScript/React with `@open-foundry/sdk/react` from day one.</div>
+				</button>
+				<button class="rounded-2xl border border-stone-700 bg-stone-900 px-4 py-3 text-left text-sm transition hover:border-sky-400" onclick={() => applyPreset('python')} disabled={busy}>
+					<div class="font-semibold text-stone-100">Python automation</div>
+					<div class="mt-1 text-stone-400">Create a Python package for agents, ML helpers, or automation surfaces.</div>
+				</button>
 			</div>
 
 			<div class="grid gap-4 md:grid-cols-2">

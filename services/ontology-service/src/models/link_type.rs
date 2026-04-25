@@ -28,13 +28,6 @@ pub struct CreateLinkTypeRequest {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct UpdateLinkTypeRequest {
-    pub display_name: Option<String>,
-    pub description: Option<String>,
-    pub cardinality: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct ListLinkTypesQuery {
     pub object_type_id: Option<Uuid>,
     pub page: Option<i64>,

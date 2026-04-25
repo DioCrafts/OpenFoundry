@@ -12,5 +12,6 @@ pub struct DatasetVersion {
     pub size_bytes: i64,
     pub row_count: i64,
     pub storage_path: String,
+    pub transaction_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
 }

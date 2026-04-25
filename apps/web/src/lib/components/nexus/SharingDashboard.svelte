@@ -13,7 +13,7 @@
 		<p class="mt-1 text-sm text-stone-600">Monitor partner authentication, data sharing posture, selective replication readiness, and cross-org audit cursors.</p>
 	</div>
 
-	<div class="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
+	<div class="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-8">
 		<div class="rounded-2xl bg-stone-950 px-4 py-4 text-stone-50">
 			<p class="text-xs uppercase tracking-[0.18em] text-cyan-300">Peers</p>
 			<p class="mt-2 text-2xl font-semibold">{overview?.peer_count ?? 0}</p>
@@ -29,6 +29,14 @@
 		<div class="rounded-2xl bg-fuchsia-50 px-4 py-4 text-fuchsia-900">
 			<p class="text-xs uppercase tracking-[0.18em] text-fuchsia-600">Shares</p>
 			<p class="mt-2 text-2xl font-semibold">{overview?.share_count ?? 0}</p>
+		</div>
+		<div class="rounded-2xl bg-cyan-50 px-4 py-4 text-cyan-900">
+			<p class="text-xs uppercase tracking-[0.18em] text-cyan-600">Private Spaces</p>
+			<p class="mt-2 text-2xl font-semibold">{overview?.private_space_count ?? 0}</p>
+		</div>
+		<div class="rounded-2xl bg-indigo-50 px-4 py-4 text-indigo-900">
+			<p class="text-xs uppercase tracking-[0.18em] text-indigo-600">Shared Spaces</p>
+			<p class="mt-2 text-2xl font-semibold">{overview?.shared_space_count ?? 0}</p>
 		</div>
 		<div class="rounded-2xl bg-amber-50 px-4 py-4 text-amber-900">
 			<p class="text-xs uppercase tracking-[0.18em] text-amber-600">Replication Ready</p>

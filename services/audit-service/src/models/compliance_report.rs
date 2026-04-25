@@ -12,6 +12,8 @@ pub enum ComplianceStandard {
     Soc2,
     Iso27001,
     Hipaa,
+    Gdpr,
+    Itar,
 }
 
 impl ComplianceStandard {
@@ -20,6 +22,8 @@ impl ComplianceStandard {
             Self::Soc2 => "soc2",
             Self::Iso27001 => "iso27001",
             Self::Hipaa => "hipaa",
+            Self::Gdpr => "gdpr",
+            Self::Itar => "itar",
         }
     }
 }
@@ -32,6 +36,8 @@ impl FromStr for ComplianceStandard {
             "soc2" => Ok(Self::Soc2),
             "iso27001" => Ok(Self::Iso27001),
             "hipaa" => Ok(Self::Hipaa),
+            "gdpr" => Ok(Self::Gdpr),
+            "itar" => Ok(Self::Itar),
             _ => Err(format!("unsupported compliance standard: {value}")),
         }
     }

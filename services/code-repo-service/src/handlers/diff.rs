@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 use crate::{
     AppState,
-    handlers::{ServiceResult, db_error, load_commits, load_files, load_repository_row, not_found},
+    handlers::{ServiceResult, db_error, load_repository_row, not_found},
     models::file::DiffResponse,
 };
 
@@ -26,13 +26,13 @@ pub async fn get_repository_diff(
         .ok_or_else(|| not_found("repository not found"))?;
     let repository = crate::models::repository::RepositoryDefinition::try_from(repository)
         .map_err(|cause| crate::handlers::internal_error(cause.to_string()))?;
-    let files = load_files(&state.db, id)
-        .await
-        .map_err(|cause| db_error(&cause))?;
-    let commits = load_commits(&state.db, id)
-        .await
-        .map_err(|cause| db_error(&cause))?;
-    let branch_name = query.branch.unwrap_or(repository.default_branch);
-    let patch = crate::domain::git::repository_diff(&files, &branch_name, &commits);
+    let branch_name = query.branch.unwrap_or_else(|| repository.default_branch.clone());
+    let patch = crate::domain::git::repository_diff(
+        &state.repo_storage_root,
+        repository.id,
+        &repository.default_branch,
+        &branch_name,
+    )
+    .map_err(|cause| crate::handlers::internal_error(cause.to_string()))?;
     Ok(Json(DiffResponse { branch_name, patch }))
 }

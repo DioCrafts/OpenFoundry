@@ -33,6 +33,17 @@ pub struct CreateCommitRequest {
     pub additions: i32,
     #[serde(default = "default_deletions")]
     pub deletions: i32,
+    #[serde(default)]
+    pub files: Vec<CommitFileChange>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitFileChange {
+    pub path: String,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub delete: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -12,6 +12,12 @@ pub struct AppConfig {
     pub dataset_service_url: String,
     #[serde(default = "default_sync_poll_interval_secs")]
     pub sync_poll_interval_secs: u64,
+    #[serde(default = "default_allow_private_network_egress")]
+    pub allow_private_network_egress: bool,
+    #[serde(default)]
+    pub allowed_egress_hosts: Vec<String>,
+    #[serde(default = "default_agent_stale_after_secs")]
+    pub agent_stale_after_secs: u64,
 }
 
 fn default_host() -> String {
@@ -25,6 +31,12 @@ fn default_dataset_service_url() -> String {
 }
 fn default_sync_poll_interval_secs() -> u64 {
     2
+}
+fn default_allow_private_network_egress() -> bool {
+    true
+}
+fn default_agent_stale_after_secs() -> u64 {
+    120
 }
 
 impl AppConfig {

@@ -1,0 +1,226 @@
+{
+  "base_url": "http://127.0.0.1:8080",
+  "started_at_epoch_ms": 1777074315798,
+  "success": true,
+  "failure_message": null,
+  "steps": [
+    {
+      "name": "create_mock_llm_provider",
+      "method": "POST",
+      "path": "/api/v1/ai/providers",
+      "url": "http://127.0.0.1:8080/api/v1/ai/providers",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [],
+      "captured": {
+        "provider_id": "019dc1e2-2286-73d3-b37a-e3066610fed1"
+      },
+      "response_preview": "{\"id\":\"019dc1e2-2286-73d3-b37a-e3066610fed1\",\"name\":\"P5 Mock Provider 019dc1e2-2216-71c1-a1a2-417f2ba5c585\",\"provider_type\":\"openai\",\"model_name\":\"mock-gpt\",\"endpoint_url\":\"http://127.0.0.1:50110/v1\",\"api_mode\":\"chat_completions\",\"credential_reference\":null,\"credential_configured\":false,\"enabled\":true,\"load_balance_weight\":500,\"max_output_tokens\":1024,\"cost_tier\":\"test\",\"tags\":[\"smoke\",\"p5\"],\"rout..."
+    },
+    {
+      "name": "create_provider_backed_knowledge_base",
+      "method": "POST",
+      "path": "/api/v1/ai/knowledge-bases",
+      "url": "http://127.0.0.1:8080/api/v1/ai/knowledge-bases",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [],
+      "captured": {
+        "knowledge_base_id": "019dc1e2-2290-7762-8c98-7fda7f54c4f5"
+      },
+      "response_preview": "{\"id\":\"019dc1e2-2290-7762-8c98-7fda7f54c4f5\",\"name\":\"P5 Playbooks 019dc1e2-2216-71c1-a1a2-417f2ba5c585\",\"description\":\"Provider-backed embeddings for smoke validation.\",\"status\":\"active\",\"embedding_provider\":\"provider:019dc1e2-2286-73d3-b37a-e3066610fed1\",\"chunking_strategy\":\"balanced\",\"tags\":[\"smoke\",\"p5\",\"rag\"],\"document_count\":0,\"chunk_count\":0,\"created_at\":\"2026-04-24T23:45:15.920117Z\",\"update..."
+    },
+    {
+      "name": "create_knowledge_document",
+      "method": "POST",
+      "path": "/api/v1/ai/knowledge-bases/${knowledge_base_id}/documents",
+      "url": "http://127.0.0.1:8080/api/v1/ai/knowledge-bases/019dc1e2-2290-7762-8c98-7fda7f54c4f5/documents",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/chunk_count",
+          "status": "passed",
+          "expected": null,
+          "actual": 1
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"id\":\"019dc1e2-2298-7a33-8497-889381f01600\",\"knowledge_base_id\":\"019dc1e2-2290-7762-8c98-7fda7f54c4f5\",\"title\":\"Retention Escalation Runbook\",\"content\":\"High ticket backlog, negative usage delta and low NPS indicate elevated churn risk. For these accounts, open a renewal risk case and prepare an outreach plan before the next executive review.\",\"source_uri\":\"kb://smoke/p5/retention-runbook\",\"metad..."
+    },
+    {
+      "name": "search_provider_backed_knowledge_base",
+      "method": "POST",
+      "path": "/api/v1/ai/knowledge-bases/${knowledge_base_id}/search",
+      "url": "http://127.0.0.1:8080/api/v1/ai/knowledge-bases/019dc1e2-2290-7762-8c98-7fda7f54c4f5/search",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/results/0/document_title",
+          "status": "passed",
+          "expected": "Retention Escalation Runbook",
+          "actual": "Retention Escalation Runbook"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"knowledge_base_id\":\"019dc1e2-2290-7762-8c98-7fda7f54c4f5\",\"query\":\"Which signals indicate churn risk?\",\"results\":[{\"knowledge_base_id\":\"019dc1e2-2290-7762-8c98-7fda7f54c4f5\",\"document_id\":\"019dc1e2-2298-7a33-8497-889381f01600\",\"document_title\":\"Retention Escalation Runbook\",\"chunk_id\":\"019dc1e2-2298-7a33-8497-889381f01600-0\",\"score\":0.31940007,\"excerpt\":\"High ticket backlog, negative usage delta..."
+    },
+    {
+      "name": "create_ml_model",
+      "method": "POST",
+      "path": "/api/v1/ml/models",
+      "url": "http://127.0.0.1:8080/api/v1/ml/models",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [],
+      "captured": {
+        "model_id": "019dc1e2-22d1-76b3-af3a-1f821834858f"
+      },
+      "response_preview": "{\"id\":\"019dc1e2-22d1-76b3-af3a-1f821834858f\",\"name\":\"P5 Churn Model 019dc1e2-2216-71c1-a1a2-417f2ba5c585\",\"description\":\"Inline-trained churn risk model for P5 smoke.\",\"problem_type\":\"classification\",\"status\":\"active\",\"tags\":[\"smoke\",\"p5\"],\"owner_id\":null,\"current_stage\":\"none\",\"latest_version_number\":null,\"active_deployment_id\":null,\"created_at\":\"2026-04-24T23:45:15.984954Z\",\"updated_at\":\"2026-04..."
+    },
+    {
+      "name": "train_real_ml_model",
+      "method": "POST",
+      "path": "/api/v1/ml/training-jobs",
+      "url": "http://127.0.0.1:8080/api/v1/ml/training-jobs",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/best_model_version_id",
+          "status": "passed",
+          "expected": null,
+          "actual": "019dc1e2-22db-73d0-af48-e291df317a47"
+        },
+        {
+          "path": "/trials/0/objective_metric/name",
+          "status": "passed",
+          "expected": "f1",
+          "actual": "f1"
+        }
+      ],
+      "captured": {
+        "trained_model_version_id": "019dc1e2-22db-73d0-af48-e291df317a47"
+      },
+      "response_preview": "{\"id\":\"019dc1e2-22da-7f02-8e17-89615de1f8ed\",\"experiment_id\":null,\"model_id\":\"019dc1e2-22d1-76b3-af3a-1f821834858f\",\"name\":\"P5 churn fit 019dc1e2-2216-71c1-a1a2-417f2ba5c585\",\"status\":\"completed\",\"dataset_ids\":[],\"training_config\":{\"engine\":\"tabular-logistic\",\"label_field\":\"label\",\"negative_label\":\"negative\",\"positive_label\":\"positive\",\"records\":[{\"label\":\"positive\",\"nps\":2,\"tickets_open\":9,\"usage..."
+    },
+    {
+      "name": "create_ml_deployment",
+      "method": "POST",
+      "path": "/api/v1/ml/deployments",
+      "url": "http://127.0.0.1:8080/api/v1/ml/deployments",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [],
+      "captured": {
+        "deployment_id": "019dc1e2-2307-7462-9c41-98399ab3aba7"
+      },
+      "response_preview": "{\"id\":\"019dc1e2-2307-7462-9c41-98399ab3aba7\",\"model_id\":\"019dc1e2-22d1-76b3-af3a-1f821834858f\",\"name\":\"P5 Churn Deployment 019dc1e2-2216-71c1-a1a2-417f2ba5c585\",\"status\":\"active\",\"strategy_type\":\"single\",\"endpoint_path\":\"/p5/churn/019dc1e2-2216-71c1-a1a2-417f2ba5c585\",\"traffic_split\":[{\"model_version_id\":\"019dc1e2-22db-73d0-af48-e291df317a47\",\"label\":\"champion\",\"allocation\":100}],\"monitoring_windo..."
+    },
+    {
+      "name": "predict_with_real_model_runtime",
+      "method": "POST",
+      "path": "/api/v1/ml/deployments/${deployment_id}/predict",
+      "url": "http://127.0.0.1:8080/api/v1/ml/deployments/019dc1e2-2307-7462-9c41-98399ab3aba7/predict",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/outputs/0/predicted_label",
+          "status": "passed",
+          "expected": "positive",
+          "actual": "positive"
+        },
+        {
+          "path": "/outputs/0/contributions/0/name",
+          "status": "passed",
+          "expected": null,
+          "actual": "nps"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"deployment_id\":\"019dc1e2-2307-7462-9c41-98399ab3aba7\",\"outputs\":[{\"record_id\":\"record-1\",\"variant\":\"champion\",\"model_version_id\":\"019dc1e2-22db-73d0-af48-e291df317a47\",\"predicted_label\":\"positive\",\"score\":0.98,\"confidence\":0.98,\"contributions\":[{\"name\":\"nps\",\"value\":1.42},{\"name\":\"tickets_open\",\"value\":1.23},{\"name\":\"usage_delta\",\"value\":1.1}]}],\"predicted_at\":\"2026-04-24T23:45:16.044230Z\"}"
+    },
+    {
+      "name": "create_real_http_tool",
+      "method": "POST",
+      "path": "/api/v1/ai/tools",
+      "url": "http://127.0.0.1:8080/api/v1/ai/tools",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [],
+      "captured": {
+        "tool_id": "019dc1e2-2312-7a22-9681-7b08651a25c4"
+      },
+      "response_preview": "{\"id\":\"019dc1e2-2312-7a22-9681-7b08651a25c4\",\"name\":\"Risk Predictor\",\"description\":\"Calls the deployed ML endpoint through the gateway.\",\"category\":\"ml\",\"execution_mode\":\"http_json\",\"execution_config\":{\"auth_mode\":\"forward_bearer\",\"method\":\"POST\",\"url\":\"http://127.0.0.1:8080/api/v1/ml/deployments/019dc1e2-2307-7462-9c41-98399ab3aba7/predict\"},\"status\":\"active\",\"input_schema\":{\"type\":\"object\"},\"out..."
+    },
+    {
+      "name": "create_agent_with_real_tool",
+      "method": "POST",
+      "path": "/api/v1/ai/agents",
+      "url": "http://127.0.0.1:8080/api/v1/ai/agents",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [],
+      "captured": {
+        "agent_id": "019dc1e2-2318-7152-9342-24336482d38a"
+      },
+      "response_preview": "{\"id\":\"019dc1e2-2318-7152-9342-24336482d38a\",\"name\":\"P5 Risk Agent 019dc1e2-2216-71c1-a1a2-417f2ba5c585\",\"description\":\"Uses retrieval plus a real ML tool.\",\"status\":\"active\",\"system_prompt\":\"Summarize churn risk using the tool result and retrieval context.\",\"objective\":\"Assess churn risk and recommend the next action.\",\"tool_ids\":[\"019dc1e2-2312-7a22-9681-7b08651a25c4\"],\"planning_strategy\":\"plan-..."
+    },
+    {
+      "name": "execute_agent_with_real_tool_and_provider",
+      "method": "POST",
+      "path": "/api/v1/ai/agents/${agent_id}/execute",
+      "url": "http://127.0.0.1:8080/api/v1/ai/agents/019dc1e2-2318-7152-9342-24336482d38a/execute",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/used_tool_names/0",
+          "status": "passed",
+          "expected": "Risk Predictor",
+          "actual": "Risk Predictor"
+        },
+        {
+          "path": "/final_response",
+          "status": "passed",
+          "expected": null,
+          "actual": "Mock provider grounded the answer using the supplied context and tool results. Focus: Respond with a concise operator-facing answer."
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"agent_id\":\"019dc1e2-2318-7152-9342-24336482d38a\",\"steps\":[{\"id\":\"analyze-request\",\"title\":\"Analyze user intent\",\"description\":\"Align the request with agent objective 'Assess churn risk and recommend the next action.'.\",\"tool_name\":null,\"status\":\"planned\"},{\"id\":\"retrieve-context\",\"title\":\"Retrieve supporting context\",\"description\":\"Use 1 retrieved passage(s) before drafting the answer.\",\"tool_na..."
+    },
+    {
+      "name": "create_chat_completion_with_rag",
+      "method": "POST",
+      "path": "/api/v1/ai/chat/completions",
+      "url": "http://127.0.0.1:8080/api/v1/ai/chat/completions",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/provider_id",
+          "status": "passed",
+          "expected": "019dc1e2-2286-73d3-b37a-e3066610fed1",
+          "actual": "019dc1e2-2286-73d3-b37a-e3066610fed1"
+        },
+        {
+          "path": "/citations/0/document_title",
+          "status": "passed",
+          "expected": "Retention Escalation Runbook",
+          "actual": "Retention Escalation Runbook"
+        },
+        {
+          "path": "/reply",
+          "status": "passed",
+          "expected": null,
+          "actual": "Mock provider grounded the answer using the supplied context and tool results. Focus: - Retention Escalation Runbook: High ticket backlog, negative usage delta and low NPS indicate elevated churn risk. For these accounts, open a renewal risk case and prepare an outr..."
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"conversation_id\":\"019dc1e2-232f-79e0-9958-5ce53ee0a508\",\"provider_id\":\"019dc1e2-2286-73d3-b37a-e3066610fed1\",\"provider_name\":\"P5 Mock Provider 019dc1e2-2216-71c1-a1a2-417f2ba5c585\",\"reply\":\"Mock provider grounded the answer using the supplied context and tool results. Focus: - Retention Escalation Runbook: High ticket backlog, negative usage delta and low NPS indicate elevated churn risk. For th..."
+    }
+  ]
+}

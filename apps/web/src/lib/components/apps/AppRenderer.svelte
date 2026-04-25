@@ -15,12 +15,25 @@
 	let activePageId = $state('');
 	let runtimeFilter = $state('');
 	let banner = $state('');
+	let runtimeParameters = $state<Record<string, string>>({});
 
 	const visiblePages = $derived(app.pages.filter((page) => page.visible));
 	const activePage = $derived(
 		visiblePages.find((page) => page.id === activePageId)
 			?? visiblePages[0]
 			?? null,
+	);
+	const runtimeLabel = $derived(
+		app.settings.builder_experience === 'slate'
+			? 'Slate runtime'
+			: app.settings.consumer_mode.enabled
+				? 'Consumer runtime'
+				: 'Workshop runtime',
+	);
+	const portalTitle = $derived(app.settings.consumer_mode.portal_title || app.name);
+	const portalSubtitle = $derived(
+		app.settings.consumer_mode.portal_subtitle
+			|| 'Published experience for operators, partners, or external consumers.',
 	);
 
 	const themeStyle = $derived([
@@ -39,6 +52,11 @@
 		if (!activePageId || !app.pages.some((page) => page.id === activePageId)) {
 			activePageId = homePageId;
 		}
+	});
+
+	$effect(() => {
+		app.id;
+		runtimeParameters = {};
 	});
 
 	async function handleAction(action: WidgetEvent, payload?: Record<string, unknown>) {
@@ -98,6 +116,29 @@
 			} catch (error) {
 				banner = error instanceof Error ? error.message : 'Action query failed';
 			}
+			return;
+		}
+
+		if (action.action === 'set_parameters') {
+			const nextParameters: Record<string, string> = { ...runtimeParameters };
+			for (const [key, value] of Object.entries(payload ?? {})) {
+				if (value === null || value === undefined || value === '') {
+					delete nextParameters[key];
+				} else {
+					nextParameters[key] = String(value);
+				}
+			}
+			runtimeParameters = nextParameters;
+			const nextKeys = Object.keys(nextParameters);
+			banner = nextKeys.length
+				? `Scenario applied: ${nextKeys.join(', ')}`
+				: 'Scenario parameters cleared';
+			return;
+		}
+
+		if (action.action === 'clear_parameters') {
+			runtimeParameters = {};
+			banner = 'Scenario parameters cleared';
 		}
 	}
 
@@ -114,6 +155,31 @@
 
 <div class="min-h-[320px] rounded-[calc(var(--app-radius)_+_8px)] border border-slate-200 bg-[var(--app-background)] p-5 shadow-sm" style={themeStyle}>
 	<div class="rounded-[var(--app-radius)] bg-[var(--app-surface)] p-5 text-[var(--app-text)] shadow-sm">
+		{#if app.settings.consumer_mode.enabled && mode === 'published'}
+			<section class="mb-5 overflow-hidden rounded-[calc(var(--app-radius)_+_4px)] border border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(15,118,110,0.16),_transparent_28%),linear-gradient(135deg,_#ffffff,_#f8fafc_55%,_#e0f2fe)] p-5">
+				<div class="flex flex-wrap items-start justify-between gap-4">
+					<div class="max-w-3xl">
+						<div class="text-xs uppercase tracking-[0.28em] text-slate-400">Consumer mode</div>
+						<h2 class="mt-2 text-3xl font-semibold" style={`font-family:${app.theme.heading_font}, sans-serif;`}>{portalTitle}</h2>
+						<p class="mt-3 text-sm leading-7 text-slate-600">{portalSubtitle}</p>
+					</div>
+					<div class="flex flex-wrap gap-2 text-xs">
+						{#if app.settings.consumer_mode.allow_guest_access}
+							<span class="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700">Guest access ready</span>
+						{/if}
+						{#if app.settings.consumer_mode.primary_cta_label && app.settings.consumer_mode.primary_cta_url}
+							<a
+								href={app.settings.consumer_mode.primary_cta_url}
+								class="rounded-full bg-[var(--app-primary)] px-4 py-2 font-medium text-white"
+							>
+								{app.settings.consumer_mode.primary_cta_label}
+							</a>
+						{/if}
+					</div>
+				</div>
+			</section>
+		{/if}
+
 		<div class="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-4">
 			<div>
 				<div class="flex items-center gap-3">
@@ -121,7 +187,7 @@
 						<img src={app.theme.logo_url} alt={app.name} class="h-10 w-10 rounded-xl object-cover" />
 					{/if}
 					<div>
-						<div class="text-xs uppercase tracking-[0.28em] text-slate-400">Workshop runtime</div>
+						<div class="text-xs uppercase tracking-[0.28em] text-slate-400">{runtimeLabel}</div>
 						<h2 class="mt-1 text-3xl font-semibold" style={`font-family:${app.theme.heading_font}, sans-serif;`}>{app.name}</h2>
 					</div>
 				</div>
@@ -133,6 +199,9 @@
 				<span class="rounded-full border border-slate-200 px-3 py-1">{app.status}</span>
 				{#if runtimeFilter}
 					<span class="rounded-full bg-[var(--app-primary)]/10 px-3 py-1 text-[var(--app-primary)]">Filter: {runtimeFilter}</span>
+				{/if}
+				{#if Object.keys(runtimeParameters).length > 0}
+					<span class="rounded-full bg-[var(--app-accent)]/10 px-3 py-1 text-[var(--app-accent)]">{Object.keys(runtimeParameters).length} runtime parameter(s)</span>
 				{/if}
 			</div>
 		</div>
@@ -164,7 +233,7 @@
 							<div class="grid" style={canvasStyle(activePage)}>
 								{#each activePage.widgets as widget (widget.id)}
 									<div style={`grid-column:${Math.max(1, widget.position.x + 1)} / span ${Math.max(1, widget.position.width)}; grid-row:${Math.max(1, widget.position.y + 1)} / span ${Math.max(1, widget.position.height)};`}>
-										<AppWidgetRenderer widget={widget} globalFilter={runtimeFilter} onAction={handleAction} />
+										<AppWidgetRenderer widget={widget} globalFilter={runtimeFilter} runtimeParameters={runtimeParameters} onAction={handleAction} />
 									</div>
 								{/each}
 							</div>
@@ -189,7 +258,7 @@
 						<div class="grid" style={canvasStyle(activePage)}>
 							{#each activePage.widgets as widget (widget.id)}
 								<div style={`grid-column:${Math.max(1, widget.position.x + 1)} / span ${Math.max(1, widget.position.width)}; grid-row:${Math.max(1, widget.position.y + 1)} / span ${Math.max(1, widget.position.height)};`}>
-									<AppWidgetRenderer widget={widget} globalFilter={runtimeFilter} onAction={handleAction} />
+									<AppWidgetRenderer widget={widget} globalFilter={runtimeFilter} runtimeParameters={runtimeParameters} onAction={handleAction} />
 								</div>
 							{/each}
 						</div>
@@ -200,7 +269,7 @@
 			<div class="mt-5 grid" style={canvasStyle(activePage)}>
 				{#each activePage.widgets as widget (widget.id)}
 					<div style={`grid-column:${Math.max(1, widget.position.x + 1)} / span ${Math.max(1, widget.position.width)}; grid-row:${Math.max(1, widget.position.y + 1)} / span ${Math.max(1, widget.position.height)};`}>
-						<AppWidgetRenderer widget={widget} globalFilter={runtimeFilter} onAction={handleAction} />
+						<AppWidgetRenderer widget={widget} globalFilter={runtimeFilter} runtimeParameters={runtimeParameters} onAction={handleAction} />
 					</div>
 				{/each}
 			</div>

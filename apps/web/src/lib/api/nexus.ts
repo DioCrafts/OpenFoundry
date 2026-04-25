@@ -9,6 +9,8 @@ export interface NexusOverview {
 	active_peer_count: number;
 	contract_count: number;
 	active_contract_count: number;
+	private_space_count: number;
+	shared_space_count: number;
 	share_count: number;
 	federated_access_count: number;
 	encrypted_share_count: number;
@@ -22,6 +24,7 @@ export interface PeerOrganization {
 	id: string;
 	slug: string;
 	display_name: string;
+	organization_type: string;
 	region: string;
 	endpoint_url: string;
 	auth_mode: string;
@@ -29,7 +32,24 @@ export interface PeerOrganization {
 	public_key_fingerprint: string;
 	shared_scopes: string[];
 	status: string;
+	lifecycle_stage: string;
+	admin_contacts: string[];
 	last_handshake_at: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface NexusSpace {
+	id: string;
+	slug: string;
+	display_name: string;
+	description: string;
+	space_kind: string;
+	owner_peer_id: string | null;
+	region: string;
+	member_peer_ids: string[];
+	governance_tags: string[];
+	status: string;
 	created_at: string;
 	updated_at: string;
 }
@@ -108,6 +128,8 @@ export interface SharedDataset {
 	contract_id: string;
 	provider_peer_id: string;
 	consumer_peer_id: string;
+	provider_space_id: string | null;
+	consumer_space_id: string | null;
 	dataset_name: string;
 	selector: Record<string, unknown>;
 	provider_schema: Record<string, unknown>;
@@ -180,18 +202,38 @@ export function listPeers() {
 export function createPeer(body: {
 	slug: string;
 	display_name: string;
+	organization_type: string;
 	region: string;
 	endpoint_url: string;
 	auth_mode: string;
 	trust_level: string;
 	public_key_fingerprint: string;
 	shared_scopes?: string[];
+	admin_contacts?: string[];
 }) {
 	return api.post<PeerOrganization>('/nexus/peers', body);
 }
 
 export function authenticatePeer(id: string) {
 	return api.post<PeerOrganization>(`/nexus/peers/${id}/authenticate`, {});
+}
+
+export function listSpaces() {
+	return api.get<ListResponse<NexusSpace>>('/nexus/spaces');
+}
+
+export function createSpace(body: {
+	slug: string;
+	display_name: string;
+	description: string;
+	space_kind: string;
+	owner_peer_id?: string | null;
+	region: string;
+	member_peer_ids?: string[];
+	governance_tags?: string[];
+	status: string;
+}) {
+	return api.post<NexusSpace>('/nexus/spaces', body);
 }
 
 export function listContracts() {
@@ -243,6 +285,8 @@ export function createShare(body: {
 	contract_id: string;
 	provider_peer_id: string;
 	consumer_peer_id: string;
+	provider_space_id?: string | null;
+	consumer_space_id?: string | null;
 	dataset_name: string;
 	selector?: Record<string, unknown>;
 	provider_schema: Record<string, unknown>;
@@ -255,6 +299,8 @@ export function createShare(body: {
 
 export function updateShare(id: string, body: Partial<{
 	dataset_name: string;
+	provider_space_id: string | null;
+	consumer_space_id: string | null;
 	selector: Record<string, unknown>;
 	consumer_schema: Record<string, unknown>;
 	sample_rows: Record<string, unknown>[];

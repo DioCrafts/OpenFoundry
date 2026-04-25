@@ -560,6 +560,7 @@ dependencies = [
  "core-models",
  "event-bus",
  "futures",
+ "regex",
  "serde",
  "serde_json",
  "sqlx",
@@ -619,6 +620,7 @@ dependencies = [
  "hmac",
  "jsonwebtoken",
  "rand 0.8.6",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",
@@ -1074,6 +1076,7 @@ dependencies = [
 name = "code-repo-service"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "auth-middleware",
  "axum 0.8.9",
  "chrono",
@@ -1551,6 +1554,7 @@ dependencies = [
  "async-trait",
  "auth-middleware",
  "axum 0.8.9",
+ "base64 0.22.1",
  "chrono",
  "config",
  "core-models",
@@ -1559,12 +1563,14 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "storage-abstraction",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
  "uuid",
 ]
 
@@ -3476,12 +3482,14 @@ dependencies = [
 name = "marketplace-service"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "auth-middleware",
  "axum 0.8.9",
  "chrono",
  "config",
  "core-models",
  "event-bus",
+ "reqwest",
  "serde",
  "serde_json",
  "sqlx",
@@ -3931,6 +3939,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "auth-middleware",
+ "axum 0.8.9",
  "clap",
  "plugin-sdk",
  "regex",
@@ -3964,6 +3973,7 @@ dependencies = [
  "config",
  "core-models",
  "event-bus",
+ "pyo3",
  "reqwest",
  "serde",
  "serde_json",
@@ -4834,6 +4844,7 @@ dependencies = [
  "config",
  "core-models",
  "event-bus",
+ "reqwest",
  "serde",
  "serde_json",
  "sqlx",

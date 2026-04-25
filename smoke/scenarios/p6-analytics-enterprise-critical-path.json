@@ -1,0 +1,593 @@
+{
+  "base_url": "http://127.0.0.1:8080",
+  "default_headers": {
+    "content-type": "application/json"
+  },
+  "auth": {
+    "type": "dev_jwt",
+    "secret_env": "JWT_SECRET",
+    "roles": ["admin"],
+    "permissions": ["*:*"],
+    "attributes": {
+      "tenant_tier": "enterprise",
+      "workspace": "smoke-p6",
+      "tenant_quotas": {
+        "requests_per_minute": 600
+      }
+    }
+  },
+  "steps": [
+    {
+      "name": "create_analytics_dataset",
+      "method": "POST",
+      "path": "/api/v1/datasets",
+      "expected_status": 201,
+      "body": {
+        "name": "p6-analytics-${RUN_ID}",
+        "description": "P6 analytics fixture dataset",
+        "format": "json",
+        "tags": ["smoke", "p6", "analytics"]
+      },
+      "capture": {
+        "analytics_dataset_id": "/id"
+      }
+    },
+    {
+      "name": "create_fixture_connection",
+      "method": "POST",
+      "path": "/api/v1/connections",
+      "expected_status": 201,
+      "body": {
+        "name": "p6-json-${RUN_ID}",
+        "connector_type": "json",
+        "config": {
+          "path": "smoke/fixtures/p6-analytics.json"
+        }
+      },
+      "capture": {
+        "analytics_connection_id": "/id"
+      }
+    },
+    {
+      "name": "sync_fixture_into_dataset",
+      "method": "POST",
+      "path": "/api/v1/connections/${analytics_connection_id}/sync",
+      "expected_status": 202,
+      "body": {
+        "table_name": "p6_analytics",
+        "target_dataset_id": "${analytics_dataset_id}"
+      },
+      "capture": {
+        "analytics_sync_job_id": "/job_id"
+      }
+    },
+    {
+      "name": "wait_for_fixture_sync",
+      "method": "GET",
+      "path": "/api/v1/connections/${analytics_connection_id}/sync-jobs",
+      "expected_status": 200,
+      "retry_attempts": 20,
+      "retry_delay_ms": 500,
+      "expect": [
+        {
+          "path": "/0/id",
+          "equals": "${analytics_sync_job_id}"
+        },
+        {
+          "path": "/0/status",
+          "equals": "completed"
+        }
+      ]
+    },
+    {
+      "name": "preview_analytics_dataset",
+      "method": "GET",
+      "path": "/api/v1/datasets/${analytics_dataset_id}/preview",
+      "expected_status": 200,
+      "retry_attempts": 20,
+      "retry_delay_ms": 500,
+      "expect": [
+        {
+          "path": "/total_rows",
+          "equals": 4
+        },
+        {
+          "path": "/rows/0/account",
+          "equals": "atlas"
+        },
+        {
+          "path": "/rows/0/amount",
+          "equals": 180
+        }
+      ]
+    },
+    {
+      "name": "create_geospatial_layer",
+      "method": "POST",
+      "path": "/api/v1/geospatial/layers",
+      "expected_status": 200,
+      "body": {
+        "name": "P6 Revenue Map ${RUN_ID}",
+        "description": "Geospatial coverage for analytics smoke.",
+        "source_kind": "dataset",
+        "source_dataset": "${analytics_dataset_id}",
+        "geometry_type": "point",
+        "features": [
+          {
+            "id": "madrid",
+            "label": "Madrid",
+            "geometry": {
+              "type": "point",
+              "coordinates": {
+                "lat": 40.4168,
+                "lon": -3.7038
+              }
+            },
+            "properties": {
+              "value": 180,
+              "region": "iberia"
+            }
+          },
+          {
+            "id": "barcelona",
+            "label": "Barcelona",
+            "geometry": {
+              "type": "point",
+              "coordinates": {
+                "lat": 41.3874,
+                "lon": 2.1686
+              }
+            },
+            "properties": {
+              "value": 120,
+              "region": "iberia"
+            }
+          },
+          {
+            "id": "paris",
+            "label": "Paris",
+            "geometry": {
+              "type": "point",
+              "coordinates": {
+                "lat": 48.8566,
+                "lon": 2.3522
+              }
+            },
+            "properties": {
+              "value": 160,
+              "region": "france"
+            }
+          }
+        ],
+        "tags": ["smoke", "p6", "map"]
+      },
+      "capture": {
+        "analytics_layer_id": "/id"
+      }
+    },
+    {
+      "name": "query_geospatial_layer",
+      "method": "POST",
+      "path": "/api/v1/geospatial/query",
+      "expected_status": 200,
+      "body": {
+        "layer_id": "${analytics_layer_id}",
+        "operation": "within",
+        "bounds": {
+          "min_lat": 39.5,
+          "min_lon": -4.5,
+          "max_lat": 42.0,
+          "max_lon": 3.0
+        },
+        "limit": 10
+      },
+      "expect": [
+        {
+          "path": "/summary/matched_count",
+          "equals": 2
+        },
+        {
+          "path": "/matched_features/0/label",
+          "equals": "Madrid"
+        }
+      ]
+    },
+    {
+      "name": "create_live_report",
+      "method": "POST",
+      "path": "/api/v1/reports/definitions",
+      "expected_status": 200,
+      "body": {
+        "name": "P6 Revenue Pulse ${RUN_ID}",
+        "description": "Analytics and geospatial smoke report.",
+        "owner": "Platform Operations",
+        "generator_kind": "html",
+        "dataset_name": "${analytics_dataset_id}",
+        "template": {
+          "title": "Revenue Pulse",
+          "subtitle": "P6 smoke",
+          "theme": "ember",
+          "layout": "briefing",
+          "sections": [
+            {
+              "id": "revenue-total",
+              "title": "Revenue total",
+              "kind": "kpi",
+              "config": {
+                "aggregation": "sum",
+                "field": "amount"
+              }
+            },
+            {
+              "id": "revenue-by-region",
+              "title": "Revenue by region",
+              "kind": "chart",
+              "config": {
+                "group_by": "region",
+                "aggregation": "sum",
+                "metric_field": "amount"
+              }
+            },
+            {
+              "id": "live-rows",
+              "title": "Live rows",
+              "kind": "table",
+              "config": {
+                "fields": ["account", "region", "amount", "status"],
+                "limit": 4
+              }
+            },
+            {
+              "id": "coverage-map",
+              "title": "Coverage map",
+              "kind": "map",
+              "config": {
+                "layer_id": "${analytics_layer_id}",
+                "limit": 3
+              }
+            },
+            {
+              "id": "narrative",
+              "title": "Narrative",
+              "kind": "narrative",
+              "config": {}
+            }
+          ]
+        },
+        "schedule": {
+          "cadence": "manual",
+          "expression": null,
+          "timezone": "UTC",
+          "anchor_time": "09:00",
+          "interval_minutes": null,
+          "enabled": false,
+          "next_run_at": null
+        },
+        "recipients": [],
+        "tags": ["smoke", "p6", "reports"],
+        "parameters": {
+          "dataset_id": "${analytics_dataset_id}",
+          "map_layer_id": "${analytics_layer_id}"
+        },
+        "active": true
+      },
+      "capture": {
+        "report_id": "/id"
+      }
+    },
+    {
+      "name": "generate_live_report",
+      "method": "POST",
+      "path": "/api/v1/reports/definitions/${report_id}/generate",
+      "expected_status": 200,
+      "expect": [
+        {
+          "path": "/preview/highlights/0/value",
+          "equals": "4"
+        },
+        {
+          "path": "/preview/sections/0/rows/0/value",
+          "equals": 550.0
+        },
+        {
+          "path": "/preview/sections/1/rows/0/bucket",
+          "equals": "france"
+        },
+        {
+          "path": "/preview/sections/1/rows/0/value",
+          "equals": 250.0
+        },
+        {
+          "path": "/preview/sections/3/rows/0/location",
+          "equals": "Madrid"
+        },
+        {
+          "path": "/metrics/section_count",
+          "equals": 5
+        }
+      ]
+    },
+    {
+      "name": "read_control_panel",
+      "method": "GET",
+      "path": "/api/v1/control-panel",
+      "expected_status": 200,
+      "expect": [
+        {
+          "path": "/platform_name",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "name": "update_control_panel",
+      "method": "PUT",
+      "path": "/api/v1/control-panel",
+      "expected_status": 200,
+      "body": {
+        "platform_name": "OpenFoundry Enterprise ${RUN_ID}",
+        "support_email": "ops@openfoundry.dev",
+        "docs_url": "https://docs.openfoundry.dev/p6",
+        "status_page_url": "https://status.openfoundry.dev/p6",
+        "announcement_banner": "Maintenance wave for ${RUN_ID}",
+        "maintenance_mode": true,
+        "release_channel": "staging",
+        "default_region": "eu-west-1",
+        "deployment_mode": "self-hosted-ha",
+        "allow_self_signup": false,
+        "allowed_email_domains": ["openfoundry.dev", "partners.example"],
+        "default_app_branding": {
+          "display_name": "OpenFoundry Enterprise",
+          "primary_color": "#0f766e",
+          "accent_color": "#d97706",
+          "logo_url": null,
+          "favicon_url": null,
+          "show_powered_by": false
+        },
+        "restricted_operations": ["marketplace.publish", "dataset.delete"]
+      },
+      "expect": [
+        {
+          "path": "/platform_name",
+          "equals": "OpenFoundry Enterprise ${RUN_ID}"
+        },
+        {
+          "path": "/maintenance_mode",
+          "equals": true
+        },
+        {
+          "path": "/default_app_branding/show_powered_by",
+          "equals": false
+        }
+      ]
+    },
+    {
+      "name": "verify_control_panel_update",
+      "method": "GET",
+      "path": "/api/v1/control-panel",
+      "expected_status": 200,
+      "expect": [
+        {
+          "path": "/platform_name",
+          "equals": "OpenFoundry Enterprise ${RUN_ID}"
+        },
+        {
+          "path": "/restricted_operations/0",
+          "equals": "marketplace.publish"
+        }
+      ]
+    },
+    {
+      "name": "create_provider_peer",
+      "method": "POST",
+      "path": "/api/v1/nexus/peers",
+      "expected_status": 200,
+      "body": {
+        "slug": "provider-${RUN_ID}",
+        "display_name": "Provider ${RUN_ID}",
+        "region": "eu-west-1",
+        "endpoint_url": "https://provider.example.com/nexus",
+        "auth_mode": "mtls",
+        "trust_level": "partner",
+        "public_key_fingerprint": "provider-${RUN_ID}",
+        "shared_scopes": ["datasets", "reports"]
+      },
+      "capture": {
+        "provider_peer_id": "/id"
+      }
+    },
+    {
+      "name": "create_consumer_peer",
+      "method": "POST",
+      "path": "/api/v1/nexus/peers",
+      "expected_status": 200,
+      "body": {
+        "slug": "consumer-${RUN_ID}",
+        "display_name": "Consumer ${RUN_ID}",
+        "region": "eu-west-1",
+        "endpoint_url": "https://consumer.example.com/nexus",
+        "auth_mode": "mtls",
+        "trust_level": "partner",
+        "public_key_fingerprint": "consumer-${RUN_ID}",
+        "shared_scopes": ["datasets", "queries"]
+      },
+      "capture": {
+        "consumer_peer_id": "/id"
+      }
+    },
+    {
+      "name": "authenticate_provider_peer",
+      "method": "POST",
+      "path": "/api/v1/nexus/peers/${provider_peer_id}/authenticate",
+      "expected_status": 200,
+      "expect": [
+        {
+          "path": "/status",
+          "equals": "authenticated"
+        }
+      ]
+    },
+    {
+      "name": "create_nexus_contract",
+      "method": "POST",
+      "path": "/api/v1/nexus/contracts",
+      "expected_status": 200,
+      "body": {
+        "peer_id": "${provider_peer_id}",
+        "name": "P6 partner contract ${RUN_ID}",
+        "description": "Enterprise analytics sharing contract.",
+        "dataset_locator": "partner://analytics/${analytics_dataset_id}",
+        "allowed_purposes": ["analytics", "forecasting"],
+        "data_classes": ["internal"],
+        "residency_region": "eu-west-1",
+        "query_template": "SELECT account, region, amount, status FROM shared_dataset",
+        "max_rows_per_query": 500,
+        "replication_mode": "incremental_replication",
+        "encryption_profile": "aes256",
+        "retention_days": 30,
+        "status": "active",
+        "expires_at": "2030-01-01T00:00:00Z"
+      },
+      "capture": {
+        "contract_id": "/id"
+      }
+    },
+    {
+      "name": "reject_share_with_pending_consumer",
+      "method": "POST",
+      "path": "/api/v1/nexus/shares",
+      "expected_status": 400,
+      "body": {
+        "contract_id": "${contract_id}",
+        "provider_peer_id": "${provider_peer_id}",
+        "consumer_peer_id": "${consumer_peer_id}",
+        "dataset_name": "partner-analytics",
+        "selector": {
+          "region": ["iberia", "france"]
+        },
+        "provider_schema": {
+          "account": "string",
+          "region": "string",
+          "amount": "number",
+          "status": "string"
+        },
+        "consumer_schema": {
+          "account": "string",
+          "region": "string",
+          "amount": "number",
+          "status": "string"
+        },
+        "sample_rows": [
+          {
+            "account": "atlas",
+            "region": "iberia",
+            "amount": 180,
+            "status": "healthy"
+          }
+        ],
+        "replication_mode": "query_only"
+      }
+    },
+    {
+      "name": "authenticate_consumer_peer",
+      "method": "POST",
+      "path": "/api/v1/nexus/peers/${consumer_peer_id}/authenticate",
+      "expected_status": 200,
+      "expect": [
+        {
+          "path": "/status",
+          "equals": "authenticated"
+        }
+      ]
+    },
+    {
+      "name": "create_hardened_share",
+      "method": "POST",
+      "path": "/api/v1/nexus/shares",
+      "expected_status": 200,
+      "body": {
+        "contract_id": "${contract_id}",
+        "provider_peer_id": "${provider_peer_id}",
+        "consumer_peer_id": "${consumer_peer_id}",
+        "dataset_name": "partner-analytics",
+        "selector": {
+          "region": ["iberia", "france"]
+        },
+        "provider_schema": {
+          "account": "string",
+          "region": "string",
+          "amount": "number",
+          "status": "string"
+        },
+        "consumer_schema": {
+          "account": "string",
+          "region": "string",
+          "amount": "number",
+          "status": "string"
+        },
+        "sample_rows": [
+          {
+            "account": "atlas",
+            "region": "iberia",
+            "amount": 180,
+            "status": "healthy"
+          },
+          {
+            "account": "nova",
+            "region": "france",
+            "amount": 90,
+            "status": "risk"
+          }
+        ],
+        "replication_mode": "query_only"
+      },
+      "capture": {
+        "share_id": "/share/id"
+      },
+      "expect": [
+        {
+          "path": "/share/status",
+          "equals": "active"
+        },
+        {
+          "path": "/access_grant/peer_id",
+          "equals": "${consumer_peer_id}"
+        }
+      ]
+    },
+    {
+      "name": "run_hardened_federated_query",
+      "method": "POST",
+      "path": "/api/v1/nexus/federation/query",
+      "expected_status": 200,
+      "body": {
+        "share_id": "${share_id}",
+        "sql": "SELECT account, region, amount FROM shared_dataset LIMIT 10",
+        "purpose": "analytics",
+        "limit": 10
+      },
+      "expect": [
+        {
+          "path": "/source_peer",
+          "equals": "Provider ${RUN_ID}"
+        },
+        {
+          "path": "/rows/0/account",
+          "equals": "atlas"
+        }
+      ]
+    },
+    {
+      "name": "reject_mutating_federated_query",
+      "method": "POST",
+      "path": "/api/v1/nexus/federation/query",
+      "expected_status": 400,
+      "body": {
+        "share_id": "${share_id}",
+        "sql": "DELETE FROM shared_dataset",
+        "purpose": "analytics",
+        "limit": 10
+      }
+    }
+  ]
+}

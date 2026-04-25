@@ -62,10 +62,32 @@ pub async fn create_repository(
         return Err(crate::handlers::bad_request("repository name is required"));
     }
 
+    crate::domain::git::ensure_storage_root(&state.repo_storage_root)
+        .map_err(|cause| internal_error(cause.to_string()))?;
+
     let id = uuid::Uuid::now_v7();
     let now = Utc::now();
     let tags =
         serde_json::to_value(&request.tags).map_err(|cause| internal_error(cause.to_string()))?;
+    let repository = RepositoryDefinition {
+        id,
+        name: request.name.clone(),
+        slug: request.slug.clone(),
+        description: request.description.clone(),
+        owner: request.owner.clone(),
+        default_branch: request.default_branch.clone(),
+        visibility: request.visibility,
+        object_store_backend: request.object_store_backend.clone(),
+        package_kind: request.package_kind,
+        tags: request.tags.clone(),
+        settings: request.settings.clone(),
+        created_at: now,
+        updated_at: now,
+    };
+
+    let (head_sha, _) =
+        crate::domain::git::initialize_repository(&state.repo_storage_root, &repository)
+            .map_err(|cause| internal_error(cause.to_string()))?;
 
     sqlx::query(
 		"INSERT INTO code_repositories (id, name, slug, description, owner, default_branch, visibility, object_store_backend, package_kind, tags, settings, created_at, updated_at)
@@ -88,24 +110,6 @@ pub async fn create_repository(
 	.await
 	.map_err(|cause| db_error(&cause))?;
 
-    for file in crate::domain::git::default_repository_files(id, &request.default_branch) {
-        sqlx::query(
-			"INSERT INTO code_repository_files (id, repository_id, path, branch_name, language, size_bytes, content, last_commit_sha)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-		)
-		.bind(file.id)
-		.bind(file.repository_id)
-		.bind(&file.path)
-		.bind(&file.branch_name)
-		.bind(&file.language)
-		.bind(file.size_bytes)
-		.bind(&file.content)
-		.bind(&file.last_commit_sha)
-		.execute(&state.db)
-		.await
-		.map_err(|cause| db_error(&cause))?;
-    }
-
     sqlx::query(
 		"INSERT INTO code_repository_branches (id, repository_id, name, head_sha, base_branch, is_default, protected, ahead_by, pending_reviews, updated_at)
 		 VALUES ($1, $2, $3, $4, NULL, true, true, 0, 0, $5)",
@@ -113,27 +117,7 @@ pub async fn create_repository(
 	.bind(uuid::Uuid::now_v7())
 	.bind(id)
 	.bind(&request.default_branch)
-	.bind("init000")
-	.bind(now)
-	.execute(&state.db)
-	.await
-	.map_err(|cause| db_error(&cause))?;
-
-    sqlx::query(
-		"INSERT INTO code_repository_commits (id, repository_id, branch_name, sha, parent_sha, title, description, author_name, author_email, files_changed, additions, deletions, created_at)
-		 VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, $9, $10, $11, $12)",
-	)
-	.bind(uuid::Uuid::now_v7())
-	.bind(id)
-	.bind(&request.default_branch)
-	.bind("init000")
-	.bind("Initialize repository")
-	.bind("Seed repository scaffold for package publishing and merge request workflow.")
-	.bind(&request.owner)
-	.bind(crate::domain::git::synthetic_signature(&request.owner))
-	.bind(3)
-	.bind(42)
-	.bind(0)
+	.bind(&head_sha)
 	.bind(now)
 	.execute(&state.db)
 	.await

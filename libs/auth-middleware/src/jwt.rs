@@ -3,7 +3,7 @@ use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::claims::Claims;
+use crate::claims::{Claims, SessionScope};
 
 #[derive(Debug, Error)]
 pub enum JwtError {
@@ -87,6 +87,34 @@ pub fn build_access_claims(
     attributes: Value,
     auth_methods: Vec<String>,
 ) -> Claims {
+    build_access_claims_with_scope(
+        config,
+        user_id,
+        email,
+        name,
+        roles,
+        permissions,
+        org_id,
+        attributes,
+        auth_methods,
+        None,
+        Some("access".to_string()),
+    )
+}
+
+pub fn build_access_claims_with_scope(
+    config: &JwtConfig,
+    user_id: Uuid,
+    email: &str,
+    name: &str,
+    roles: Vec<String>,
+    permissions: Vec<String>,
+    org_id: Option<Uuid>,
+    attributes: Value,
+    auth_methods: Vec<String>,
+    session_scope: Option<SessionScope>,
+    session_kind: Option<String>,
+) -> Claims {
     let now = chrono::Utc::now().timestamp();
     Claims {
         sub: user_id,
@@ -102,6 +130,8 @@ pub fn build_access_claims(
         auth_methods,
         token_use: Some("access".to_string()),
         api_key_id: None,
+        session_kind,
+        session_scope,
     }
 }
 
@@ -122,6 +152,8 @@ pub fn build_refresh_claims(config: &JwtConfig, user_id: Uuid) -> Claims {
         auth_methods: vec![],
         token_use: Some("refresh".to_string()),
         api_key_id: None,
+        session_kind: None,
+        session_scope: None,
     }
 }
 
@@ -138,6 +170,34 @@ pub fn build_api_key_claims(
     api_key_id: Uuid,
     expires_in_secs: i64,
 ) -> Claims {
+    build_api_key_claims_with_scope(
+        user_id,
+        email,
+        name,
+        roles,
+        permissions,
+        org_id,
+        attributes,
+        api_key_id,
+        expires_in_secs,
+        None,
+        None,
+    )
+}
+
+pub fn build_api_key_claims_with_scope(
+    user_id: Uuid,
+    email: &str,
+    name: &str,
+    roles: Vec<String>,
+    permissions: Vec<String>,
+    org_id: Option<Uuid>,
+    attributes: Value,
+    api_key_id: Uuid,
+    expires_in_secs: i64,
+    session_scope: Option<SessionScope>,
+    session_kind: Option<String>,
+) -> Claims {
     let now = chrono::Utc::now().timestamp();
     Claims {
         sub: user_id,
@@ -153,5 +213,7 @@ pub fn build_api_key_claims(
         auth_methods: vec!["api_key".to_string()],
         token_use: Some("api_key".to_string()),
         api_key_id: Some(api_key_id),
+        session_kind,
+        session_scope,
     }
 }

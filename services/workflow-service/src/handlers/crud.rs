@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::{
     AppState,
-    domain::executor,
+    domain::{executor, lineage},
     models::workflow::{
         CreateWorkflowRequest, ListWorkflowsQuery, UpdateWorkflowRequest, WorkflowDefinition,
     },
@@ -126,6 +126,10 @@ pub async fn create_workflow(
                 }
             }
 
+            if let Err(error) = lineage::sync_workflow_lineage(&state, &workflow).await {
+                tracing::warn!(workflow_id = %workflow.id, "workflow lineage sync failed: {error}");
+            }
+
             (StatusCode::CREATED, Json(workflow)).into_response()
         }
         Err(error) => {
@@ -230,6 +234,10 @@ pub async fn update_workflow(
                 workflow = reloaded;
             }
 
+            if let Err(error) = lineage::sync_workflow_lineage(&state, &workflow).await {
+                tracing::warn!(workflow_id = %workflow.id, "workflow lineage sync failed: {error}");
+            }
+
             Json(workflow).into_response()
         }
         Err(error) => {
@@ -248,7 +256,12 @@ pub async fn delete_workflow(
         .execute(&state.db)
         .await
     {
-        Ok(result) if result.rows_affected() > 0 => StatusCode::NO_CONTENT.into_response(),
+        Ok(result) if result.rows_affected() > 0 => {
+            if let Err(error) = lineage::delete_workflow_lineage(&state, workflow_id).await {
+                tracing::warn!(workflow_id = %workflow_id, "workflow lineage delete failed: {error}");
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
         Ok(_) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => {
             tracing::error!("delete workflow failed: {error}");

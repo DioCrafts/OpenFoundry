@@ -9,14 +9,21 @@
 		const params = new URLSearchParams(window.location.search);
 		const code = params.get('code');
 		const state = params.get('state');
+		const samlResponse = params.get('SAMLResponse');
+		const relayState = params.get('RelayState');
 
-		if (!code || !state) {
-			error = 'Missing authorization code or state.';
+		if ((!code || !state) && (!samlResponse || !relayState)) {
+			error = 'Missing authorization code/state or SAML response.';
 			return;
 		}
 
 		try {
-			const result = await auth.handleSsoCallback(code, state);
+			const result = await auth.handleSsoCallback({
+				code: code ?? undefined,
+				state: state ?? undefined,
+				saml_response: samlResponse ?? undefined,
+				relay_state: relayState ?? undefined,
+			});
 			goto(result.status === 'mfa_required' ? '/auth/mfa' : '/');
 		} catch (err: any) {
 			error = err.message ?? 'SSO callback failed';

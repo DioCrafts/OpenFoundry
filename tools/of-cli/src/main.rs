@@ -1,4 +1,5 @@
 mod benchmark;
+mod mock_provider;
 mod openapi;
 mod smoke;
 
@@ -46,6 +47,10 @@ enum Command {
     Smoke {
         #[command(subcommand)]
         command: SmokeCommand,
+    },
+    MockProvider {
+        #[command(subcommand)]
+        command: MockProviderCommand,
     },
     Terraform {
         #[command(subcommand)]
@@ -103,6 +108,42 @@ enum DocsCommand {
         #[arg(long)]
         input: PathBuf,
     },
+    GenerateSdkTypescript {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    ValidateSdkTypescript {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    GenerateSdkPython {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    ValidateSdkPython {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    GenerateSdkJava {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    ValidateSdkJava {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -118,10 +159,20 @@ enum BenchCommand {
 #[derive(Subcommand)]
 enum SmokeCommand {
     Run {
-        #[arg(long, default_value = "smoke/scenarios/p0-critical-path.json")]
+        #[arg(long, default_value = "smoke/scenarios/p2-runtime-critical-path.json")]
         scenario: PathBuf,
-        #[arg(long, default_value = "smoke/results/p0-critical-path.json")]
+        #[arg(long, default_value = "smoke/results/p2-runtime-critical-path.json")]
         output: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum MockProviderCommand {
+    Serve {
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        #[arg(long, default_value_t = 50110)]
+        port: u16,
     },
 }
 
@@ -197,6 +248,24 @@ async fn main() -> Result<()> {
             DocsCommand::ValidateOpenapi { proto_dir, input } => {
                 validate_openapi(&proto_dir, &input)
             }
+            DocsCommand::GenerateSdkTypescript { input, output } => {
+                generate_typescript_sdk(&input, &output)
+            }
+            DocsCommand::ValidateSdkTypescript { input, output } => {
+                validate_typescript_sdk(&input, &output)
+            }
+            DocsCommand::GenerateSdkPython { input, output } => {
+                generate_python_sdk(&input, &output)
+            }
+            DocsCommand::ValidateSdkPython { input, output } => {
+                validate_python_sdk(&input, &output)
+            }
+            DocsCommand::GenerateSdkJava { input, output } => {
+                generate_java_sdk(&input, &output)
+            }
+            DocsCommand::ValidateSdkJava { input, output } => {
+                validate_java_sdk(&input, &output)
+            }
         },
         Command::Bench { command } => match command {
             BenchCommand::Run { scenario, output } => {
@@ -205,6 +274,9 @@ async fn main() -> Result<()> {
         },
         Command::Smoke { command } => match command {
             SmokeCommand::Run { scenario, output } => smoke::run_suite(&scenario, &output).await,
+        },
+        Command::MockProvider { command } => match command {
+            MockProviderCommand::Serve { host, port } => mock_provider::serve(&host, port).await,
         },
         Command::Terraform { command } => match command {
             TerraformCommand::Schema { output } => generate_terraform_schema(&output),
@@ -288,6 +360,42 @@ fn generate_openapi(proto_dir: &Path, output: &Path) -> Result<()> {
 fn validate_openapi(proto_dir: &Path, input: &Path) -> Result<()> {
     openapi::validate_generated_spec(proto_dir, input)?;
     println!("validated OpenAPI spec at {}", input.display());
+    Ok(())
+}
+
+fn generate_typescript_sdk(input: &Path, output: &Path) -> Result<()> {
+    openapi::generate_typescript_sdk(input, output)?;
+    println!("generated TypeScript SDK at {}", output.display());
+    Ok(())
+}
+
+fn validate_typescript_sdk(input: &Path, output: &Path) -> Result<()> {
+    openapi::validate_typescript_sdk(input, output)?;
+    println!("validated TypeScript SDK at {}", output.display());
+    Ok(())
+}
+
+fn generate_python_sdk(input: &Path, output: &Path) -> Result<()> {
+    openapi::generate_python_sdk(input, output)?;
+    println!("generated Python SDK at {}", output.display());
+    Ok(())
+}
+
+fn validate_python_sdk(input: &Path, output: &Path) -> Result<()> {
+    openapi::validate_python_sdk(input, output)?;
+    println!("validated Python SDK at {}", output.display());
+    Ok(())
+}
+
+fn generate_java_sdk(input: &Path, output: &Path) -> Result<()> {
+    openapi::generate_java_sdk(input, output)?;
+    println!("generated Java SDK at {}", output.display());
+    Ok(())
+}
+
+fn validate_java_sdk(input: &Path, output: &Path) -> Result<()> {
+    openapi::validate_java_sdk(input, output)?;
+    println!("validated Java SDK at {}", output.display());
     Ok(())
 }
 

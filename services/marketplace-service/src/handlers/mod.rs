@@ -139,7 +139,7 @@ pub async fn load_installs(
     db: &sqlx::PgPool,
 ) -> Result<Vec<crate::models::install::InstallRecord>, sqlx::Error> {
     let rows = sqlx::query_as::<_, InstallRow>(
-		"SELECT id, listing_id, listing_name, version, workspace_name, status, dependency_plan, installed_at, ready_at
+		"SELECT id, listing_id, listing_name, version, workspace_name, status, dependency_plan, activation, installed_at, ready_at
 		 FROM marketplace_installs
 		 ORDER BY installed_at DESC",
 	)

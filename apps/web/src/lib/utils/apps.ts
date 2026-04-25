@@ -1,4 +1,12 @@
-import type { AppDefinition, AppPage, AppSettings, AppTheme, AppWidget, WidgetCatalogItem } from '$lib/api/apps';
+import type {
+	AppDefinition,
+	AppPage,
+	AppSettings,
+	AppTheme,
+	AppWidget,
+	SlatePackageFile,
+	WidgetCatalogItem,
+} from '$lib/api/apps';
 
 function createId() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -32,13 +40,49 @@ export function createDefaultTheme(): AppTheme {
 }
 
 export function createDefaultSettings(homePageId: string | null = null): AppSettings {
-  return {
-    home_page_id: homePageId,
-    navigation_style: 'tabs',
-    max_width: '1280px',
-    show_branding: true,
-    custom_css: null,
-  };
+	return {
+		home_page_id: homePageId,
+		navigation_style: 'tabs',
+		max_width: '1280px',
+		show_branding: true,
+		custom_css: null,
+		builder_experience: 'workshop',
+		consumer_mode: {
+			enabled: false,
+			allow_guest_access: false,
+			portal_title: null,
+			portal_subtitle: null,
+			primary_cta_label: null,
+			primary_cta_url: null,
+		},
+		slate: {
+			enabled: false,
+			framework: 'react',
+			package_name: '@open-foundry/slate-app',
+			entry_file: 'src/App.tsx',
+			sdk_import: '@open-foundry/sdk/react',
+			workspace: {
+				enabled: false,
+				repository_id: null,
+				layout: 'split',
+				runtime: 'typescript-react',
+				dev_command: 'pnpm dev',
+				preview_command: 'pnpm build',
+				files: [],
+			},
+			quiver_embed: {
+				enabled: false,
+				primary_type_id: null,
+				secondary_type_id: null,
+				join_field: null,
+				secondary_join_field: null,
+				date_field: null,
+				metric_field: null,
+				group_field: null,
+				selected_group: null,
+			},
+		},
+	};
 }
 
 export function createPage(name = 'Overview', path = '/'): AppPage {
@@ -59,32 +103,47 @@ export function createPage(name = 'Overview', path = '/'): AppPage {
 }
 
 export function createWidgetFromCatalog(item: WidgetCatalogItem): AppWidget {
-  return {
-    id: createId(),
-    widget_type: item.widget_type,
-    title: item.label,
-    description: item.description,
-    position: {
-      x: 0,
-      y: 0,
-      width: item.default_size.width,
-      height: item.default_size.height,
-    },
-    props: cloneValue(item.default_props ?? {}),
-    binding: item.supported_bindings.length > 0
-      ? {
-          source_type: item.supported_bindings[0],
-          source_id: null,
-          query_text: null,
-          path: null,
-          fields: [],
-          parameters: {},
-          limit: 25,
-        }
-      : null,
-    events: [],
-    children: [],
-  };
+	const widgetId = createId();
+	const widget: AppWidget = {
+		id: widgetId,
+		widget_type: item.widget_type,
+		title: item.label,
+		description: item.description,
+		position: {
+			x: 0,
+			y: 0,
+			width: item.default_size.width,
+			height: item.default_size.height,
+		},
+		props: cloneValue(item.default_props ?? {}),
+		binding: item.supported_bindings.length > 0
+			? {
+					source_type: item.supported_bindings[0],
+					source_id: null,
+					query_text: null,
+					path: null,
+					fields: [],
+					parameters: {},
+					limit: 25,
+				}
+			: null,
+		events: [],
+		children: [],
+	};
+
+	if (item.widget_type === 'scenario') {
+		widget.events = [
+			{
+				id: createId(),
+				trigger: 'scenario_change',
+				action: 'set_parameters',
+				label: 'Apply runtime parameters',
+				config: { source: 'scenario-widget' },
+			},
+		];
+	}
+
+	return widget;
 }
 
 export function createEmptyAppDraft(): AppDefinition {
@@ -118,4 +177,8 @@ export function normalizePageLayout(pages: AppPage[]) {
       },
     })),
   }));
+}
+
+export function seedSlateWorkspace(files: SlatePackageFile[]) {
+	return cloneValue(files);
 }

@@ -136,15 +136,26 @@ pub async fn create_training_job(
         .objective_metric_name
         .unwrap_or_else(|| "accuracy".to_string());
     let search = body.hyperparameter_search.unwrap_or_else(|| json!({}));
-    let trials = training::generate_trials(Some(&search), &objective_metric_name);
-    let best_trial = training::best_trial(&trials);
+    let resolved_training_config = if body.training_config.is_null() {
+        json!({ "engine": "tabular-logistic" })
+    } else {
+        body.training_config
+    };
+    let execution = training::execute_training(
+        &resolved_training_config,
+        Some(&search),
+        &objective_metric_name,
+    )
+    .map_err(bad_request)?;
     let now = Utc::now();
     let job_id = Uuid::now_v7();
 
     let mut best_model_version_id = None;
 
     if body.auto_register_model_version {
-        if let (Some(model_id), Some(best_trial)) = (body.model_id, best_trial.clone()) {
+        if let (Some(model_id), Some(best_hyperparameters)) =
+            (body.model_id, execution.best_hyperparameters.clone())
+        {
             let next_version_number = query_scalar::<_, i32>(
                 "SELECT COALESCE(MAX(version_number), 0) + 1 FROM ml_model_versions WHERE model_id = $1",
             )
@@ -191,15 +202,17 @@ pub async fn create_training_job(
             .bind(next_version_number)
             .bind(format!("autotune-v{next_version_number}"))
             .bind(job_id)
-            .bind(best_trial.hyperparameters.clone())
-            .bind(to_json(&vec![best_trial.objective_metric.clone()]))
+            .bind(best_hyperparameters)
+            .bind(to_json(&execution.best_metrics))
             .bind(Some(format!(
                 "ml://models/{model_id}/versions/{next_version_number}"
             )))
-            .bind(json!({
-                "signature": "tabular",
-                "objective_metric": objective_metric_name,
-                "generated_by": "training-orchestrator"
+            .bind(execution.best_schema.clone().unwrap_or_else(|| {
+                json!({
+                    "signature": "tabular",
+                    "objective_metric": objective_metric_name,
+                    "generated_by": "training-orchestrator"
+                })
             }))
             .fetch_one(&state.db)
             .await
@@ -261,14 +274,10 @@ pub async fn create_training_job(
     .bind(body.model_id)
     .bind(body.name.trim())
     .bind(to_json(&body.dataset_ids))
-    .bind(if body.training_config.is_null() {
-        json!({ "engine": "xgboost" })
-    } else {
-        body.training_config
-    })
+    .bind(resolved_training_config)
     .bind(search)
     .bind(objective_metric_name)
-    .bind(to_json(&trials))
+    .bind(to_json(&execution.trials))
     .bind(best_model_version_id)
     .bind(now)
     .bind(Some(now))

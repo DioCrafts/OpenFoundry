@@ -33,6 +33,8 @@ pub async fn create_connection(
         "json" => connectors::json::validate_config(&body.config),
         "rest_api" => connectors::rest_api::validate_config(&body.config),
         "salesforce" => connectors::salesforce::validate_config(&body.config),
+        "sap" => connectors::sap::validate_config(&body.config),
+        "iot" => connectors::iot::validate_config(&body.config),
         _ => Ok(()),
     };
 
@@ -146,12 +148,30 @@ pub async fn test_connection(
         }
     };
 
+    let agent_url =
+        match crate::domain::agent_registry::resolve_agent_url(&state, &conn.config).await {
+            Ok(agent_url) => agent_url,
+            Err(error) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({ "error": error })),
+                )
+                    .into_response();
+            }
+        };
     let test_result = match conn.connector_type.as_str() {
         "postgresql" => connectors::postgres::test_connection(&conn.config).await,
-        "csv" => connectors::csv::test_connection(&conn.config).await,
-        "json" => connectors::json::test_connection(&conn.config).await,
-        "rest_api" => connectors::rest_api::test_connection(&conn.config).await,
-        "salesforce" => connectors::salesforce::test_connection(&conn.config).await,
+        "csv" => connectors::csv::test_connection(&state, &conn.config).await,
+        "json" => connectors::json::test_connection(&state, &conn.config).await,
+        "rest_api" => {
+            connectors::rest_api::test_connection(&state, &conn.config, agent_url.as_deref()).await
+        }
+        "salesforce" => {
+            connectors::salesforce::test_connection(&state, &conn.config, agent_url.as_deref())
+                .await
+        }
+        "sap" => connectors::sap::test_connection(&state, &conn.config, agent_url.as_deref()).await,
+        "iot" => connectors::iot::test_connection(&state, &conn.config, agent_url.as_deref()).await,
         other => Err(format!("unsupported connector type: {other}")),
     };
 

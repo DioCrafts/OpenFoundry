@@ -19,6 +19,9 @@ pub struct AppState {
     pub jwt_config: JwtConfig,
     pub http_client: reqwest::Client,
     pub dataset_service_url: String,
+    pub allowed_egress_hosts: Vec<String>,
+    pub allow_private_network_egress: bool,
+    pub agent_stale_after: chrono::Duration,
 }
 
 impl axum::extract::FromRef<AppState> for JwtConfig {
@@ -55,6 +58,9 @@ async fn main() {
         jwt_config: jwt_config.clone(),
         http_client,
         dataset_service_url: cfg.dataset_service_url.clone(),
+        allowed_egress_hosts: cfg.allowed_egress_hosts.clone(),
+        allow_private_network_egress: cfg.allow_private_network_egress,
+        agent_stale_after: chrono::Duration::seconds(cfg.agent_stale_after_secs.max(15) as i64),
     };
 
     let scheduler_state = state.clone();
@@ -72,6 +78,14 @@ async fn main() {
     );
 
     let protected = Router::new()
+        .route(
+            "/api/v1/connector-agents",
+            post(handlers::agents::register_agent).get(handlers::agents::list_agents),
+        )
+        .route(
+            "/api/v1/connector-agents/{id}/heartbeat",
+            post(handlers::agents::heartbeat_agent),
+        )
         .route(
             "/api/v1/connections",
             post(handlers::connections::create_connection),
@@ -91,6 +105,26 @@ async fn main() {
         .route(
             "/api/v1/connections/{id}/test",
             post(handlers::connections::test_connection),
+        )
+        .route(
+            "/api/v1/connections/{id}/discover",
+            post(handlers::registrations::discover_connection_sources),
+        )
+        .route(
+            "/api/v1/connections/{id}/registrations",
+            get(handlers::registrations::list_registrations),
+        )
+        .route(
+            "/api/v1/connections/{id}/registrations/auto",
+            post(handlers::registrations::auto_register_sources),
+        )
+        .route(
+            "/api/v1/connections/{id}/registrations/bulk",
+            post(handlers::registrations::bulk_register_sources),
+        )
+        .route(
+            "/api/v1/connections/{id}/virtual-tables/query",
+            post(handlers::registrations::query_virtual_table),
         )
         .route(
             "/api/v1/connections/{id}/sync",

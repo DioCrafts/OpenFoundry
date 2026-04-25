@@ -46,6 +46,7 @@ export interface DatasetVersion {
   size_bytes: number;
   row_count: number;
   storage_path: string;
+  transaction_id?: string | null;
   created_at: string;
 }
 
@@ -54,9 +55,21 @@ export interface DatasetPreviewResponse {
   version?: number;
   size_bytes?: number;
   format?: string;
-  rows?: string[][];
-  columns?: string[];
+  branch?: string | null;
+  storage_path?: string;
+  limit?: number;
+  offset?: number;
+  row_count?: number;
+  rows?: Array<Record<string, unknown>>;
+  columns?: Array<{
+    name: string;
+    field_type?: string;
+    data_type?: string;
+    nullable?: boolean;
+  }>;
   total_rows?: number;
+  warnings?: string[];
+  errors?: string[];
   message?: string;
 }
 
@@ -65,10 +78,81 @@ export interface DatasetBranch {
   dataset_id: string;
   name: string;
   version: number;
+  base_version?: number;
   description: string;
   is_default: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface DatasetView {
+  id: string;
+  dataset_id: string;
+  name: string;
+  description: string;
+  sql_text: string;
+  source_branch?: string | null;
+  source_version?: number | null;
+  materialized: boolean;
+  refresh_on_source_update: boolean;
+  format: string;
+  current_version: number;
+  storage_path?: string | null;
+  row_count: number;
+  schema_fields: unknown;
+  last_refreshed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateDatasetViewParams {
+  name: string;
+  description?: string;
+  sql: string;
+  source_branch?: string;
+  source_version?: number;
+  materialized?: boolean;
+  refresh_on_source_update?: boolean;
+}
+
+export interface DatasetFilesystemEntry {
+  entry_type: 'directory' | 'file';
+  name: string;
+  path: string;
+  storage_path?: string;
+  size_bytes?: number;
+  last_modified?: string;
+  content_type?: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface DatasetFilesystemResponse {
+  dataset_id: string;
+  requested_path: string;
+  root: string;
+  current_version: number;
+  active_branch: string;
+  entries: DatasetFilesystemEntry[];
+  items: DatasetFilesystemEntry[];
+  breadcrumbs: Array<{ name: string; path: string }>;
+  sections: {
+    versions: number;
+    branches: number;
+    views: number;
+  };
+}
+
+export interface DatasetTransaction {
+  id: string;
+  dataset_id: string;
+  view_id?: string | null;
+  operation: string;
+  branch_name?: string | null;
+  status: string;
+  summary: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  committed_at?: string | null;
 }
 
 export interface CreateDatasetBranchParams {
@@ -233,6 +317,10 @@ export function getVersions(datasetId: string) {
   return api.get<DatasetVersion[]>(`/datasets/${datasetId}/versions`);
 }
 
+export function listDatasetTransactions(datasetId: string) {
+  return api.get<DatasetTransaction[]>(`/datasets/${datasetId}/transactions`);
+}
+
 export function listBranches(datasetId: string) {
   return api.get<DatasetBranch[]>(`/datasets/${datasetId}/branches`);
 }
@@ -243,6 +331,37 @@ export function createDatasetBranch(datasetId: string, params: CreateDatasetBran
 
 export function checkoutDatasetBranch(datasetId: string, branchName: string) {
   return api.post<Dataset>(`/datasets/${datasetId}/branches/${encodeURIComponent(branchName)}/checkout`, {});
+}
+
+export function listDatasetViews(datasetId: string) {
+  return api.get<DatasetView[]>(`/datasets/${datasetId}/views`);
+}
+
+export function getDatasetView(datasetId: string, viewId: string) {
+  return api.get<DatasetView>(`/datasets/${datasetId}/views/${viewId}`);
+}
+
+export function createDatasetView(datasetId: string, params: CreateDatasetViewParams) {
+  return api.post<DatasetView>(`/datasets/${datasetId}/views`, params);
+}
+
+export function refreshDatasetView(datasetId: string, viewId: string) {
+  return api.post<DatasetView>(`/datasets/${datasetId}/views/${viewId}/refresh`, {});
+}
+
+export function previewDatasetView(datasetId: string, viewId: string, params?: { limit?: number; offset?: number }) {
+  const query = new URLSearchParams();
+  if (params?.limit) query.set('limit', String(params.limit));
+  if (params?.offset) query.set('offset', String(params.offset));
+  const qs = query.toString();
+  return api.get<Record<string, unknown>>(`/datasets/${datasetId}/views/${viewId}/preview${qs ? `?${qs}` : ''}`);
+}
+
+export function listDatasetFilesystem(datasetId: string, params?: { path?: string }) {
+  const query = new URLSearchParams();
+  if (params?.path) query.set('path', params.path);
+  const qs = query.toString();
+  return api.get<DatasetFilesystemResponse>(`/datasets/${datasetId}/filesystem${qs ? `?${qs}` : ''}`);
 }
 
 export function getDatasetQuality(datasetId: string) {
@@ -268,8 +387,14 @@ export function deleteDatasetQualityRule(datasetId: string, ruleId: string) {
 export async function uploadData(datasetId: string, file: File) {
   const formData = new FormData();
   formData.append('file', file);
+  const headers: Record<string, string> = {};
+  const authHeader = api.authorizationHeaders().Authorization;
+  if (authHeader) {
+    headers.Authorization = authHeader;
+  }
   const response = await fetch(`/api/v1/datasets/${datasetId}/upload`, {
     method: 'POST',
+    headers,
     body: formData,
   });
   if (!response.ok) throw new Error('Upload failed');

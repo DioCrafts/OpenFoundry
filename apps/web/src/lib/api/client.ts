@@ -13,6 +13,12 @@ class ApiClient {
     this.token = token;
   }
 
+  authorizationHeaders() {
+    return this.token
+      ? ({ Authorization: `Bearer ${this.token}` } satisfies Record<string, string>)
+      : ({} satisfies Record<string, string>);
+  }
+
   async fetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',

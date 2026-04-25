@@ -147,9 +147,9 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO code_repository_files (id, repository_id, path, branch_name, language, size_bytes, content, last_commit_sha)
 VALUES
 ('0196839d-d210-7f8c-8a1d-7ab001030301', '0196839d-d210-7f8c-8a1d-7ab001030001', 'README.md', 'main', 'markdown', 1640, '# Foundry Widget Kit\n\nShared widget primitives for marketplace publication.\n', 'a12b3c4'),
-('0196839d-d210-7f8c-8a1d-7ab001030302', '0196839d-d210-7f8c-8a1d-7ab001030001', 'src/lib.rs', 'main', 'rust', 840, 'pub fn widget_entry() -> &'"'"'static str {\n    "widget-kit"\n}\n', 'a12b3c4'),
-('0196839d-d210-7f8c-8a1d-7ab001030303', '0196839d-d210-7f8c-8a1d-7ab001030001', 'src/map_preview.rs', 'feature/map-preview', 'rust', 1120, 'pub fn render_preview() -> &'"'"'static str {\n    "map-preview"\n}\n', 'b34c5d6'),
-('0196839d-d210-7f8c-8a1d-7ab001030304', '0196839d-d210-7f8c-8a1d-7ab001030002', 'src/connectors.rs', 'main', 'rust', 980, 'pub fn webhook_connector() -> &'"'"'static str {\n    "webhook"\n}\n', 'c45d6e7')
+('0196839d-d210-7f8c-8a1d-7ab001030302', '0196839d-d210-7f8c-8a1d-7ab001030001', 'src/lib.rs', 'main', 'rust', 840, $$pub fn widget_entry() -> &'static str {\n    "widget-kit"\n}\n$$, 'a12b3c4'),
+('0196839d-d210-7f8c-8a1d-7ab001030303', '0196839d-d210-7f8c-8a1d-7ab001030001', 'src/map_preview.rs', 'feature/map-preview', 'rust', 1120, $$pub fn render_preview() -> &'static str {\n    "map-preview"\n}\n$$, 'b34c5d6'),
+('0196839d-d210-7f8c-8a1d-7ab001030304', '0196839d-d210-7f8c-8a1d-7ab001030002', 'src/connectors.rs', 'main', 'rust', 980, $$pub fn webhook_connector() -> &'static str {\n    "webhook"\n}\n$$, 'c45d6e7')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO code_merge_requests (id, repository_id, title, description, source_branch, target_branch, status, author, labels, reviewers, approvals_required, changed_files, created_at, updated_at, merged_at)

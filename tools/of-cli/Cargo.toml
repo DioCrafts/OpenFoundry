@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { workspace = true }
 auth-middleware = { workspace = true }
+axum = { workspace = true }
 plugin-sdk = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }

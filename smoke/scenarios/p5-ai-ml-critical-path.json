@@ -1,0 +1,311 @@
+{
+  "base_url": "http://127.0.0.1:8080",
+  "default_headers": {
+    "content-type": "application/json"
+  },
+  "auth": {
+    "type": "dev_jwt",
+    "secret_env": "JWT_SECRET",
+    "roles": ["admin"],
+    "permissions": ["*:*"],
+    "attributes": {
+      "tenant_tier": "team",
+      "workspace": "smoke-p5",
+      "tenant_quotas": {
+        "requests_per_minute": 600
+      }
+    }
+  },
+  "steps": [
+    {
+      "name": "create_mock_llm_provider",
+      "method": "POST",
+      "path": "/api/v1/ai/providers",
+      "expected_status": 200,
+      "body": {
+        "name": "P5 Mock Provider ${RUN_ID}",
+        "provider_type": "openai",
+        "model_name": "mock-gpt",
+        "endpoint_url": "http://127.0.0.1:50110/v1",
+        "api_mode": "chat_completions",
+        "enabled": true,
+        "load_balance_weight": 500,
+        "max_output_tokens": 1024,
+        "cost_tier": "test",
+        "tags": ["smoke", "p5"]
+      },
+      "capture": {
+        "provider_id": "/id"
+      }
+    },
+    {
+      "name": "create_provider_backed_knowledge_base",
+      "method": "POST",
+      "path": "/api/v1/ai/knowledge-bases",
+      "expected_status": 200,
+      "body": {
+        "name": "P5 Playbooks ${RUN_ID}",
+        "description": "Provider-backed embeddings for smoke validation.",
+        "embedding_provider": "provider:${provider_id}",
+        "chunking_strategy": "balanced",
+        "tags": ["smoke", "p5", "rag"]
+      },
+      "capture": {
+        "knowledge_base_id": "/id"
+      }
+    },
+    {
+      "name": "create_knowledge_document",
+      "method": "POST",
+      "path": "/api/v1/ai/knowledge-bases/${knowledge_base_id}/documents",
+      "expected_status": 200,
+      "body": {
+        "title": "Retention Escalation Runbook",
+        "content": "High ticket backlog, negative usage delta and low NPS indicate elevated churn risk. For these accounts, open a renewal risk case and prepare an outreach plan before the next executive review.",
+        "source_uri": "kb://smoke/p5/retention-runbook",
+        "metadata": {
+          "team": "retention-ops"
+        }
+      },
+      "expect": [
+        {
+          "path": "/chunk_count",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "name": "search_provider_backed_knowledge_base",
+      "method": "POST",
+      "path": "/api/v1/ai/knowledge-bases/${knowledge_base_id}/search",
+      "expected_status": 200,
+      "body": {
+        "query": "Which signals indicate churn risk?",
+        "top_k": 3,
+        "min_score": 0.1
+      },
+      "expect": [
+        {
+          "path": "/results/0/document_title",
+          "equals": "Retention Escalation Runbook"
+        }
+      ]
+    },
+    {
+      "name": "create_ml_model",
+      "method": "POST",
+      "path": "/api/v1/ml/models",
+      "expected_status": 200,
+      "body": {
+        "name": "P5 Churn Model ${RUN_ID}",
+        "description": "Inline-trained churn risk model for P5 smoke.",
+        "problem_type": "classification",
+        "tags": ["smoke", "p5"]
+      },
+      "capture": {
+        "model_id": "/id"
+      }
+    },
+    {
+      "name": "train_real_ml_model",
+      "method": "POST",
+      "path": "/api/v1/ml/training-jobs",
+      "expected_status": 200,
+      "body": {
+        "model_id": "${model_id}",
+        "name": "P5 churn fit ${RUN_ID}",
+        "auto_register_model_version": true,
+        "training_config": {
+          "engine": "tabular-logistic",
+          "label_field": "label",
+          "positive_label": "positive",
+          "negative_label": "negative",
+          "records": [
+            { "label": "positive", "tickets_open": 9, "usage_delta": -0.8, "nps": 2 },
+            { "label": "positive", "tickets_open": 7, "usage_delta": -0.6, "nps": 3 },
+            { "label": "positive", "tickets_open": 8, "usage_delta": -0.7, "nps": 2 },
+            { "label": "negative", "tickets_open": 1, "usage_delta": 0.2, "nps": 9 },
+            { "label": "negative", "tickets_open": 2, "usage_delta": 0.4, "nps": 8 },
+            { "label": "negative", "tickets_open": 3, "usage_delta": 0.3, "nps": 7 }
+          ]
+        },
+        "hyperparameter_search": {
+          "candidates": [
+            { "learning_rate": 0.05, "epochs": 250, "l2": 0.0 },
+            { "learning_rate": 0.08, "epochs": 350, "l2": 0.001 },
+            { "learning_rate": 0.12, "epochs": 500, "l2": 0.01 }
+          ]
+        },
+        "objective_metric_name": "f1"
+      },
+      "capture": {
+        "trained_model_version_id": "/best_model_version_id"
+      },
+      "expect": [
+        {
+          "path": "/best_model_version_id",
+          "exists": true
+        },
+        {
+          "path": "/trials/0/objective_metric/name",
+          "equals": "f1"
+        }
+      ]
+    },
+    {
+      "name": "create_ml_deployment",
+      "method": "POST",
+      "path": "/api/v1/ml/deployments",
+      "expected_status": 200,
+      "body": {
+        "model_id": "${model_id}",
+        "name": "P5 Churn Deployment ${RUN_ID}",
+        "strategy_type": "single",
+        "endpoint_path": "/p5/churn/${RUN_ID}",
+        "traffic_split": [
+          {
+            "model_version_id": "${trained_model_version_id}",
+            "label": "champion",
+            "allocation": 100
+          }
+        ],
+        "monitoring_window": "24h"
+      },
+      "capture": {
+        "deployment_id": "/id"
+      }
+    },
+    {
+      "name": "predict_with_real_model_runtime",
+      "method": "POST",
+      "path": "/api/v1/ml/deployments/${deployment_id}/predict",
+      "expected_status": 200,
+      "body": {
+        "inputs": [
+          {
+            "tickets_open": 8,
+            "usage_delta": -0.85,
+            "nps": 2
+          }
+        ],
+        "explain": true
+      },
+      "expect": [
+        {
+          "path": "/outputs/0/predicted_label",
+          "equals": "positive"
+        },
+        {
+          "path": "/outputs/0/contributions/0/name",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "name": "create_real_http_tool",
+      "method": "POST",
+      "path": "/api/v1/ai/tools",
+      "expected_status": 200,
+      "body": {
+        "name": "Risk Predictor",
+        "description": "Calls the deployed ML endpoint through the gateway.",
+        "category": "ml",
+        "execution_mode": "http_json",
+        "execution_config": {
+          "url": "http://127.0.0.1:8080/api/v1/ml/deployments/${deployment_id}/predict",
+          "method": "POST",
+          "auth_mode": "forward_bearer"
+        },
+        "status": "active",
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        },
+        "tags": ["smoke", "p5", "agent-tool"]
+      },
+      "capture": {
+        "tool_id": "/id"
+      }
+    },
+    {
+      "name": "create_agent_with_real_tool",
+      "method": "POST",
+      "path": "/api/v1/ai/agents",
+      "expected_status": 200,
+      "body": {
+        "name": "P5 Risk Agent ${RUN_ID}",
+        "description": "Uses retrieval plus a real ML tool.",
+        "system_prompt": "Summarize churn risk using the tool result and retrieval context.",
+        "objective": "Assess churn risk and recommend the next action.",
+        "tool_ids": ["${tool_id}"],
+        "planning_strategy": "plan-act-observe",
+        "max_iterations": 2
+      },
+      "capture": {
+        "agent_id": "/id"
+      }
+    },
+    {
+      "name": "execute_agent_with_real_tool_and_provider",
+      "method": "POST",
+      "path": "/api/v1/ai/agents/${agent_id}/execute",
+      "expected_status": 200,
+      "body": {
+        "user_message": "Assess this account and recommend the next action.",
+        "knowledge_base_id": "${knowledge_base_id}",
+        "context": {
+          "tool_inputs": {
+            "Risk Predictor": {
+              "inputs": [
+                {
+                  "tickets_open": 8,
+                  "usage_delta": -0.85,
+                  "nps": 2
+                }
+              ],
+              "explain": true
+            }
+          }
+        }
+      },
+      "expect": [
+        {
+          "path": "/used_tool_names/0",
+          "equals": "Risk Predictor"
+        },
+        {
+          "path": "/final_response",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "name": "create_chat_completion_with_rag",
+      "method": "POST",
+      "path": "/api/v1/ai/chat/completions",
+      "expected_status": 200,
+      "body": {
+        "user_message": "What signals indicate elevated churn risk?",
+        "knowledge_base_id": "${knowledge_base_id}",
+        "preferred_provider_id": "${provider_id}",
+        "max_tokens": 256
+      },
+      "expect": [
+        {
+          "path": "/provider_id",
+          "equals": "${provider_id}"
+        },
+        {
+          "path": "/citations/0/document_title",
+          "equals": "Retention Escalation Runbook"
+        },
+        {
+          "path": "/reply",
+          "exists": true
+        }
+      ]
+    }
+  ]
+}

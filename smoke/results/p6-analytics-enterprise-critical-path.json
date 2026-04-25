@@ -1,0 +1,418 @@
+{
+  "base_url": "http://127.0.0.1:8080",
+  "started_at_epoch_ms": 1777102578582,
+  "success": true,
+  "failure_message": null,
+  "steps": [
+    {
+      "name": "create_analytics_dataset",
+      "method": "POST",
+      "path": "/api/v1/datasets",
+      "url": "http://127.0.0.1:8080/api/v1/datasets",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [],
+      "captured": {
+        "analytics_dataset_id": "019dc391-640d-7a13-9b13-d32349a2bc1a"
+      },
+      "response_preview": "{\"id\":\"019dc391-640d-7a13-9b13-d32349a2bc1a\",\"name\":\"p6-analytics-019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"description\":\"P6 analytics fixture dataset\",\"format\":\"json\",\"storage_path\":\"datasets/019dc391-640d-7a13-9b13-d32349a2bc1a\",\"size_bytes\":0,\"row_count\":0,\"owner_id\":\"019dc391-6406-7992-a00b-e3262c744083\",\"tags\":[\"smoke\",\"p6\",\"analytics\"],\"current_version\":1,\"active_branch\":\"main\",\"created_at\":\"20..."
+    },
+    {
+      "name": "create_fixture_connection",
+      "method": "POST",
+      "path": "/api/v1/connections",
+      "url": "http://127.0.0.1:8080/api/v1/connections",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [],
+      "captured": {
+        "analytics_connection_id": "019dc391-643d-7373-82c4-d0ec6eaa9f6b"
+      },
+      "response_preview": "{\"id\":\"019dc391-643d-7373-82c4-d0ec6eaa9f6b\",\"name\":\"p6-json-019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"connector_type\":\"json\",\"config\":{\"path\":\"smoke/fixtures/p6-analytics.json\"},\"status\":\"disconnected\",\"owner_id\":\"019dc391-643b-7581-8aa6-7cd8ea475d1e\",\"last_sync_at\":null,\"created_at\":\"2026-04-25T07:36:18.749007Z\",\"updated_at\":\"2026-04-25T07:36:18.749007Z\"}"
+    },
+    {
+      "name": "sync_fixture_into_dataset",
+      "method": "POST",
+      "path": "/api/v1/connections/${analytics_connection_id}/sync",
+      "url": "http://127.0.0.1:8080/api/v1/connections/019dc391-643d-7373-82c4-d0ec6eaa9f6b/sync",
+      "expected_status": 202,
+      "actual_status": 202,
+      "assertions": [],
+      "captured": {
+        "analytics_sync_job_id": "019dc391-6442-72b3-a7fe-bc51f79fa1cb"
+      },
+      "response_preview": "{\"connection_id\":\"019dc391-643d-7373-82c4-d0ec6eaa9f6b\",\"job_id\":\"019dc391-6442-72b3-a7fe-bc51f79fa1cb\",\"max_attempts\":3,\"scheduled_at\":\"2026-04-25T07:36:18.754864Z\",\"status\":\"pending\"}"
+    },
+    {
+      "name": "wait_for_fixture_sync",
+      "method": "GET",
+      "path": "/api/v1/connections/${analytics_connection_id}/sync-jobs",
+      "url": "http://127.0.0.1:8080/api/v1/connections/019dc391-643d-7373-82c4-d0ec6eaa9f6b/sync-jobs",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/0/id",
+          "status": "passed",
+          "expected": "019dc391-6442-72b3-a7fe-bc51f79fa1cb",
+          "actual": "019dc391-6442-72b3-a7fe-bc51f79fa1cb"
+        },
+        {
+          "path": "/0/status",
+          "status": "passed",
+          "expected": "completed",
+          "actual": "completed"
+        }
+      ],
+      "captured": {},
+      "response_preview": "[{\"id\":\"019dc391-6442-72b3-a7fe-bc51f79fa1cb\",\"connection_id\":\"019dc391-643d-7373-82c4-d0ec6eaa9f6b\",\"target_dataset_id\":\"019dc391-640d-7a13-9b13-d32349a2bc1a\",\"table_name\":\"p6_analytics\",\"status\":\"completed\",\"rows_synced\":4,\"error\":null,\"attempts\":1,\"max_attempts\":3,\"scheduled_at\":\"2026-04-25T07:36:18.754864Z\",\"next_retry_at\":null,\"result_dataset_version\":1,\"sync_metadata\":{\"source\":{\"rows\":4,\"so..."
+    },
+    {
+      "name": "preview_analytics_dataset",
+      "method": "GET",
+      "path": "/api/v1/datasets/${analytics_dataset_id}/preview",
+      "url": "http://127.0.0.1:8080/api/v1/datasets/019dc391-640d-7a13-9b13-d32349a2bc1a/preview",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/total_rows",
+          "status": "passed",
+          "expected": 4,
+          "actual": 4
+        },
+        {
+          "path": "/rows/0/account",
+          "status": "passed",
+          "expected": "atlas",
+          "actual": "atlas"
+        },
+        {
+          "path": "/rows/0/amount",
+          "status": "passed",
+          "expected": 180,
+          "actual": 180
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"branch\":null,\"columns\":[{\"field_type\":\"Utf8\",\"name\":\"account\",\"nullable\":true},{\"field_type\":\"Int64\",\"name\":\"amount\",\"nullable\":true},{\"field_type\":\"Float64\",\"name\":\"lat\",\"nullable\":true},{\"field_type\":\"Float64\",\"name\":\"lon\",\"nullable\":true},{\"field_type\":\"Utf8\",\"name\":\"region\",\"nullable\":true},{\"field_type\":\"Utf8\",\"name\":\"status\",\"nullable\":true}],\"dataset_id\":\"019dc391-640d-7a13-9b13-d32349a2b..."
+    },
+    {
+      "name": "create_geospatial_layer",
+      "method": "POST",
+      "path": "/api/v1/geospatial/layers",
+      "url": "http://127.0.0.1:8080/api/v1/geospatial/layers",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [],
+      "captured": {
+        "analytics_layer_id": "019dc391-6691-7461-b86c-30044f4f6c35"
+      },
+      "response_preview": "{\"id\":\"019dc391-6691-7461-b86c-30044f4f6c35\",\"name\":\"P6 Revenue Map 019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"description\":\"Geospatial coverage for analytics smoke.\",\"source_kind\":\"dataset\",\"source_dataset\":\"019dc391-640d-7a13-9b13-d32349a2bc1a\",\"geometry_type\":\"point\",\"style\":{\"color\":\"#D97706\",\"opacity\":0.78,\"radius\":9.0,\"line_width\":2.0,\"heatmap_intensity\":0.65,\"cluster_color\":\"#0F766E\",\"show_labe..."
+    },
+    {
+      "name": "query_geospatial_layer",
+      "method": "POST",
+      "path": "/api/v1/geospatial/query",
+      "url": "http://127.0.0.1:8080/api/v1/geospatial/query",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/summary/matched_count",
+          "status": "passed",
+          "expected": 2,
+          "actual": 2
+        },
+        {
+          "path": "/matched_features/0/label",
+          "status": "passed",
+          "expected": "Madrid",
+          "actual": "Madrid"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"operation\":\"within\",\"matched_features\":[{\"id\":\"madrid\",\"label\":\"Madrid\",\"geometry\":{\"type\":\"point\",\"coordinates\":{\"lat\":40.4168,\"lon\":-3.7038}},\"properties\":{\"region\":\"iberia\",\"value\":180}},{\"id\":\"barcelona\",\"label\":\"Barcelona\",\"geometry\":{\"type\":\"point\",\"coordinates\":{\"lat\":41.3874,\"lon\":2.1686}},\"properties\":{\"region\":\"iberia\",\"value\":120}}],\"summary\":{\"matched_count\":2,\"query_time_ms\":26,\"nea..."
+    },
+    {
+      "name": "create_live_report",
+      "method": "POST",
+      "path": "/api/v1/reports/definitions",
+      "url": "http://127.0.0.1:8080/api/v1/reports/definitions",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [],
+      "captured": {
+        "report_id": "019dc391-66db-7c13-b2d5-e36501dcae23"
+      },
+      "response_preview": "{\"id\":\"019dc391-66db-7c13-b2d5-e36501dcae23\",\"name\":\"P6 Revenue Pulse 019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"description\":\"Analytics and geospatial smoke report.\",\"owner\":\"Platform Operations\",\"generator_kind\":\"html\",\"dataset_name\":\"019dc391-640d-7a13-9b13-d32349a2bc1a\",\"template\":{\"title\":\"Revenue Pulse\",\"subtitle\":\"P6 smoke\",\"theme\":\"ember\",\"layout\":\"briefing\",\"sections\":[{\"id\":\"revenue-total\",\"..."
+    },
+    {
+      "name": "generate_live_report",
+      "method": "POST",
+      "path": "/api/v1/reports/definitions/${report_id}/generate",
+      "url": "http://127.0.0.1:8080/api/v1/reports/definitions/019dc391-66db-7c13-b2d5-e36501dcae23/generate",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/preview/highlights/0/value",
+          "status": "passed",
+          "expected": "4",
+          "actual": "4"
+        },
+        {
+          "path": "/preview/sections/0/rows/0/value",
+          "status": "passed",
+          "expected": 550.0,
+          "actual": 550.0
+        },
+        {
+          "path": "/preview/sections/1/rows/0/bucket",
+          "status": "passed",
+          "expected": "france",
+          "actual": "france"
+        },
+        {
+          "path": "/preview/sections/1/rows/0/value",
+          "status": "passed",
+          "expected": 250.0,
+          "actual": 250.0
+        },
+        {
+          "path": "/preview/sections/3/rows/0/location",
+          "status": "passed",
+          "expected": "Madrid",
+          "actual": "Madrid"
+        },
+        {
+          "path": "/metrics/section_count",
+          "status": "passed",
+          "expected": 5,
+          "actual": 5
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"id\":\"019dc391-670e-7051-883d-b7cb08fab86c\",\"report_id\":\"019dc391-66db-7c13-b2d5-e36501dcae23\",\"report_name\":\"P6 Revenue Pulse 019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"status\":\"completed\",\"generator_kind\":\"html\",\"triggered_by\":\"manual\",\"generated_at\":\"2026-04-25T07:36:19.470374Z\",\"completed_at\":\"2026-04-25T07:36:19.470374Z\",\"preview\":{\"headline\":\"P6 Revenue Pulse 019dc391-6396-7df0-8c36-bc92c2c90dc..."
+    },
+    {
+      "name": "read_control_panel",
+      "method": "GET",
+      "path": "/api/v1/control-panel",
+      "url": "http://127.0.0.1:8080/api/v1/control-panel",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/platform_name",
+          "status": "passed",
+          "expected": null,
+          "actual": "OpenFoundry"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"platform_name\":\"OpenFoundry\",\"support_email\":\"support@openfoundry.dev\",\"docs_url\":\"https://docs.openfoundry.dev\",\"status_page_url\":\"https://status.openfoundry.dev\",\"announcement_banner\":\"\",\"maintenance_mode\":false,\"release_channel\":\"stable\",\"default_region\":\"eu-west-1\",\"deployment_mode\":\"self_hosted\",\"allow_self_signup\":false,\"allowed_email_domains\":[],\"default_app_branding\":{\"display_name\":\"Ope..."
+    },
+    {
+      "name": "update_control_panel",
+      "method": "PUT",
+      "path": "/api/v1/control-panel",
+      "url": "http://127.0.0.1:8080/api/v1/control-panel",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/platform_name",
+          "status": "passed",
+          "expected": "OpenFoundry Enterprise 019dc391-6396-7df0-8c36-bc92c2c90dc6",
+          "actual": "OpenFoundry Enterprise 019dc391-6396-7df0-8c36-bc92c2c90dc6"
+        },
+        {
+          "path": "/maintenance_mode",
+          "status": "passed",
+          "expected": true,
+          "actual": true
+        },
+        {
+          "path": "/default_app_branding/show_powered_by",
+          "status": "passed",
+          "expected": false,
+          "actual": false
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"platform_name\":\"OpenFoundry Enterprise 019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"support_email\":\"ops@openfoundry.dev\",\"docs_url\":\"https://docs.openfoundry.dev/p6\",\"status_page_url\":\"https://status.openfoundry.dev/p6\",\"announcement_banner\":\"Maintenance wave for 019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"maintenance_mode\":true,\"release_channel\":\"staging\",\"default_region\":\"eu-west-1\",\"deployment_mode\":\"se..."
+    },
+    {
+      "name": "verify_control_panel_update",
+      "method": "GET",
+      "path": "/api/v1/control-panel",
+      "url": "http://127.0.0.1:8080/api/v1/control-panel",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/platform_name",
+          "status": "passed",
+          "expected": "OpenFoundry Enterprise 019dc391-6396-7df0-8c36-bc92c2c90dc6",
+          "actual": "OpenFoundry Enterprise 019dc391-6396-7df0-8c36-bc92c2c90dc6"
+        },
+        {
+          "path": "/restricted_operations/0",
+          "status": "passed",
+          "expected": "marketplace.publish",
+          "actual": "marketplace.publish"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"platform_name\":\"OpenFoundry Enterprise 019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"support_email\":\"ops@openfoundry.dev\",\"docs_url\":\"https://docs.openfoundry.dev/p6\",\"status_page_url\":\"https://status.openfoundry.dev/p6\",\"announcement_banner\":\"Maintenance wave for 019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"maintenance_mode\":true,\"release_channel\":\"staging\",\"default_region\":\"eu-west-1\",\"deployment_mode\":\"se..."
+    },
+    {
+      "name": "create_provider_peer",
+      "method": "POST",
+      "path": "/api/v1/nexus/peers",
+      "url": "http://127.0.0.1:8080/api/v1/nexus/peers",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [],
+      "captured": {
+        "provider_peer_id": "019dc391-6759-7ac0-9fa7-411b0a07c5a1"
+      },
+      "response_preview": "{\"id\":\"019dc391-6759-7ac0-9fa7-411b0a07c5a1\",\"slug\":\"provider-019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"display_name\":\"Provider 019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"region\":\"eu-west-1\",\"endpoint_url\":\"https://provider.example.com/nexus\",\"auth_mode\":\"mtls\",\"trust_level\":\"partner\",\"public_key_fingerprint\":\"provider-019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"shared_scopes\":[\"datasets\",\"reports\"],\"status\":..."
+    },
+    {
+      "name": "create_consumer_peer",
+      "method": "POST",
+      "path": "/api/v1/nexus/peers",
+      "url": "http://127.0.0.1:8080/api/v1/nexus/peers",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [],
+      "captured": {
+        "consumer_peer_id": "019dc391-6781-76b0-96a3-ce36062a66dd"
+      },
+      "response_preview": "{\"id\":\"019dc391-6781-76b0-96a3-ce36062a66dd\",\"slug\":\"consumer-019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"display_name\":\"Consumer 019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"region\":\"eu-west-1\",\"endpoint_url\":\"https://consumer.example.com/nexus\",\"auth_mode\":\"mtls\",\"trust_level\":\"partner\",\"public_key_fingerprint\":\"consumer-019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"shared_scopes\":[\"datasets\",\"queries\"],\"status\":..."
+    },
+    {
+      "name": "authenticate_provider_peer",
+      "method": "POST",
+      "path": "/api/v1/nexus/peers/${provider_peer_id}/authenticate",
+      "url": "http://127.0.0.1:8080/api/v1/nexus/peers/019dc391-6759-7ac0-9fa7-411b0a07c5a1/authenticate",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/status",
+          "status": "passed",
+          "expected": "authenticated",
+          "actual": "authenticated"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"id\":\"019dc391-6759-7ac0-9fa7-411b0a07c5a1\",\"slug\":\"provider-019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"display_name\":\"Provider 019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"region\":\"eu-west-1\",\"endpoint_url\":\"https://provider.example.com/nexus\",\"auth_mode\":\"mtls\",\"trust_level\":\"partner\",\"public_key_fingerprint\":\"provider-019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"shared_scopes\":[\"datasets\",\"reports\"],\"status\":..."
+    },
+    {
+      "name": "create_nexus_contract",
+      "method": "POST",
+      "path": "/api/v1/nexus/contracts",
+      "url": "http://127.0.0.1:8080/api/v1/nexus/contracts",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [],
+      "captured": {
+        "contract_id": "019dc391-678d-7120-b52a-b3b5eb3d9578"
+      },
+      "response_preview": "{\"id\":\"019dc391-678d-7120-b52a-b3b5eb3d9578\",\"peer_id\":\"019dc391-6759-7ac0-9fa7-411b0a07c5a1\",\"name\":\"P6 partner contract 019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"description\":\"Enterprise analytics sharing contract.\",\"dataset_locator\":\"partner://analytics/019dc391-640d-7a13-9b13-d32349a2bc1a\",\"allowed_purposes\":[\"analytics\",\"forecasting\"],\"data_classes\":[\"internal\"],\"residency_region\":\"eu-west-1\",\"q..."
+    },
+    {
+      "name": "reject_share_with_pending_consumer",
+      "method": "POST",
+      "path": "/api/v1/nexus/shares",
+      "url": "http://127.0.0.1:8080/api/v1/nexus/shares",
+      "expected_status": 400,
+      "actual_status": 400,
+      "assertions": [],
+      "captured": {},
+      "response_preview": "{\"error\":\"consumer peer must be authenticated\"}"
+    },
+    {
+      "name": "authenticate_consumer_peer",
+      "method": "POST",
+      "path": "/api/v1/nexus/peers/${consumer_peer_id}/authenticate",
+      "url": "http://127.0.0.1:8080/api/v1/nexus/peers/019dc391-6781-76b0-96a3-ce36062a66dd/authenticate",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/status",
+          "status": "passed",
+          "expected": "authenticated",
+          "actual": "authenticated"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"id\":\"019dc391-6781-76b0-96a3-ce36062a66dd\",\"slug\":\"consumer-019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"display_name\":\"Consumer 019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"region\":\"eu-west-1\",\"endpoint_url\":\"https://consumer.example.com/nexus\",\"auth_mode\":\"mtls\",\"trust_level\":\"partner\",\"public_key_fingerprint\":\"consumer-019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"shared_scopes\":[\"datasets\",\"queries\"],\"status\":..."
+    },
+    {
+      "name": "create_hardened_share",
+      "method": "POST",
+      "path": "/api/v1/nexus/shares",
+      "url": "http://127.0.0.1:8080/api/v1/nexus/shares",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/share/status",
+          "status": "passed",
+          "expected": "active",
+          "actual": "active"
+        },
+        {
+          "path": "/access_grant/peer_id",
+          "status": "passed",
+          "expected": "019dc391-6781-76b0-96a3-ce36062a66dd",
+          "actual": "019dc391-6781-76b0-96a3-ce36062a66dd"
+        }
+      ],
+      "captured": {
+        "share_id": "019dc391-67a5-7230-a441-2c259e96d7f4"
+      },
+      "response_preview": "{\"share\":{\"id\":\"019dc391-67a5-7230-a441-2c259e96d7f4\",\"contract_id\":\"019dc391-678d-7120-b52a-b3b5eb3d9578\",\"provider_peer_id\":\"019dc391-6759-7ac0-9fa7-411b0a07c5a1\",\"consumer_peer_id\":\"019dc391-6781-76b0-96a3-ce36062a66dd\",\"dataset_name\":\"partner-analytics\",\"selector\":{\"region\":[\"iberia\",\"france\"]},\"provider_schema\":{\"account\":\"string\",\"amount\":\"number\",\"region\":\"string\",\"status\":\"string\"},\"consum..."
+    },
+    {
+      "name": "run_hardened_federated_query",
+      "method": "POST",
+      "path": "/api/v1/nexus/federation/query",
+      "url": "http://127.0.0.1:8080/api/v1/nexus/federation/query",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/source_peer",
+          "status": "passed",
+          "expected": "Provider 019dc391-6396-7df0-8c36-bc92c2c90dc6",
+          "actual": "Provider 019dc391-6396-7df0-8c36-bc92c2c90dc6"
+        },
+        {
+          "path": "/rows/0/account",
+          "status": "passed",
+          "expected": "atlas",
+          "actual": "atlas"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"share_id\":\"019dc391-67a5-7230-a441-2c259e96d7f4\",\"dataset_name\":\"partner-analytics\",\"source_peer\":\"Provider 019dc391-6396-7df0-8c36-bc92c2c90dc6\",\"executed_sql\":\"SELECT account, region, amount FROM shared_dataset LIMIT 10\",\"query_mode\":\"query_only\",\"limit\":10,\"columns\":[\"account\",\"amount\",\"region\",\"status\"],\"rows\":[{\"account\":\"atlas\",\"amount\":180,\"region\":\"iberia\",\"status\":\"healthy\"},{\"account\":..."
+    },
+    {
+      "name": "reject_mutating_federated_query",
+      "method": "POST",
+      "path": "/api/v1/nexus/federation/query",
+      "url": "http://127.0.0.1:8080/api/v1/nexus/federation/query",
+      "expected_status": 400,
+      "actual_status": 400,
+      "assertions": [],
+      "captured": {},
+      "response_preview": "{\"error\":\"federated query must be read-only\"}"
+    }
+  ]
+}

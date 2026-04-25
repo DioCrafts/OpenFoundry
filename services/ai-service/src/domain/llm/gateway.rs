@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 
 use uuid::Uuid;
 
-use crate::models::{knowledge_base::KnowledgeSearchResult, provider::LlmProvider};
+use crate::models::provider::LlmProvider;
 
 pub fn route_providers(
     providers: &[LlmProvider],
@@ -69,31 +69,6 @@ pub fn select_provider(candidates: &[LlmProvider], fallback_enabled: bool) -> Op
     }
 }
 
-pub fn synthesize_completion(
-    provider: &LlmProvider,
-    prompt: &str,
-    citations: &[KnowledgeSearchResult],
-) -> String {
-    let final_line = prompt.lines().last().unwrap_or(prompt).trim();
-    let context_summary = if citations.is_empty() {
-        "No retrieval context was required for this answer.".to_string()
-    } else {
-        format!(
-            "Retrieved {} knowledge chunk(s), led by '{}' .",
-            citations.len(),
-            citations[0].document_title
-        )
-    };
-
-    format!(
-        "{} routed this request to model '{}'. {} Recommended response: focus on '{}' and preserve operator context.",
-        provider.name,
-        provider.model_name,
-        context_summary,
-        truncate(final_line, 140)
-    )
-}
-
 pub fn estimate_tokens(content: &str) -> i32 {
     ((content.split_whitespace().count() as f32) * 1.35).ceil() as i32
 }
@@ -106,14 +81,4 @@ fn provider_rank(provider: &LlmProvider) -> f32 {
     };
 
     health_bonus + provider.load_balance_weight as f32 - (provider.health_state.error_rate * 100.0)
-}
-
-fn truncate(content: &str, limit: usize) -> String {
-    let mut chars = content.chars();
-    let truncated = chars.by_ref().take(limit).collect::<String>();
-    if chars.next().is_some() {
-        format!("{truncated}...")
-    } else {
-        truncated
-    }
 }

@@ -6,3 +6,4 @@ pub mod oauth;
 pub mod rbac;
 pub mod saml;
 pub mod security;
+pub mod sessions;

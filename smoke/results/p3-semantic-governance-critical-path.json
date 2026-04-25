@@ -1,0 +1,446 @@
+{
+  "base_url": "http://127.0.0.1:8080",
+  "started_at_epoch_ms": 1777070367662,
+  "success": true,
+  "failure_message": null,
+  "steps": [
+    {
+      "name": "create_reviewable_interface",
+      "method": "POST",
+      "path": "/api/v1/ontology/interfaces",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/interfaces",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [],
+      "captured": {
+        "interface_id": "019dc1a5-e3b4-7aa2-b1dc-de22694448e9"
+      },
+      "response_preview": "{\"created_at\":\"2026-04-24T22:39:27.669799Z\",\"description\":\"P3 smoke reviewable interface\",\"display_name\":\"Reviewable 019dc1a5-e3ae-7621-a7c3-d6ea9398bf16\",\"id\":\"019dc1a5-e3b4-7aa2-b1dc-de22694448e9\",\"name\":\"reviewable_019dc1a5-e3ae-7621-a7c3-d6ea9398bf16\",\"owner_id\":\"019dc1a5-e3b0-78a1-905d-22cfa146e041\",\"updated_at\":\"2026-04-24T22:39:27.669799Z\"}"
+    },
+    {
+      "name": "create_review_history_property",
+      "method": "POST",
+      "path": "/api/v1/ontology/interfaces/${interface_id}/properties",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/interfaces/019dc1a5-e3b4-7aa2-b1dc-de22694448e9/properties",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [
+        {
+          "path": "/time_dependent",
+          "status": "passed",
+          "expected": true,
+          "actual": true
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"created_at\":\"2026-04-24T22:39:27.676351Z\",\"default_value\":[],\"description\":\"Chronological review events\",\"display_name\":\"Review history\",\"id\":\"019dc1a5-e3bb-7661-81db-2a03a6673cd2\",\"interface_id\":\"019dc1a5-e3b4-7aa2-b1dc-de22694448e9\",\"name\":\"review_history\",\"property_type\":\"json\",\"required\":false,\"time_dependent\":true,\"unique_constraint\":false,\"updated_at\":\"2026-04-24T22:39:27.676351Z\",\"validat..."
+    },
+    {
+      "name": "create_case_type",
+      "method": "POST",
+      "path": "/api/v1/ontology/types",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/types",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [],
+      "captured": {
+        "case_type_id": "019dc1a5-e3c1-7471-9b39-23c12bee1792"
+      },
+      "response_preview": "{\"color\":null,\"created_at\":\"2026-04-24T22:39:27.682165Z\",\"description\":\"P3 smoke case type\",\"display_name\":\"Case 019dc1a5-e3ae-7621-a7c3-d6ea9398bf16\",\"icon\":null,\"id\":\"019dc1a5-e3c1-7471-9b39-23c12bee1792\",\"name\":\"case_019dc1a5-e3ae-7621-a7c3-d6ea9398bf16\",\"owner_id\":\"019dc1a5-e3bf-70f0-b31b-475def8601a4\",\"primary_key_property\":\"status\",\"updated_at\":\"2026-04-24T22:39:27.682165Z\"}"
+    },
+    {
+      "name": "attach_interface_to_case_type",
+      "method": "POST",
+      "path": "/api/v1/ontology/types/${case_type_id}/interfaces/${interface_id}",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/types/019dc1a5-e3c1-7471-9b39-23c12bee1792/interfaces/019dc1a5-e3b4-7aa2-b1dc-de22694448e9",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [
+        {
+          "path": "/interface_id",
+          "status": "passed",
+          "expected": "019dc1a5-e3b4-7aa2-b1dc-de22694448e9",
+          "actual": "019dc1a5-e3b4-7aa2-b1dc-de22694448e9"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"created_at\":\"2026-04-24T22:39:27.685798Z\",\"interface_id\":\"019dc1a5-e3b4-7aa2-b1dc-de22694448e9\",\"object_type_id\":\"019dc1a5-e3c1-7471-9b39-23c12bee1792\"}"
+    },
+    {
+      "name": "create_case_status_property",
+      "method": "POST",
+      "path": "/api/v1/ontology/types/${case_type_id}/properties",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/types/019dc1a5-e3c1-7471-9b39-23c12bee1792/properties",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [],
+      "captured": {},
+      "response_preview": "{\"created_at\":\"2026-04-24T22:39:27.691572Z\",\"default_value\":\"open\",\"description\":\"\",\"display_name\":\"Status\",\"id\":\"019dc1a5-e3ca-7773-a1ca-e6adf8aef080\",\"name\":\"status\",\"object_type_id\":\"019dc1a5-e3c1-7471-9b39-23c12bee1792\",\"property_type\":\"string\",\"required\":true,\"time_dependent\":false,\"unique_constraint\":false,\"updated_at\":\"2026-04-24T22:39:27.691572Z\",\"validation_rules\":null}"
+    },
+    {
+      "name": "create_case_decision_property",
+      "method": "POST",
+      "path": "/api/v1/ontology/types/${case_type_id}/properties",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/types/019dc1a5-e3c1-7471-9b39-23c12bee1792/properties",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [],
+      "captured": {},
+      "response_preview": "{\"created_at\":\"2026-04-24T22:39:27.696486Z\",\"default_value\":null,\"description\":\"\",\"display_name\":\"Decision\",\"id\":\"019dc1a5-e3d0-7f20-9c49-46fecc784989\",\"name\":\"decision\",\"object_type_id\":\"019dc1a5-e3c1-7471-9b39-23c12bee1792\",\"property_type\":\"string\",\"required\":false,\"time_dependent\":false,\"unique_constraint\":false,\"updated_at\":\"2026-04-24T22:39:27.696486Z\",\"validation_rules\":null}"
+    },
+    {
+      "name": "create_case_owner_count_property",
+      "method": "POST",
+      "path": "/api/v1/ontology/types/${case_type_id}/properties",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/types/019dc1a5-e3c1-7471-9b39-23c12bee1792/properties",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [],
+      "captured": {},
+      "response_preview": "{\"created_at\":\"2026-04-24T22:39:27.700720Z\",\"default_value\":0,\"description\":\"\",\"display_name\":\"Owner count\",\"id\":\"019dc1a5-e3d4-7522-bbf7-7482ed49a2c2\",\"name\":\"owner_count\",\"object_type_id\":\"019dc1a5-e3c1-7471-9b39-23c12bee1792\",\"property_type\":\"integer\",\"required\":true,\"time_dependent\":false,\"unique_constraint\":false,\"updated_at\":\"2026-04-24T22:39:27.700720Z\",\"validation_rules\":null}"
+    },
+    {
+      "name": "create_case_peer_count_property",
+      "method": "POST",
+      "path": "/api/v1/ontology/types/${case_type_id}/properties",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/types/019dc1a5-e3c1-7471-9b39-23c12bee1792/properties",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [],
+      "captured": {},
+      "response_preview": "{\"created_at\":\"2026-04-24T22:39:27.705106Z\",\"default_value\":0,\"description\":\"\",\"display_name\":\"Peer case count\",\"id\":\"019dc1a5-e3d9-7640-b8b1-3b46cee39738\",\"name\":\"peer_case_count\",\"object_type_id\":\"019dc1a5-e3c1-7471-9b39-23c12bee1792\",\"property_type\":\"integer\",\"required\":true,\"time_dependent\":false,\"unique_constraint\":false,\"updated_at\":\"2026-04-24T22:39:27.705106Z\",\"validation_rules\":null}"
+    },
+    {
+      "name": "create_analyst_type",
+      "method": "POST",
+      "path": "/api/v1/ontology/types",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/types",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [],
+      "captured": {
+        "analyst_type_id": "019dc1a5-e3dd-7340-ad02-9cd8355f862c"
+      },
+      "response_preview": "{\"color\":null,\"created_at\":\"2026-04-24T22:39:27.709504Z\",\"description\":\"P3 smoke analyst type\",\"display_name\":\"Analyst 019dc1a5-e3ae-7621-a7c3-d6ea9398bf16\",\"icon\":null,\"id\":\"019dc1a5-e3dd-7340-ad02-9cd8355f862c\",\"name\":\"analyst_019dc1a5-e3ae-7621-a7c3-d6ea9398bf16\",\"owner_id\":\"019dc1a5-e3db-7123-b1f4-cb0ebaab30e6\",\"primary_key_property\":null,\"updated_at\":\"2026-04-24T22:39:27.709504Z\"}"
+    },
+    {
+      "name": "create_analyst_name_property",
+      "method": "POST",
+      "path": "/api/v1/ontology/types/${analyst_type_id}/properties",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/types/019dc1a5-e3dd-7340-ad02-9cd8355f862c/properties",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [],
+      "captured": {},
+      "response_preview": "{\"created_at\":\"2026-04-24T22:39:27.713705Z\",\"default_value\":null,\"description\":\"\",\"display_name\":\"Name\",\"id\":\"019dc1a5-e3e1-7810-bacd-6444c1ffdc8a\",\"name\":\"name\",\"object_type_id\":\"019dc1a5-e3dd-7340-ad02-9cd8355f862c\",\"property_type\":\"string\",\"required\":true,\"time_dependent\":false,\"unique_constraint\":false,\"updated_at\":\"2026-04-24T22:39:27.713705Z\",\"validation_rules\":null}"
+    },
+    {
+      "name": "create_analyst_object",
+      "method": "POST",
+      "path": "/api/v1/ontology/types/${analyst_type_id}/objects",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/types/019dc1a5-e3dd-7340-ad02-9cd8355f862c/objects",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [],
+      "captured": {
+        "analyst_id": "019dc1a5-e409-79d1-9f23-9aa4e4fa9881"
+      },
+      "response_preview": "{\"created_at\":\"2026-04-24T22:39:27.754226Z\",\"created_by\":\"019dc1a5-e3e4-7113-9408-9caf87259442\",\"id\":\"019dc1a5-e409-79d1-9f23-9aa4e4fa9881\",\"marking\":\"confidential\",\"object_type_id\":\"019dc1a5-e3dd-7340-ad02-9cd8355f862c\",\"organization_id\":\"11111111-1111-7111-8111-111111111111\",\"properties\":{\"name\":\"Analyst A\"},\"updated_at\":\"2026-04-24T22:39:27.754226Z\"}"
+    },
+    {
+      "name": "create_case_one",
+      "method": "POST",
+      "path": "/api/v1/ontology/types/${case_type_id}/objects",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/types/019dc1a5-e3c1-7471-9b39-23c12bee1792/objects",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [
+        {
+          "path": "/organization_id",
+          "status": "passed",
+          "expected": "11111111-1111-7111-8111-111111111111",
+          "actual": "11111111-1111-7111-8111-111111111111"
+        },
+        {
+          "path": "/marking",
+          "status": "passed",
+          "expected": "confidential",
+          "actual": "confidential"
+        }
+      ],
+      "captured": {
+        "case_one_id": "019dc1a5-e413-7d32-b065-5c5f1999b72f"
+      },
+      "response_preview": "{\"created_at\":\"2026-04-24T22:39:27.763480Z\",\"created_by\":\"019dc1a5-e40d-7302-a577-da156dd22bac\",\"id\":\"019dc1a5-e413-7d32-b065-5c5f1999b72f\",\"marking\":\"confidential\",\"object_type_id\":\"019dc1a5-e3c1-7471-9b39-23c12bee1792\",\"organization_id\":\"11111111-1111-7111-8111-111111111111\",\"properties\":{\"owner_count\":0,\"peer_case_count\":0,\"review_history\":[],\"status\":\"open\"},\"updated_at\":\"2026-04-24T22:39:27.7..."
+    },
+    {
+      "name": "create_case_two",
+      "method": "POST",
+      "path": "/api/v1/ontology/types/${case_type_id}/objects",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/types/019dc1a5-e3c1-7471-9b39-23c12bee1792/objects",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [],
+      "captured": {
+        "case_two_id": "019dc1a5-e41a-7c10-b11e-e0a25edd471b"
+      },
+      "response_preview": "{\"created_at\":\"2026-04-24T22:39:27.770111Z\",\"created_by\":\"019dc1a5-e416-7b02-b0aa-7aaa170498e9\",\"id\":\"019dc1a5-e41a-7c10-b11e-e0a25edd471b\",\"marking\":\"confidential\",\"object_type_id\":\"019dc1a5-e3c1-7471-9b39-23c12bee1792\",\"organization_id\":\"11111111-1111-7111-8111-111111111111\",\"properties\":{\"owner_count\":0,\"peer_case_count\":0,\"review_history\":[],\"status\":\"open\"},\"updated_at\":\"2026-04-24T22:39:27.7..."
+    },
+    {
+      "name": "create_case_assignment_link_type",
+      "method": "POST",
+      "path": "/api/v1/ontology/links",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/links",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [],
+      "captured": {
+        "assignment_link_type_id": "019dc1a5-e41f-7a60-b3f8-9dd14f27f9ac"
+      },
+      "response_preview": "{\"cardinality\":\"many_to_many\",\"created_at\":\"2026-04-24T22:39:27.775729Z\",\"description\":\"P3 smoke ownership link\",\"display_name\":\"Assigned to 019dc1a5-e3ae-7621-a7c3-d6ea9398bf16\",\"id\":\"019dc1a5-e41f-7a60-b3f8-9dd14f27f9ac\",\"name\":\"assigned_to_019dc1a5-e3ae-7621-a7c3-d6ea9398bf16\",\"owner_id\":\"019dc1a5-e41c-7713-80b2-59254a597f74\",\"source_type_id\":\"019dc1a5-e3c1-7471-9b39-23c12bee1792\",\"target_type_..."
+    },
+    {
+      "name": "link_case_one_to_analyst",
+      "method": "POST",
+      "path": "/api/v1/ontology/links/${assignment_link_type_id}/instances",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/links/019dc1a5-e41f-7a60-b3f8-9dd14f27f9ac/instances",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [],
+      "captured": {},
+      "response_preview": "{\"created_at\":\"2026-04-24T22:39:27.779975Z\",\"created_by\":\"019dc1a5-e422-78a1-b0a5-a6106fa4e9c3\",\"id\":\"019dc1a5-e423-72b1-9f7b-566e22a549db\",\"link_type_id\":\"019dc1a5-e41f-7a60-b3f8-9dd14f27f9ac\",\"properties\":null,\"source_object_id\":\"019dc1a5-e413-7d32-b065-5c5f1999b72f\",\"target_object_id\":\"019dc1a5-e409-79d1-9f23-9aa4e4fa9881\"}"
+    },
+    {
+      "name": "link_case_two_to_analyst",
+      "method": "POST",
+      "path": "/api/v1/ontology/links/${assignment_link_type_id}/instances",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/links/019dc1a5-e41f-7a60-b3f8-9dd14f27f9ac/instances",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [],
+      "captured": {},
+      "response_preview": "{\"created_at\":\"2026-04-24T22:39:27.783964Z\",\"created_by\":\"019dc1a5-e426-7de0-86fc-1cd5f0753383\",\"id\":\"019dc1a5-e427-7e91-accf-ca6504893170\",\"link_type_id\":\"019dc1a5-e41f-7a60-b3f8-9dd14f27f9ac\",\"properties\":null,\"source_object_id\":\"019dc1a5-e41a-7c10-b11e-e0a25edd471b\",\"target_object_id\":\"019dc1a5-e409-79d1-9f23-9aa4e4fa9881\"}"
+    },
+    {
+      "name": "create_resolve_action",
+      "method": "POST",
+      "path": "/api/v1/ontology/actions",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/actions",
+      "expected_status": 201,
+      "actual_status": 201,
+      "assertions": [],
+      "captured": {
+        "action_id": "019dc1a5-e430-7903-8ae5-39ea514e698f"
+      },
+      "response_preview": "{\"config\":{\"runtime\":\"python\",\"source\":\"history = list((target_object or {}).get('properties', {}).get('review_history') or [])\\nhistory.append({'decision': parameters['decision'], 'justification': justification, 'at': context_now})\\nobject_patch = {'status': 'resolved', 'decision': parameters['decision'], 'owner_count': len(linked_objects), 'peer_case_count': len(object_set), 'review_history': hi..."
+    },
+    {
+      "name": "validate_resolve_action",
+      "method": "POST",
+      "path": "/api/v1/ontology/actions/${action_id}/validate",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/actions/019dc1a5-e430-7903-8ae5-39ea514e698f/validate",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/valid",
+          "status": "passed",
+          "expected": true,
+          "actual": true
+        },
+        {
+          "path": "/preview/runtime",
+          "status": "passed",
+          "expected": "python",
+          "actual": "python"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"valid\":true,\"errors\":[],\"preview\":{\"kind\":\"invoke_function\",\"request\":{\"payload\":{\"action\":{\"display_name\":\"Resolve case 019dc1a5-e3ae-7621-a7c3-d6ea9398bf16\",\"id\":\"019dc1a5-e430-7903-8ae5-39ea514e698f\",\"name\":\"resolve_case_019dc1a5-e3ae-7621-a7c3-d6ea9398bf16\",\"object_type_id\":\"019dc1a5-e3c1-7471-9b39-23c12bee1792\",\"operation_kind\":\"invoke_function\"},\"parameters\":{\"decision\":\"approve\"},\"target_..."
+    },
+    {
+      "name": "deny_cross_org_action_execution",
+      "method": "POST",
+      "path": "/api/v1/ontology/actions/${action_id}/execute",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/actions/019dc1a5-e430-7903-8ae5-39ea514e698f/execute",
+      "expected_status": 403,
+      "actual_status": 403,
+      "assertions": [],
+      "captured": {},
+      "response_preview": "{\"details\":[\"forbidden: object belongs to a different organization\"],\"error\":\"action validation failed\"}"
+    },
+    {
+      "name": "require_justification_for_action",
+      "method": "POST",
+      "path": "/api/v1/ontology/actions/${action_id}/execute",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/actions/019dc1a5-e430-7903-8ae5-39ea514e698f/execute",
+      "expected_status": 400,
+      "actual_status": 400,
+      "assertions": [],
+      "captured": {},
+      "response_preview": "{\"error\":\"justification is required for confirmation_required actions\"}"
+    },
+    {
+      "name": "batch_execute_resolve_action",
+      "method": "POST",
+      "path": "/api/v1/ontology/actions/${action_id}/execute-batch",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/actions/019dc1a5-e430-7903-8ae5-39ea514e698f/execute-batch",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/succeeded",
+          "status": "passed",
+          "expected": 2,
+          "actual": 2
+        },
+        {
+          "path": "/failed",
+          "status": "passed",
+          "expected": 0,
+          "actual": 0
+        },
+        {
+          "path": "/results/0/status",
+          "status": "passed",
+          "expected": "succeeded",
+          "actual": "succeeded"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"action\":{\"id\":\"019dc1a5-e430-7903-8ae5-39ea514e698f\",\"name\":\"resolve_case_019dc1a5-e3ae-7621-a7c3-d6ea9398bf16\",\"display_name\":\"Resolve case 019dc1a5-e3ae-7621-a7c3-d6ea9398bf16\",\"description\":\"P3 smoke action\",\"object_type_id\":\"019dc1a5-e3c1-7471-9b39-23c12bee1792\",\"operation_kind\":\"invoke_function\",\"input_schema\":[{\"name\":\"decision\",\"display_name\":\"Decision\",\"description\":null,\"property_type\":..."
+    },
+    {
+      "name": "query_resolved_cases",
+      "method": "POST",
+      "path": "/api/v1/ontology/types/${case_type_id}/objects/query",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/types/019dc1a5-e3c1-7471-9b39-23c12bee1792/objects/query",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/total",
+          "status": "passed",
+          "expected": 2,
+          "actual": 2
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"data\":[{\"created_at\":\"2026-04-24T22:39:27.763480Z\",\"created_by\":\"019dc1a5-e40d-7302-a577-da156dd22bac\",\"id\":\"019dc1a5-e413-7d32-b065-5c5f1999b72f\",\"marking\":\"confidential\",\"object_type_id\":\"019dc1a5-e3c1-7471-9b39-23c12bee1792\",\"organization_id\":\"11111111-1111-7111-8111-111111111111\",\"properties\":{\"decision\":\"approve\",\"owner_count\":1,\"peer_case_count\":2,\"review_history\":[{\"at\":\"2026-04-24T22:39:..."
+    },
+    {
+      "name": "get_case_one_after_batch",
+      "method": "GET",
+      "path": "/api/v1/ontology/types/${case_type_id}/objects/${case_one_id}",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/types/019dc1a5-e3c1-7471-9b39-23c12bee1792/objects/019dc1a5-e413-7d32-b065-5c5f1999b72f",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/properties/status",
+          "status": "passed",
+          "expected": "resolved",
+          "actual": "resolved"
+        },
+        {
+          "path": "/properties/decision",
+          "status": "passed",
+          "expected": "approve",
+          "actual": "approve"
+        },
+        {
+          "path": "/properties/owner_count",
+          "status": "passed",
+          "expected": 1,
+          "actual": 1
+        },
+        {
+          "path": "/properties/peer_case_count",
+          "status": "passed",
+          "expected": 2,
+          "actual": 2
+        },
+        {
+          "path": "/properties/review_history/0/decision",
+          "status": "passed",
+          "expected": "approve",
+          "actual": "approve"
+        },
+        {
+          "path": "/organization_id",
+          "status": "passed",
+          "expected": "11111111-1111-7111-8111-111111111111",
+          "actual": "11111111-1111-7111-8111-111111111111"
+        },
+        {
+          "path": "/marking",
+          "status": "passed",
+          "expected": "confidential",
+          "actual": "confidential"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"created_at\":\"2026-04-24T22:39:27.763480Z\",\"created_by\":\"019dc1a5-e40d-7302-a577-da156dd22bac\",\"id\":\"019dc1a5-e413-7d32-b065-5c5f1999b72f\",\"marking\":\"confidential\",\"object_type_id\":\"019dc1a5-e3c1-7471-9b39-23c12bee1792\",\"organization_id\":\"11111111-1111-7111-8111-111111111111\",\"properties\":{\"decision\":\"approve\",\"owner_count\":1,\"peer_case_count\":2,\"review_history\":[{\"at\":\"2026-04-24T22:39:27.862549..."
+    },
+    {
+      "name": "list_case_one_neighbors",
+      "method": "GET",
+      "path": "/api/v1/ontology/types/${case_type_id}/objects/${case_one_id}/neighbors",
+      "url": "http://127.0.0.1:8080/api/v1/ontology/types/019dc1a5-e3c1-7471-9b39-23c12bee1792/objects/019dc1a5-e413-7d32-b065-5c5f1999b72f/neighbors",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/data/0/object/properties/name",
+          "status": "passed",
+          "expected": "Analyst A",
+          "actual": "Analyst A"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"data\":[{\"direction\":\"outbound\",\"link_id\":\"019dc1a5-e423-72b1-9f7b-566e22a549db\",\"link_name\":\"assigned_to_019dc1a5-e3ae-7621-a7c3-d6ea9398bf16\",\"link_type_id\":\"019dc1a5-e41f-7a60-b3f8-9dd14f27f9ac\",\"object\":{\"created_at\":\"2026-04-24T22:39:27.754226Z\",\"created_by\":\"019dc1a5-e3e4-7113-9408-9caf87259442\",\"id\":\"019dc1a5-e409-79d1-9f23-9aa4e4fa9881\",\"marking\":\"confidential\",\"object_type_id\":\"019dc1a5-..."
+    },
+    {
+      "name": "list_ontology_audit_events",
+      "method": "GET",
+      "path": "/api/v1/audit/events?source_service=ontology-service",
+      "url": "http://127.0.0.1:8080/api/v1/audit/events?source_service=ontology-service",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/items/0/source_service",
+          "status": "passed",
+          "expected": "ontology-service",
+          "actual": "ontology-service"
+        },
+        {
+          "path": "/items/0/action",
+          "status": "passed",
+          "expected": "ontology.action.execute",
+          "actual": "ontology.action.execute"
+        },
+        {
+          "path": "/items/0/status",
+          "status": "passed",
+          "expected": "success",
+          "actual": "success"
+        },
+        {
+          "path": "/items/0/metadata/action_id",
+          "status": "passed",
+          "expected": "019dc1a5-e430-7903-8ae5-39ea514e698f",
+          "actual": "019dc1a5-e430-7903-8ae5-39ea514e698f"
+        },
+        {
+          "path": "/items/0/metadata/justification",
+          "status": "passed",
+          "expected": "resolved from smoke",
+          "actual": "resolved from smoke"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"items\":[{\"id\":\"019dc1a5-e482-78a3-a2d0-a2dab09a5bf5\",\"sequence\":7,\"previous_hash\":\"AUD-00000006-AUD00000-ONTOLOGY\",\"entry_hash\":\"AUD-00000007-AUD00000-ONTOLOGY\",\"source_service\":\"ontology-service\",\"channel\":\"api\",\"actor\":\"smoke@example.com\",\"action\":\"ontology.action.execute\",\"resource_type\":\"ontology_object\",\"resource_id\":\"019dc1a5-e41a-7c10-b11e-e0a25edd471b\",\"status\":\"success\",\"severity\":\"low\"..."
+    }
+  ]
+}

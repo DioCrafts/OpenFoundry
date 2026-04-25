@@ -6,11 +6,12 @@ use axum::{
     response::IntoResponse,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
 use crate::AppState;
-use crate::domain::{jwt, mfa, oauth, rbac};
+use crate::domain::{jwt, mfa, oauth, rbac, saml};
+use crate::models::control_panel::{IdentityProviderMapping, ResourceManagementPolicy};
 use crate::models::mfa::TotpConfiguration;
 use crate::models::sso::{SsoProvider, SsoProviderResponse};
 use crate::models::user::User;
@@ -42,8 +43,12 @@ pub struct UpsertProviderRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct CompleteSsoLoginRequest {
-    pub code: String,
-    pub state: String,
+    pub code: Option<String>,
+    pub state: Option<String>,
+    #[serde(alias = "SAMLResponse")]
+    pub saml_response: Option<String>,
+    #[serde(alias = "RelayState")]
+    pub relay_state: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -54,8 +59,15 @@ pub struct PublicProviderResponse {
     pub provider_type: String,
 }
 
+#[derive(Debug, Clone)]
+struct SsoProvisioningProfile {
+    organization_id: Option<Uuid>,
+    attributes: Value,
+    role_names: Vec<String>,
+}
+
 pub async fn list_public_providers(State(state): State<AppState>) -> impl IntoResponse {
-    match list_enabled_oidc_providers(&state.db).await {
+    match list_enabled_public_providers(&state.db).await {
         Ok(providers) => Json(
             providers
                 .into_iter()
@@ -88,18 +100,15 @@ pub async fn start_login(
         }
     };
 
-    if provider.provider_type != "oidc" {
-        return json_error(StatusCode::BAD_REQUEST, "saml login flow is not wired yet");
-    }
+    let redirect_uri = format!("{}/auth/callback", state.public_web_origin.trim_end_matches('/'));
+    let authorization_url = match provider.provider_type.as_str() {
+        "oidc" => oauth::build_authorization_url(&state.jwt_config, &provider, &redirect_uri, Some("/")),
+        "saml" => saml::build_authorization_url(&state.jwt_config, &provider, &redirect_uri, Some("/")),
+        _ => Err("unsupported provider type".to_string()),
+    };
 
-    let redirect_uri = format!(
-        "{}/auth/callback",
-        state.public_web_origin.trim_end_matches('/')
-    );
-    match oauth::build_authorization_url(&state.jwt_config, &provider, &redirect_uri, Some("/")) {
-        Ok(authorization_url) => {
-            Json(json!({ "authorization_url": authorization_url })).into_response()
-        }
+    match authorization_url {
+        Ok(authorization_url) => Json(json!({ "authorization_url": authorization_url })).into_response(),
         Err(error) => json_error(StatusCode::BAD_REQUEST, error),
     }
 }
@@ -108,7 +117,12 @@ pub async fn complete_login(
     State(state): State<AppState>,
     Json(body): Json<CompleteSsoLoginRequest>,
 ) -> impl IntoResponse {
-    let state_claims = match oauth::validate_state(&state.jwt_config, &body.state) {
+    let state_token = body
+        .state
+        .as_deref()
+        .or(body.relay_state.as_deref())
+        .unwrap_or_default();
+    let state_claims = match oauth::validate_state(&state.jwt_config, state_token) {
         Ok(claims) => claims,
         Err(error) => return json_error(StatusCode::UNAUTHORIZED, error),
     };
@@ -126,43 +140,74 @@ pub async fn complete_login(
         "{}/auth/callback",
         state.public_web_origin.trim_end_matches('/')
     );
-    let token_payload = match oauth::exchange_code(&provider, &body.code, &redirect_uri).await {
-        Ok(payload) => payload,
-        Err(error) => return json_error(StatusCode::BAD_GATEWAY, error),
-    };
-
-    let access_token = token_payload
-        .get("access_token")
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string);
-    let Some(access_token) = access_token else {
-        return json_error(
-            StatusCode::BAD_GATEWAY,
-            "provider token response is missing access_token",
-        );
-    };
-
-    let userinfo = match oauth::fetch_userinfo(&provider, &access_token).await {
-        Ok(payload) => payload,
-        Err(error) => return json_error(StatusCode::BAD_GATEWAY, error),
-    };
-
-    let (subject, email, name) = match oauth::map_identity(&provider, &userinfo) {
-        Ok(identity) => identity,
-        Err(error) => return json_error(StatusCode::BAD_GATEWAY, error),
-    };
-
-    let user =
-        match find_or_create_sso_user(&state.db, &provider, &subject, &email, &name, &userinfo)
-            .await
-        {
-            Ok(user) => user,
-            Err(e) => {
-                tracing::error!("failed to materialize SSO user: {e}");
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            }
+    let (subject, email, name, raw_claims) = if provider.provider_type == "saml" {
+        let Some(saml_response) = body.saml_response.as_deref() else {
+            return json_error(StatusCode::BAD_REQUEST, "missing saml_response");
         };
+        match saml::parse_saml_response(&provider, saml_response) {
+            Ok(identity) => (
+                identity.subject,
+                identity.email,
+                identity.name,
+                identity.raw_claims,
+            ),
+            Err(error) => return json_error(StatusCode::BAD_GATEWAY, error),
+        }
+    } else {
+        let Some(code) = body.code.as_deref() else {
+            return json_error(StatusCode::BAD_REQUEST, "missing authorization code");
+        };
+        let token_payload = match oauth::exchange_code(&provider, code, &redirect_uri).await {
+            Ok(payload) => payload,
+            Err(error) => return json_error(StatusCode::BAD_GATEWAY, error),
+        };
+
+        let access_token = token_payload
+            .get("access_token")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string);
+        let Some(access_token) = access_token else {
+            return json_error(
+                StatusCode::BAD_GATEWAY,
+                "provider token response is missing access_token",
+            );
+        };
+
+        let userinfo = match oauth::fetch_userinfo(&provider, &access_token).await {
+            Ok(payload) => payload,
+            Err(error) => return json_error(StatusCode::BAD_GATEWAY, error),
+        };
+
+        let (subject, email, name) = match oauth::map_identity(&provider, &userinfo) {
+            Ok(identity) => identity,
+            Err(error) => return json_error(StatusCode::BAD_GATEWAY, error),
+        };
+        (subject, email, name, userinfo)
+    };
+
+    let provisioning =
+        match build_sso_provisioning_profile(&state.db, &provider, &email, &raw_claims).await {
+            Ok(profile) => profile,
+            Err(error) => return json_error(StatusCode::FORBIDDEN, error),
+        };
+    let user = match find_or_create_sso_user(
+        &state.db,
+        &provider,
+        &subject,
+        &email,
+        &name,
+        &raw_claims,
+        &provisioning,
+    )
+    .await
+    {
+        Ok(user) => user,
+        Err(e) => {
+            tracing::error!("failed to materialize SSO user: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
 
     let mfa_configuration = match load_mfa_configuration(&state.db, user.id).await {
         Ok(configuration) => configuration,
@@ -191,7 +236,12 @@ pub async fn complete_login(
         return json_error(StatusCode::FORBIDDEN, "mfa setup required by administrator");
     }
 
-    match jwt::issue_tokens(&state.db, &state.jwt_config, &user, vec!["sso".to_string()]).await {
+    let provider_auth_method = if provider.provider_type == "saml" {
+        "saml".to_string()
+    } else {
+        "sso".to_string()
+    };
+    match jwt::issue_tokens(&state.db, &state.jwt_config, &user, vec![provider_auth_method]).await {
         Ok((platform_access_token, refresh_token)) => Json(LoginResponse::Authenticated {
             access_token: platform_access_token,
             refresh_token,
@@ -237,6 +287,18 @@ pub async fn create_provider(
         return response;
     }
 
+    let metadata_defaults = if body.provider_type == "saml" {
+        match body.saml_metadata_url.as_deref() {
+            Some(metadata_url) => match saml::resolve_metadata_defaults(metadata_url).await {
+                Ok(defaults) => Some(defaults),
+                Err(error) => return json_error(StatusCode::BAD_REQUEST, error),
+            },
+            None => None,
+        }
+    } else {
+        None
+    };
+
     match sqlx::query_as::<_, SsoProvider>(
         r#"INSERT INTO sso_providers (id, slug, name, provider_type, enabled, client_id, client_secret, issuer_url, authorization_url, token_url, userinfo_url, scopes, saml_metadata_url, saml_entity_id, saml_sso_url, saml_certificate, attribute_mapping)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
@@ -255,9 +317,9 @@ pub async fn create_provider(
     .bind(body.userinfo_url)
     .bind(body.scopes)
     .bind(body.saml_metadata_url)
-    .bind(body.saml_entity_id)
-    .bind(body.saml_sso_url)
-    .bind(body.saml_certificate)
+    .bind(body.saml_entity_id.or_else(|| metadata_defaults.as_ref().and_then(|defaults| defaults.entity_id.clone())))
+    .bind(body.saml_sso_url.or_else(|| metadata_defaults.as_ref().and_then(|defaults| defaults.sso_url.clone())))
+    .bind(body.saml_certificate.or_else(|| metadata_defaults.as_ref().and_then(|defaults| defaults.certificate.clone())))
     .bind(body.attribute_mapping)
     .fetch_one(&state.db)
     .await
@@ -287,6 +349,18 @@ pub async fn update_provider(
             tracing::error!("failed to load existing provider: {e}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
+    };
+
+    let metadata_defaults = if body.provider_type == "saml" {
+        match body.saml_metadata_url.as_deref().or(existing.saml_metadata_url.as_deref()) {
+            Some(metadata_url) => match saml::resolve_metadata_defaults(metadata_url).await {
+                Ok(defaults) => Some(defaults),
+                Err(error) => return json_error(StatusCode::BAD_REQUEST, error),
+            },
+            None => None,
+        }
+    } else {
+        None
     };
 
     match sqlx::query_as::<_, SsoProvider>(
@@ -324,9 +398,9 @@ pub async fn update_provider(
     .bind(body.userinfo_url)
     .bind(body.scopes)
     .bind(body.saml_metadata_url)
-    .bind(body.saml_entity_id)
-    .bind(body.saml_sso_url)
-    .bind(body.saml_certificate)
+    .bind(body.saml_entity_id.or(existing.saml_entity_id).or_else(|| metadata_defaults.as_ref().and_then(|defaults| defaults.entity_id.clone())))
+    .bind(body.saml_sso_url.or(existing.saml_sso_url).or_else(|| metadata_defaults.as_ref().and_then(|defaults| defaults.sso_url.clone())))
+    .bind(body.saml_certificate.or(existing.saml_certificate).or_else(|| metadata_defaults.as_ref().and_then(|defaults| defaults.certificate.clone())))
     .bind(body.attribute_mapping)
     .fetch_optional(&state.db)
     .await
@@ -363,9 +437,9 @@ pub async fn delete_provider(
     }
 }
 
-async fn list_enabled_oidc_providers(pool: &sqlx::PgPool) -> Result<Vec<SsoProvider>, sqlx::Error> {
+async fn list_enabled_public_providers(pool: &sqlx::PgPool) -> Result<Vec<SsoProvider>, sqlx::Error> {
     sqlx::query_as::<_, SsoProvider>(
-        "SELECT id, slug, name, provider_type, enabled, client_id, client_secret, issuer_url, authorization_url, token_url, userinfo_url, scopes, saml_metadata_url, saml_entity_id, saml_sso_url, saml_certificate, attribute_mapping, created_at, updated_at FROM sso_providers WHERE enabled = true AND provider_type = 'oidc' ORDER BY name",
+        "SELECT id, slug, name, provider_type, enabled, client_id, client_secret, issuer_url, authorization_url, token_url, userinfo_url, scopes, saml_metadata_url, saml_entity_id, saml_sso_url, saml_certificate, attribute_mapping, created_at, updated_at FROM sso_providers WHERE enabled = true ORDER BY name",
     )
     .fetch_all(pool)
     .await
@@ -407,6 +481,83 @@ async fn load_mfa_configuration(
     .await
 }
 
+async fn build_sso_provisioning_profile(
+    pool: &sqlx::PgPool,
+    provider: &SsoProvider,
+    email: &str,
+    raw_claims: &Value,
+) -> Result<SsoProvisioningProfile, String> {
+    let mappings = load_identity_provider_mappings(pool).await?;
+    let policies = load_resource_management_policies(pool).await?;
+    let mapping = mappings
+        .iter()
+        .find(|entry| entry.provider_slug == provider.slug);
+
+    validate_allowed_email_domains(email, mapping)?;
+
+    let organization_id = resolve_organization_id(provider, mapping, raw_claims)?;
+    let workspace = resolve_string_claim(
+        raw_claims,
+        mapping.and_then(|entry| entry.workspace_claim.as_deref()),
+        provider
+            .attribute_mapping
+            .get("workspace")
+            .and_then(Value::as_str),
+    )
+    .or_else(|| mapping.and_then(|entry| entry.default_workspace.clone()));
+    let classification_clearance = resolve_string_claim(
+        raw_claims,
+        mapping.and_then(|entry| entry.classification_clearance_claim.as_deref()),
+        provider
+            .attribute_mapping
+            .get("classification_clearance")
+            .and_then(Value::as_str),
+    )
+    .or_else(|| {
+        mapping.and_then(|entry| entry.default_classification_clearance.clone())
+    });
+    let mut role_names = parse_role_claim(
+        raw_claims,
+        mapping.and_then(|entry| entry.role_claim.as_deref()),
+    );
+    if let Some(mapping) = mapping {
+        role_names.extend(mapping.default_roles.clone());
+    }
+    role_names.sort();
+    role_names.dedup();
+
+    let mut attributes = match raw_claims {
+        Value::Object(object) => object.clone(),
+        _ => Map::new(),
+    };
+    attributes.insert("identity_provider".to_string(), json!(provider.slug));
+    if let Some(workspace) = workspace.as_deref() {
+        attributes.insert("workspace".to_string(), json!(workspace));
+    }
+    if let Some(classification_clearance) = classification_clearance.as_deref() {
+        attributes.insert(
+            "classification_clearance".to_string(),
+            json!(classification_clearance),
+        );
+    }
+
+    if let Some(policy) = match_resource_policy(&policies, organization_id, workspace.as_deref()) {
+        attributes.insert("tenant_tier".to_string(), json!(policy.tenant_tier));
+        attributes.insert(
+            "tenant_quotas".to_string(),
+            serde_json::to_value(&policy.quota)
+                .map_err(|cause| format!("invalid resource quota policy: {cause}"))?,
+        );
+        attributes.insert("resource_policy".to_string(), json!(policy.name));
+    }
+
+    Ok(SsoProvisioningProfile {
+        organization_id,
+        attributes: Value::Object(attributes),
+        role_names,
+    })
+}
+
 async fn find_or_create_sso_user(
     pool: &sqlx::PgPool,
     provider: &SsoProvider,
@@ -414,6 +565,7 @@ async fn find_or_create_sso_user(
     email: &str,
     name: &str,
     raw_claims: &Value,
+    profile: &SsoProvisioningProfile,
 ) -> Result<User, sqlx::Error> {
     if let Some(user) = sqlx::query_as::<_, User>(
         r#"SELECT u.id, u.email, u.name, u.password_hash, u.is_active, u.organization_id, u.attributes, u.mfa_enforced, u.auth_source, u.created_at, u.updated_at
@@ -426,7 +578,19 @@ async fn find_or_create_sso_user(
     .fetch_optional(pool)
     .await?
     {
-        return Ok(user);
+        if profile.organization_id.is_some() || profile.attributes != user.attributes {
+            let next_org = profile.organization_id.or(user.organization_id);
+            let _ = sqlx::query(
+                "UPDATE users SET organization_id = $2, attributes = $3, updated_at = NOW() WHERE id = $1",
+            )
+            .bind(user.id)
+            .bind(next_org)
+            .bind(profile.attributes.clone())
+            .execute(pool)
+            .await;
+        }
+        assign_roles_by_name(pool, user.id, &profile.role_names).await?;
+        return load_user(pool, user.id).await;
     }
 
     let user = if let Some(existing_user) = sqlx::query_as::<_, User>(
@@ -436,16 +600,27 @@ async fn find_or_create_sso_user(
     .fetch_optional(pool)
     .await?
     {
+        let next_org = profile.organization_id.or(existing_user.organization_id);
+        sqlx::query(
+            "UPDATE users SET organization_id = $2, attributes = $3, updated_at = NOW() WHERE id = $1",
+        )
+        .bind(existing_user.id)
+        .bind(next_org)
+        .bind(profile.attributes.clone())
+        .execute(pool)
+        .await?;
         existing_user
     } else {
         let user_id = Uuid::now_v7();
         sqlx::query(
-            r#"INSERT INTO users (id, email, name, password_hash, is_active, auth_source)
-               VALUES ($1, $2, $3, '!sso', true, 'sso')"#,
+            r#"INSERT INTO users (id, email, name, password_hash, is_active, organization_id, attributes, auth_source)
+               VALUES ($1, $2, $3, '!sso', true, $4, $5, 'sso')"#,
         )
         .bind(user_id)
         .bind(email)
         .bind(name)
+        .bind(profile.organization_id)
+        .bind(profile.attributes.clone())
         .execute(pool)
         .await?;
 
@@ -477,5 +652,274 @@ async fn find_or_create_sso_user(
     .execute(pool)
     .await?;
 
-    Ok(user)
+    assign_roles_by_name(pool, user.id, &profile.role_names).await?;
+
+    load_user(pool, user.id).await
+}
+
+async fn load_user(pool: &sqlx::PgPool, user_id: Uuid) -> Result<User, sqlx::Error> {
+    sqlx::query_as::<_, User>(
+        "SELECT id, email, name, password_hash, is_active, organization_id, attributes, mfa_enforced, auth_source, created_at, updated_at FROM users WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+}
+
+async fn load_identity_provider_mappings(
+    pool: &sqlx::PgPool,
+) -> Result<Vec<IdentityProviderMapping>, String> {
+    let value = sqlx::query_scalar::<_, Value>(
+        "SELECT identity_provider_mappings FROM control_panel_settings WHERE singleton_id = TRUE",
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|cause| cause.to_string())?
+    .unwrap_or_else(|| json!([]));
+
+    serde_json::from_value(value)
+        .map_err(|cause| format!("invalid control-panel identity_provider_mappings: {cause}"))
+}
+
+async fn load_resource_management_policies(
+    pool: &sqlx::PgPool,
+) -> Result<Vec<ResourceManagementPolicy>, String> {
+    let value = sqlx::query_scalar::<_, Value>(
+        "SELECT resource_management_policies FROM control_panel_settings WHERE singleton_id = TRUE",
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|cause| cause.to_string())?
+    .unwrap_or_else(|| json!([]));
+
+    serde_json::from_value(value)
+        .map_err(|cause| format!("invalid control-panel resource_management_policies: {cause}"))
+}
+
+fn validate_allowed_email_domains(
+    email: &str,
+    mapping: Option<&IdentityProviderMapping>,
+) -> Result<(), String> {
+    let Some(mapping) = mapping else {
+        return Ok(());
+    };
+    if mapping.allowed_email_domains.is_empty() {
+        return Ok(());
+    }
+
+    let domain = email
+        .split('@')
+        .nth(1)
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    if mapping
+        .allowed_email_domains
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(&domain))
+    {
+        Ok(())
+    } else {
+        Err(format!(
+            "email domain '{domain}' is not allowed for provider {}",
+            mapping.provider_slug
+        ))
+    }
+}
+
+fn resolve_organization_id(
+    provider: &SsoProvider,
+    mapping: Option<&IdentityProviderMapping>,
+    raw_claims: &Value,
+) -> Result<Option<Uuid>, String> {
+    if let Some(org_id) = resolve_string_claim(
+        raw_claims,
+        mapping.and_then(|entry| entry.organization_claim.as_deref()),
+        provider
+            .attribute_mapping
+            .get("organization_id")
+            .and_then(Value::as_str),
+    ) {
+        return Uuid::parse_str(&org_id)
+            .map(Some)
+            .map_err(|cause| format!("invalid organization_id claim: {cause}"));
+    }
+
+    Ok(mapping.and_then(|entry| entry.default_organization_id))
+}
+
+fn resolve_string_claim(
+    raw_claims: &Value,
+    preferred_key: Option<&str>,
+    fallback_key: Option<&str>,
+) -> Option<String> {
+    preferred_key
+        .and_then(|key| raw_claims.get(key))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            fallback_key
+                .and_then(|key| raw_claims.get(key))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+}
+
+fn parse_role_claim(raw_claims: &Value, key: Option<&str>) -> Vec<String> {
+    let Some(value) = key.and_then(|claim| raw_claims.get(claim)) else {
+        return Vec::new();
+    };
+
+    let mut roles = match value {
+        Value::String(text) => text
+            .split(',')
+            .map(|role| role.trim().to_string())
+            .filter(|role| !role.is_empty())
+            .collect::<Vec<_>>(),
+        Value::Array(items) => items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    roles.sort();
+    roles.dedup();
+    roles
+}
+
+fn match_resource_policy<'a>(
+    policies: &'a [ResourceManagementPolicy],
+    organization_id: Option<Uuid>,
+    workspace: Option<&str>,
+) -> Option<&'a ResourceManagementPolicy> {
+    policies.iter().find(|policy| {
+        let org_matches = policy.applies_to_org_ids.is_empty()
+            || organization_id.is_some_and(|org_id| policy.applies_to_org_ids.contains(&org_id));
+        let workspace_matches = policy.applies_to_workspaces.is_empty()
+            || workspace.is_some_and(|candidate| {
+                policy
+                    .applies_to_workspaces
+                    .iter()
+                    .any(|value| value == candidate)
+            });
+        org_matches && workspace_matches
+    })
+}
+
+async fn assign_roles_by_name(
+    pool: &sqlx::PgPool,
+    user_id: Uuid,
+    role_names: &[String],
+) -> Result<(), sqlx::Error> {
+    for role_name in role_names {
+        if let Some(role) = rbac::get_role_by_name(pool, role_name).await? {
+            rbac::assign_role(pool, user_id, role.id).await?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+    use serde_json::json;
+    use uuid::Uuid;
+
+    use crate::models::{
+        control_panel::{IdentityProviderMapping, ResourceManagementPolicy, ResourceQuotaSettings},
+        sso::SsoProvider,
+    };
+
+    use super::{match_resource_policy, parse_role_claim, resolve_organization_id, validate_allowed_email_domains};
+
+    fn provider() -> SsoProvider {
+        SsoProvider {
+            id: Uuid::now_v7(),
+            slug: "enterprise-saml".to_string(),
+            name: "Enterprise SAML".to_string(),
+            provider_type: "saml".to_string(),
+            enabled: true,
+            client_id: None,
+            client_secret: None,
+            issuer_url: None,
+            authorization_url: None,
+            token_url: None,
+            userinfo_url: None,
+            scopes: vec![],
+            saml_metadata_url: None,
+            saml_entity_id: None,
+            saml_sso_url: None,
+            saml_certificate: None,
+            attribute_mapping: json!({
+                "organization_id": "org_id",
+                "workspace": "workspace",
+                "classification_clearance": "clearance"
+            }),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn parses_roles_from_csv_claim() {
+        let roles = parse_role_claim(&json!({ "roles": "viewer, editor, viewer" }), Some("roles"));
+        assert_eq!(roles, vec!["editor".to_string(), "viewer".to_string()]);
+    }
+
+    #[test]
+    fn validates_allowed_email_domains() {
+        let mapping = IdentityProviderMapping {
+            provider_slug: "enterprise-saml".to_string(),
+            default_organization_id: None,
+            organization_claim: None,
+            workspace_claim: None,
+            default_workspace: None,
+            classification_clearance_claim: None,
+            default_classification_clearance: None,
+            role_claim: None,
+            default_roles: vec![],
+            allowed_email_domains: vec!["openfoundry.dev".to_string()],
+        };
+
+        assert!(validate_allowed_email_domains("operator@openfoundry.dev", Some(&mapping)).is_ok());
+        assert!(validate_allowed_email_domains("outsider@example.com", Some(&mapping)).is_err());
+    }
+
+    #[test]
+    fn resolves_organization_from_claim() {
+        let org_id = Uuid::now_v7();
+        let resolved = resolve_organization_id(
+            &provider(),
+            None,
+            &json!({ "org_id": org_id.to_string() }),
+        )
+        .expect("organization claim should parse");
+
+        assert_eq!(resolved, Some(org_id));
+    }
+
+    #[test]
+    fn matches_resource_policy_by_workspace() {
+        let policy = ResourceManagementPolicy {
+            name: "shared".to_string(),
+            tenant_tier: "team".to_string(),
+            applies_to_org_ids: vec![],
+            applies_to_workspaces: vec!["partner-portal".to_string()],
+            quota: ResourceQuotaSettings {
+                max_query_limit: 5000,
+                max_distributed_query_workers: 4,
+                max_pipeline_workers: 4,
+                max_request_body_bytes: 20 * 1024 * 1024,
+                requests_per_minute: 900,
+                max_storage_gb: 120,
+                max_shared_spaces: 8,
+                max_guest_sessions: 20,
+            },
+        };
+
+        let policies = [policy];
+        let matched = match_resource_policy(&policies, None, Some("partner-portal"));
+        assert!(matched.is_some());
+        assert_eq!(matched.map(|entry| entry.tenant_tier.as_str()), Some("team"));
+    }
 }

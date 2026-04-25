@@ -135,6 +135,64 @@ pub fn widget_catalog() -> Vec<WidgetCatalogItem> {
             supports_children: false,
         },
         WidgetCatalogItem {
+            widget_type: "scenario".to_string(),
+            label: "Scenario Lab".to_string(),
+            description:
+                "What-if controls that publish runtime parameters into the rest of the app."
+                    .to_string(),
+            category: "decision".to_string(),
+            default_props: json!({
+                "headline": "What-if controls",
+                "parameters": [
+                    {
+                        "name": "demand_multiplier",
+                        "label": "Demand multiplier",
+                        "type": "number",
+                        "default_value": "1.10",
+                        "description": "Scale the primary operating assumption."
+                    },
+                    {
+                        "name": "service_level",
+                        "label": "Service level target",
+                        "type": "number",
+                        "default_value": "0.95",
+                        "description": "Target fulfillment ratio for the plan."
+                    }
+                ],
+                "apply_label": "Apply scenario",
+                "reset_label": "Reset"
+            }),
+            default_size: WidgetDefaultSize {
+                width: 6,
+                height: 4,
+            },
+            supported_bindings: vec!["static".to_string()],
+            supports_children: false,
+        },
+        WidgetCatalogItem {
+            widget_type: "agent".to_string(),
+            label: "Agent Widget".to_string(),
+            description:
+                "Embed an AI agent run surface with prompt, response, and tool trace output."
+                    .to_string(),
+            category: "ai".to_string(),
+            default_props: json!({
+                "agent_id": "",
+                "placeholder": "Ask the embedded agent to summarize the current situation...",
+                "empty_state": "Choose an active agent to turn this panel into an interactive copilot.",
+                "welcome_message": "This widget can call a real OpenFoundry agent and bring the response back into the app.",
+                "knowledge_base_id": "",
+                "show_traces": true,
+                "submit_label": "Run agent"
+            }),
+            default_size: WidgetDefaultSize {
+                width: 6,
+                height: 5,
+            },
+            supported_bindings: vec![],
+            supports_children: false,
+        },
+        WidgetCatalogItem {
             widget_type: "container".to_string(),
             label: "Container".to_string(),
             description: "Layout wrapper for related widgets, sections, or cards.".to_string(),

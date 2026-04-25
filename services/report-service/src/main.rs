@@ -17,6 +17,9 @@ use tracing_subscriber::EnvFilter;
 pub struct AppState {
     pub db: sqlx::PgPool,
     pub jwt_config: JwtConfig,
+    pub http_client: reqwest::Client,
+    pub dataset_service_url: String,
+    pub geospatial_service_url: String,
 }
 
 impl FromRef<AppState> for JwtConfig {
@@ -48,6 +51,9 @@ async fn main() {
     let state = AppState {
         db: pool,
         jwt_config: jwt_config.clone(),
+        http_client: reqwest::Client::new(),
+        dataset_service_url: cfg.dataset_service_url.clone(),
+        geospatial_service_url: cfg.geospatial_service_url.clone(),
     };
 
     let public = Router::new().route("/health", get(|| async { "ok" }));

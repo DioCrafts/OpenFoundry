@@ -2,6 +2,7 @@ pub mod access_grant;
 pub mod contract;
 pub mod peer;
 pub mod share;
+pub mod space;
 pub mod sync_status;
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};

@@ -4,12 +4,14 @@
 	interface PeerDraft {
 		slug: string;
 		display_name: string;
+		organization_type: string;
 		region: string;
 		endpoint_url: string;
 		auth_mode: string;
 		trust_level: string;
 		public_key_fingerprint: string;
 		shared_scopes_text: string;
+		admin_contacts_text: string;
 	}
 
 	export let peers: PeerOrganization[] = [];
@@ -41,7 +43,7 @@
 					<div class="flex items-start justify-between gap-3">
 						<div>
 							<p class="font-semibold text-stone-900">{peer.display_name}</p>
-							<p class="text-sm text-stone-500">{peer.slug} • {peer.region} • {peer.auth_mode}</p>
+							<p class="text-sm text-stone-500">{peer.slug} • {peer.organization_type} • {peer.region} • {peer.auth_mode}</p>
 						</div>
 						<span class={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${peer.status === 'authenticated' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{peer.status}</span>
 					</div>
@@ -49,6 +51,10 @@
 						{#each peer.shared_scopes as scope}
 							<span class="rounded-full bg-stone-100 px-2 py-1">{scope}</span>
 						{/each}
+					</div>
+					<div class="mt-3 text-xs text-stone-500">
+						<div>Lifecycle {peer.lifecycle_stage}</div>
+						<div class="mt-1">Contacts {peer.admin_contacts.join(', ') || 'n/a'}</div>
 					</div>
 					<div class="mt-3 flex items-center justify-between gap-3 text-xs text-stone-500">
 						<span>{peer.public_key_fingerprint}</span>
@@ -67,6 +73,10 @@
 				<label class="block text-sm">
 					<span class="mb-2 block font-medium text-stone-100">Display name</span>
 					<input class="w-full rounded-2xl border border-stone-700 bg-stone-900 px-4 py-3 outline-none transition focus:border-emerald-400" value={draft.display_name} oninput={(event) => onDraftChange({ display_name: inputValue(event) })} />
+				</label>
+				<label class="block text-sm">
+					<span class="mb-2 block font-medium text-stone-100">Organization type</span>
+					<input class="w-full rounded-2xl border border-stone-700 bg-stone-900 px-4 py-3 outline-none transition focus:border-emerald-400" value={draft.organization_type} oninput={(event) => onDraftChange({ organization_type: inputValue(event) })} />
 				</label>
 				<label class="block text-sm">
 					<span class="mb-2 block font-medium text-stone-100">Region</span>
@@ -91,6 +101,10 @@
 				<label class="block text-sm md:col-span-2">
 					<span class="mb-2 block font-medium text-stone-100">Shared scopes</span>
 					<input class="w-full rounded-2xl border border-stone-700 bg-stone-900 px-4 py-3 outline-none transition focus:border-emerald-400" value={draft.shared_scopes_text} oninput={(event) => onDraftChange({ shared_scopes_text: inputValue(event) })} />
+				</label>
+				<label class="block text-sm md:col-span-2">
+					<span class="mb-2 block font-medium text-stone-100">Admin contacts</span>
+					<input class="w-full rounded-2xl border border-stone-700 bg-stone-900 px-4 py-3 outline-none transition focus:border-emerald-400" value={draft.admin_contacts_text} oninput={(event) => onDraftChange({ admin_contacts_text: inputValue(event) })} />
 				</label>
 			</div>
 		</div>

@@ -10,6 +10,8 @@ pub struct AppConfig {
     pub jwt_secret: String,
     #[serde(default = "default_notification_service_url")]
     pub notification_service_url: String,
+    #[serde(default = "default_pipeline_service_url")]
+    pub pipeline_service_url: String,
 }
 
 fn default_host() -> String {
@@ -22,6 +24,10 @@ fn default_port() -> u16 {
 
 fn default_notification_service_url() -> String {
     "http://localhost:50069".to_string()
+}
+
+fn default_pipeline_service_url() -> String {
+    "http://localhost:50056".to_string()
 }
 
 impl AppConfig {

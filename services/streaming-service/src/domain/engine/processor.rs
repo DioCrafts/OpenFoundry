@@ -44,11 +44,8 @@ struct StreamEventRow {
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct StreamingCheckpointRow {
-    topology_id: Uuid,
     stream_id: Uuid,
-    last_event_id: Option<Uuid>,
     last_sequence_no: i64,
-    updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
@@ -209,7 +206,7 @@ async fn load_checkpoints(
     topology_id: Uuid,
 ) -> Result<HashMap<Uuid, StreamingCheckpointRow>, String> {
     let rows = sqlx::query_as::<_, StreamingCheckpointRow>(
-        r#"SELECT topology_id, stream_id, last_event_id, last_sequence_no, updated_at
+        r#"SELECT stream_id, last_sequence_no
            FROM streaming_checkpoints
            WHERE topology_id = $1"#,
     )

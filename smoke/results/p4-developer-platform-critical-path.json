@@ -1,0 +1,201 @@
+{
+  "base_url": "http://127.0.0.1:8080",
+  "started_at_epoch_ms": 1777072565598,
+  "success": true,
+  "failure_message": null,
+  "steps": [
+    {
+      "name": "create_code_repository",
+      "method": "POST",
+      "path": "/api/v1/code-repos/repositories",
+      "url": "http://127.0.0.1:8080/api/v1/code-repos/repositories",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [],
+      "captured": {
+        "repository_id": "019dc1c7-6de4-7722-ab03-51cdb7d20844"
+      },
+      "response_preview": "{\"id\":\"019dc1c7-6de4-7722-ab03-51cdb7d20844\",\"name\":\"P4 Smoke Repo 019dc1c7-6d5e-7543-9d01-d61fadf9eed3\",\"slug\":\"p4-smoke-repo-019dc1c7-6d5e-7543-9d01-d61fadf9eed3\",\"description\":\"P4 developer platform smoke repository\",\"owner\":\"Platform UI\",\"default_branch\":\"main\",\"visibility\":\"private\",\"object_store_backend\":\"local\",\"package_kind\":\"widget\",\"tags\":[\"smoke\",\"p4\"],\"settings\":{\"runtime\":\"rust\"},\"cre..."
+    },
+    {
+      "name": "create_feature_branch",
+      "method": "POST",
+      "path": "/api/v1/code-repos/repositories/${repository_id}/branches",
+      "url": "http://127.0.0.1:8080/api/v1/code-repos/repositories/019dc1c7-6de4-7722-ab03-51cdb7d20844/branches",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/base_branch",
+          "status": "passed",
+          "expected": "main",
+          "actual": "main"
+        }
+      ],
+      "captured": {
+        "branch_name": "feature/p4-019dc1c7-6d5e-7543-9d01-d61fadf9eed3"
+      },
+      "response_preview": "{\"id\":\"019dc1c7-6e59-76c3-9252-0b6c05c02cf8\",\"repository_id\":\"019dc1c7-6de4-7722-ab03-51cdb7d20844\",\"name\":\"feature/p4-019dc1c7-6d5e-7543-9d01-d61fadf9eed3\",\"head_sha\":\"ed358e6f1279284ac03efc5a6adfa3b4c3f462b1\",\"base_branch\":\"main\",\"is_default\":false,\"protected\":false,\"ahead_by\":0,\"pending_reviews\":0,\"updated_at\":\"2026-04-24T23:16:05Z\"}"
+    },
+    {
+      "name": "create_real_git_commit",
+      "method": "POST",
+      "path": "/api/v1/code-repos/repositories/${repository_id}/commits",
+      "url": "http://127.0.0.1:8080/api/v1/code-repos/repositories/019dc1c7-6de4-7722-ab03-51cdb7d20844/commits",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/branch_name",
+          "status": "passed",
+          "expected": "feature/p4-019dc1c7-6d5e-7543-9d01-d61fadf9eed3",
+          "actual": "feature/p4-019dc1c7-6d5e-7543-9d01-d61fadf9eed3"
+        },
+        {
+          "path": "/files_changed",
+          "status": "passed",
+          "expected": 1,
+          "actual": 1
+        }
+      ],
+      "captured": {
+        "commit_sha": "005fadf41a5a670d625889c44f49733bb44de79b"
+      },
+      "response_preview": "{\"id\":\"019dc1c7-6e89-7d60-a995-363c80bb30f3\",\"repository_id\":\"019dc1c7-6de4-7722-ab03-51cdb7d20844\",\"branch_name\":\"feature/p4-019dc1c7-6d5e-7543-9d01-d61fadf9eed3\",\"sha\":\"005fadf41a5a670d625889c44f49733bb44de79b\",\"parent_sha\":\"ed358e6f1279284ac03efc5a6adfa3b4c3f462b1\",\"title\":\"Add runtime helper\",\"description\":\"\",\"author_name\":\"Platform UI\",\"author_email\":\"platform.ui@openfoundry.dev\",\"files_chang..."
+    },
+    {
+      "name": "list_repository_commits",
+      "method": "GET",
+      "path": "/api/v1/code-repos/repositories/${repository_id}/commits",
+      "url": "http://127.0.0.1:8080/api/v1/code-repos/repositories/019dc1c7-6de4-7722-ab03-51cdb7d20844/commits",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/items/0/sha",
+          "status": "passed",
+          "expected": "005fadf41a5a670d625889c44f49733bb44de79b",
+          "actual": "005fadf41a5a670d625889c44f49733bb44de79b"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"items\":[{\"id\":\"019dc1c7-6e9b-7e81-8099-146633e77245\",\"repository_id\":\"019dc1c7-6de4-7722-ab03-51cdb7d20844\",\"branch_name\":\"feature/p4-019dc1c7-6d5e-7543-9d01-d61fadf9eed3\",\"sha\":\"005fadf41a5a670d625889c44f49733bb44de79b\",\"parent_sha\":\"ed358e6f1279284ac03efc5a6adfa3b4c3f462b1\",\"title\":\"Add runtime helper\",\"description\":\"\",\"author_name\":\"Platform UI\",\"author_email\":\"platform.ui@openfoundry.dev\",\"f..."
+    },
+    {
+      "name": "search_repository_files",
+      "method": "GET",
+      "path": "/api/v1/code-repos/repositories/${repository_id}/search?q=package_kind",
+      "url": "http://127.0.0.1:8080/api/v1/code-repos/repositories/019dc1c7-6de4-7722-ab03-51cdb7d20844/search?q=package_kind",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/results/0/path",
+          "status": "passed",
+          "expected": "src/lib.rs",
+          "actual": "src/lib.rs"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"query\":\"package_kind\",\"results\":[{\"path\":\"src/lib.rs\",\"branch_name\":\"main\",\"snippet\":\"pub fn package_kind() -> &'static str {\",\"score\":0.74}]}"
+    },
+    {
+      "name": "diff_feature_branch",
+      "method": "GET",
+      "path": "/api/v1/code-repos/repositories/${repository_id}/diff?branch=${branch_name}",
+      "url": "http://127.0.0.1:8080/api/v1/code-repos/repositories/019dc1c7-6de4-7722-ab03-51cdb7d20844/diff?branch=feature/p4-019dc1c7-6d5e-7543-9d01-d61fadf9eed3",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/patch",
+          "status": "passed",
+          "expected": null,
+          "actual": "diff --git a/src/runtime.rs b/src/runtime.rs\nnew file mode 100644\nindex 0000000..719d686\n--- /dev/null\n+++ b/src/runtime.rs\n@@ -0,0 +1,3 @@\n+pub fn runtime_ready() -> bool {\n+    true\n+}\n"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"branch_name\":\"feature/p4-019dc1c7-6d5e-7543-9d01-d61fadf9eed3\",\"patch\":\"diff --git a/src/runtime.rs b/src/runtime.rs\\nnew file mode 100644\\nindex 0000000..719d686\\n--- /dev/null\\n+++ b/src/runtime.rs\\n@@ -0,0 +1,3 @@\\n+pub fn runtime_ready() -> bool {\\n+    true\\n+}\\n\"}"
+    },
+    {
+      "name": "trigger_real_ci_run",
+      "method": "POST",
+      "path": "/api/v1/code-repos/repositories/${repository_id}/ci",
+      "url": "http://127.0.0.1:8080/api/v1/code-repos/repositories/019dc1c7-6de4-7722-ab03-51cdb7d20844/ci",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/status",
+          "status": "passed",
+          "expected": "passed",
+          "actual": "passed"
+        },
+        {
+          "path": "/checks/0",
+          "status": "passed",
+          "expected": null,
+          "actual": "cargo check: passed"
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"id\":\"019dc1c7-704f-7ee3-81a0-8bb1bc6c6749\",\"repository_id\":\"019dc1c7-6de4-7722-ab03-51cdb7d20844\",\"branch_name\":\"feature/p4-019dc1c7-6d5e-7543-9d01-d61fadf9eed3\",\"commit_sha\":\"005fadf41a5a670d625889c44f49733bb44de79b\",\"pipeline_name\":\"package-validation\",\"status\":\"passed\",\"trigger\":\"manual\",\"started_at\":\"2026-04-24T23:16:05.981502Z\",\"completed_at\":\"2026-04-24T23:16:06.351140Z\",\"checks\":[\"cargo c..."
+    },
+    {
+      "name": "install_marketplace_app_template",
+      "method": "POST",
+      "path": "/api/v1/marketplace/installs",
+      "url": "http://127.0.0.1:8080/api/v1/marketplace/installs",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/activation/kind",
+          "status": "passed",
+          "expected": "app_template",
+          "actual": "app_template"
+        },
+        {
+          "path": "/activation/status",
+          "status": "passed",
+          "expected": "activated",
+          "actual": "activated"
+        },
+        {
+          "path": "/activation/public_url",
+          "status": "passed",
+          "expected": null,
+          "actual": "/apps/runtime/p4-smoke-019dc1c7-6d5e-7543-9d01-d61fadf9eed3-operations-center-template-019dc1c7"
+        }
+      ],
+      "captured": {
+        "installed_app_slug": "p4-smoke-019dc1c7-6d5e-7543-9d01-d61fadf9eed3-operations-center-template-019dc1c7"
+      },
+      "response_preview": "{\"id\":\"019dc1c7-7085-7eb1-8319-48a92328ca31\",\"listing_id\":\"01968b70-4f20-71b8-a6f0-0f4000001001\",\"listing_name\":\"Operations Center Template\",\"version\":\"1.0.0\",\"workspace_name\":\"P4 Smoke 019dc1c7-6d5e-7543-9d01-d61fadf9eed3\",\"status\":\"installed\",\"dependency_plan\":[],\"activation\":{\"kind\":\"app_template\",\"status\":\"activated\",\"resource_id\":\"019dc1c7-7088-7911-a773-3542db86872d\",\"resource_slug\":\"p4-smok..."
+    },
+    {
+      "name": "load_published_marketplace_app",
+      "method": "GET",
+      "path": "/api/v1/apps/public/${installed_app_slug}",
+      "url": "http://127.0.0.1:8080/api/v1/apps/public/p4-smoke-019dc1c7-6d5e-7543-9d01-d61fadf9eed3-operations-center-template-019dc1c7",
+      "expected_status": 200,
+      "actual_status": 200,
+      "assertions": [
+        {
+          "path": "/app/slug",
+          "status": "passed",
+          "expected": "p4-smoke-019dc1c7-6d5e-7543-9d01-d61fadf9eed3-operations-center-template-019dc1c7",
+          "actual": "p4-smoke-019dc1c7-6d5e-7543-9d01-d61fadf9eed3-operations-center-template-019dc1c7"
+        },
+        {
+          "path": "/published_version_number",
+          "status": "passed",
+          "expected": 1,
+          "actual": 1
+        }
+      ],
+      "captured": {},
+      "response_preview": "{\"app\":{\"id\":\"019dc1c7-7088-7911-a773-3542db86872d\",\"name\":\"P4 Smoke 019dc1c7-6d5e-7543-9d01-d61fadf9eed3 - Operations Center Template\",\"slug\":\"p4-smoke-019dc1c7-6d5e-7543-9d01-d61fadf9eed3-operations-center-template-019dc1c7\",\"description\":\"Installed from marketplace listing operations-center-template 1.0.0\",\"status\":\"draft\",\"pages\":[{\"id\":\"019dc1c7-7088-7911-a773-34a86257d852\",\"name\":\"Overview\",..."
+    }
+  ]
+}

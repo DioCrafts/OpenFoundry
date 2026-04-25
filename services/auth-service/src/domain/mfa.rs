@@ -82,6 +82,8 @@ pub fn issue_challenge(
         auth_methods: vec![auth_method.to_string()],
         token_use: Some("mfa_challenge".to_string()),
         api_key_id: None,
+        session_kind: None,
+        session_scope: None,
     };
 
     jwt::encode_token(config, &claims)

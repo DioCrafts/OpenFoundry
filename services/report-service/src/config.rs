@@ -8,6 +8,10 @@ pub struct AppConfig {
     pub port: u16,
     pub database_url: String,
     pub jwt_secret: String,
+    #[serde(default = "default_dataset_service_url")]
+    pub dataset_service_url: String,
+    #[serde(default = "default_geospatial_service_url")]
+    pub geospatial_service_url: String,
 }
 
 fn default_host() -> String {
@@ -16,6 +20,14 @@ fn default_host() -> String {
 
 fn default_port() -> u16 {
     50064
+}
+
+fn default_dataset_service_url() -> String {
+    "http://localhost:50053".to_string()
+}
+
+fn default_geospatial_service_url() -> String {
+    "http://localhost:50068".to_string()
 }
 
 impl AppConfig {

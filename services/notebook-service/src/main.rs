@@ -73,6 +73,25 @@ async fn main() {
         .route("/api/v1/notebooks/{id}/sessions", post(handlers::sessions::create_session))
         .route("/api/v1/notebooks/{id}/sessions", get(handlers::sessions::list_sessions))
         .route("/api/v1/notebooks/{notebook_id}/sessions/{session_id}", delete(handlers::sessions::stop_session))
+        // Notepad
+        .route(
+            "/api/v1/notepad/documents",
+            post(handlers::notepad::create_document).get(handlers::notepad::list_documents),
+        )
+        .route(
+            "/api/v1/notepad/documents/{id}",
+            get(handlers::notepad::get_document)
+                .patch(handlers::notepad::update_document)
+                .delete(handlers::notepad::delete_document),
+        )
+        .route(
+            "/api/v1/notepad/documents/{id}/presence",
+            get(handlers::notepad::list_presence).post(handlers::notepad::upsert_presence),
+        )
+        .route(
+            "/api/v1/notepad/documents/{id}/export",
+            get(handlers::notepad::export_document),
+        )
         .layer(middleware::from_fn_with_state(
             jwt_config,
             auth_middleware::auth_layer,

@@ -5,7 +5,13 @@ use std::time::Instant;
 
 use serde_json::{Value, json};
 
-use super::{ConnectionTestResult, SyncPayload};
+use super::{
+    ConnectionTestResult, SyncPayload, add_source_signature, basic_discovered_source,
+    virtual_table_response,
+};
+use crate::models::registration::{
+    DiscoveredSource, VirtualTableQueryRequest, VirtualTableQueryResponse,
+};
 
 /// Validate that the connection config has the required fields.
 pub fn validate_config(config: &Value) -> Result<(), String> {
@@ -75,7 +81,7 @@ pub async fn fetch_dataset(config: &Value, selector: &str) -> Result<SyncPayload
         .unwrap_or(0);
     let file_name = format!("{}.json", sanitize_file_stem(selector));
 
-    Ok(SyncPayload {
+    let mut payload = SyncPayload {
         bytes: serde_json::to_vec(&payload).map_err(|error| error.to_string())?,
         format: "json".to_string(),
         rows_synced,
@@ -84,7 +90,78 @@ pub async fn fetch_dataset(config: &Value, selector: &str) -> Result<SyncPayload
             "query": query,
             "selector": selector,
         }),
-    })
+    };
+    add_source_signature(&mut payload);
+    Ok(payload)
+}
+
+pub async fn discover_sources(config: &Value) -> Result<Vec<DiscoveredSource>, String> {
+    validate_config(config)?;
+
+    let pool = sqlx::PgPool::connect(&build_connection_string(config))
+        .await
+        .map_err(|error| error.to_string())?;
+    let rows = sqlx::query_as::<_, (String, String, String)>(
+        r#"SELECT table_schema, table_name, table_type
+           FROM information_schema.tables
+           WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+           ORDER BY table_schema, table_name
+           LIMIT 200"#,
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|error| error.to_string())?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(schema, table, table_type)| {
+            let selector = format!("{schema}.{table}");
+            basic_discovered_source(
+                selector.clone(),
+                selector,
+                if table_type.contains("VIEW") {
+                    "view"
+                } else {
+                    "table"
+                },
+                json!({
+                    "schema": schema,
+                    "table": table,
+                    "table_type": table_type,
+                }),
+            )
+        })
+        .collect())
+}
+
+pub async fn query_virtual_table(
+    config: &Value,
+    request: &VirtualTableQueryRequest,
+) -> Result<VirtualTableQueryResponse, String> {
+    validate_config(config)?;
+    let query = source_query(config, &request.selector)?;
+    let limited = format!(
+        "SELECT COALESCE(json_agg(row_to_json(dataset_rows)), '[]'::json) FROM ({query} LIMIT {}) AS dataset_rows",
+        request.limit.unwrap_or(50).clamp(1, 500)
+    );
+
+    let pool = sqlx::PgPool::connect(&build_connection_string(config))
+        .await
+        .map_err(|error| error.to_string())?;
+    let rows: Value = sqlx::query_scalar(&limited)
+        .fetch_one(&pool)
+        .await
+        .map_err(|error| error.to_string())?;
+    let rows = rows.as_array().cloned().unwrap_or_default();
+
+    Ok(virtual_table_response(
+        &request.selector,
+        rows,
+        json!({
+            "query": query,
+            "limit": request.limit.unwrap_or(50).clamp(1, 500),
+        }),
+    ))
 }
 
 fn source_query(config: &Value, selector: &str) -> Result<String, String> {

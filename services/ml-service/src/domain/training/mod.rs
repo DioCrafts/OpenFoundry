@@ -1,61 +1,72 @@
-use serde_json::{Value, json};
+pub mod hyperparameter;
+pub mod runner;
+
+use serde_json::Value;
 
 use crate::models::{run::MetricValue, training_job::TrainingTrial};
 
-fn round_score(value: f64) -> f64 {
-    (value * 100.0).round() / 100.0
+#[derive(Debug, Clone)]
+pub struct TrainingExecution {
+    pub trials: Vec<TrainingTrial>,
+    pub best_hyperparameters: Option<Value>,
+    pub best_metrics: Vec<MetricValue>,
+    pub best_schema: Option<Value>,
 }
 
-fn value_as_f64(value: Option<&Value>, fallback: f64) -> f64 {
-    value.and_then(Value::as_f64).unwrap_or(fallback)
-}
-
-pub fn generate_trials(search: Option<&Value>, objective_metric_name: &str) -> Vec<TrainingTrial> {
-    let candidates = search
-        .and_then(|value| value.get("candidates"))
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_else(|| {
-            vec![
-                json!({ "learning_rate": 0.01, "max_depth": 4, "subsample": 0.8 }),
-                json!({ "learning_rate": 0.05, "max_depth": 6, "subsample": 0.9 }),
-                json!({ "learning_rate": 0.08, "max_depth": 8, "subsample": 1.0 }),
-            ]
+pub fn execute_training(
+    training_config: &Value,
+    search: Option<&Value>,
+    objective_metric_name: &str,
+) -> Result<TrainingExecution, String> {
+    if !runner::has_inline_training_data(training_config) {
+        let trials = synthetic_trials(search, objective_metric_name);
+        let best_hyperparameters = trials.first().map(|trial| trial.hyperparameters.clone());
+        return Ok(TrainingExecution {
+            trials,
+            best_hyperparameters,
+            best_metrics: Vec::new(),
+            best_schema: None,
         });
+    }
 
-    candidates
+    let mut outcomes = hyperparameter::candidate_sets(search)
         .into_iter()
         .enumerate()
-        .map(|(index, hyperparameters)| {
-            let learning_rate = value_as_f64(hyperparameters.get("learning_rate"), 0.05);
-            let max_depth = value_as_f64(hyperparameters.get("max_depth"), 6.0);
-            let subsample = value_as_f64(hyperparameters.get("subsample"), 0.9);
-            let score = round_score(
-                (0.68
-                    + index as f64 * 0.04
-                    + learning_rate * 0.35
-                    + max_depth * 0.007
-                    + subsample * 0.05)
-                    .min(0.99),
-            );
-
-            TrainingTrial {
-                id: format!("trial-{}", index + 1),
-                status: "completed".to_string(),
-                hyperparameters,
-                objective_metric: MetricValue {
-                    name: objective_metric_name.to_string(),
-                    value: score,
-                },
-            }
+        .map(|(index, candidate)| {
+            runner::train_trial(training_config, &candidate, objective_metric_name, index)
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    outcomes.sort_by(|left, right| {
+        right
+            .trial
+            .objective_metric
+            .value
+            .total_cmp(&left.trial.objective_metric.value)
+    });
+
+    let trials = outcomes.iter().map(|outcome| outcome.trial.clone()).collect();
+    let best = outcomes.first();
+
+    Ok(TrainingExecution {
+        trials,
+        best_hyperparameters: best.map(|outcome| outcome.trial.hyperparameters.clone()),
+        best_metrics: best.map(|outcome| outcome.metrics.clone()).unwrap_or_default(),
+        best_schema: best.map(|outcome| outcome.schema.clone()),
+    })
 }
 
-pub fn best_trial(trials: &[TrainingTrial]) -> Option<TrainingTrial> {
-    trials.iter().cloned().max_by(|left, right| {
-        left.objective_metric
-            .value
-            .total_cmp(&right.objective_metric.value)
-    })
+fn synthetic_trials(search: Option<&Value>, objective_metric_name: &str) -> Vec<TrainingTrial> {
+    hyperparameter::candidate_sets(search)
+        .into_iter()
+        .enumerate()
+        .map(|(index, hyperparameters)| TrainingTrial {
+            id: format!("trial-{}", index + 1),
+            status: "completed".to_string(),
+            hyperparameters,
+            objective_metric: MetricValue {
+                name: objective_metric_name.to_string(),
+                value: 0.5 + index as f64 * 0.05,
+            },
+        })
+        .collect()
 }

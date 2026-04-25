@@ -8,6 +8,14 @@ pub struct AppConfig {
     pub port: u16,
     pub database_url: String,
     pub jwt_secret: String,
+    #[serde(default = "default_audit_service_url")]
+    pub audit_service_url: String,
+    #[serde(default = "default_ontology_service_url")]
+    pub ontology_service_url: String,
+    #[serde(default = "default_ai_service_url")]
+    pub ai_service_url: String,
+    #[serde(default = "default_node_runtime_command")]
+    pub node_runtime_command: String,
 }
 
 fn default_host() -> String {
@@ -15,6 +23,22 @@ fn default_host() -> String {
 }
 fn default_port() -> u16 {
     50057
+}
+
+fn default_audit_service_url() -> String {
+    "http://localhost:50070".to_string()
+}
+
+fn default_ontology_service_url() -> String {
+    "http://localhost:50057".to_string()
+}
+
+fn default_ai_service_url() -> String {
+    "http://localhost:50060".to_string()
+}
+
+fn default_node_runtime_command() -> String {
+    "node".to_string()
 }
 
 impl AppConfig {

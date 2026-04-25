@@ -1,4 +1,5 @@
 use axum::{
+    http::HeaderMap,
     Json,
     extract::{Path, State},
 };
@@ -8,18 +9,19 @@ use uuid::Uuid;
 
 use crate::{
     AppState,
-    domain::{agents, rag},
+    domain::{agents, llm, rag},
     models::{
         agent::{
             AgentDefinition, AgentExecutionResponse, AgentRow, CreateAgentRequest,
             ExecuteAgentRequest, ListAgentsResponse, UpdateAgentRequest,
         },
         knowledge_base::KnowledgeDocumentRow,
+        provider::{LlmProvider, ProviderRow},
         tool::{ToolDefinition, ToolRow},
     },
 };
 
-use super::{ServiceResult, bad_request, db_error, not_found};
+use super::{ServiceResult, bad_request, db_error, internal_error, not_found};
 
 async fn load_agent_row(
     db: &sqlx::PgPool,
@@ -61,12 +63,13 @@ async fn load_tools(
 			SELECT
 				id,
 				name,
-				description,
-				category,
-				execution_mode,
-				status,
-				input_schema,
-				output_schema,
+			description,
+			category,
+			execution_mode,
+			execution_config,
+			status,
+			input_schema,
+			output_schema,
 				tags,
 				created_at,
 				updated_at
@@ -83,6 +86,34 @@ async fn load_tools(
     }
 
     Ok(tools)
+}
+
+async fn load_provider_rows(db: &sqlx::PgPool) -> Result<Vec<ProviderRow>, sqlx::Error> {
+    query_as::<_, ProviderRow>(
+        r#"
+		SELECT
+			id,
+			name,
+			provider_type,
+			model_name,
+			endpoint_url,
+			api_mode,
+			credential_reference,
+			enabled,
+			load_balance_weight,
+			max_output_tokens,
+			cost_tier,
+			tags,
+			route_rules,
+			health_state,
+			created_at,
+			updated_at
+		FROM ai_providers
+		ORDER BY updated_at DESC, created_at DESC
+		"#,
+    )
+    .fetch_all(db)
+    .await
 }
 
 async fn load_documents(
@@ -265,6 +296,7 @@ pub async fn update_agent(
 pub async fn execute_agent(
     State(state): State<AppState>,
     Path(agent_id): Path<Uuid>,
+    headers: HeaderMap,
     Json(body): Json<ExecuteAgentRequest>,
 ) -> ServiceResult<AgentExecutionResponse> {
     if body.user_message.trim().is_empty() {
@@ -301,12 +333,74 @@ pub async fn execute_agent(
     });
 
     let steps = agents::planner::build_plan(&agent, &objective, &tools, &knowledge_hits);
-    let traces =
-        agents::executor::execute_plan(&steps, &tools, &body.user_message, &knowledge_hits);
-    let final_response = traces
-        .last()
-        .map(|trace| trace.observation.clone())
-        .unwrap_or_else(|| "Agent execution completed without traces.".to_string());
+    let traces = agents::executor::execute_plan(
+        &state.http_client,
+        &steps,
+        &tools,
+        &body.user_message,
+        &objective,
+        &body.context,
+        &headers,
+        &knowledge_hits,
+    )
+    .await;
+
+    let providers = load_provider_rows(&state.db)
+        .await
+        .map_err(|cause| db_error(&cause))?
+        .into_iter()
+        .map(Into::into)
+        .collect::<Vec<LlmProvider>>();
+    let final_response = if let Some(provider) = llm::gateway::select_provider(
+        &llm::gateway::route_providers(&providers, None, "agents"),
+        true,
+    ) {
+        let knowledge_summary = knowledge_hits
+            .iter()
+            .map(|hit| format!("- {}: {}", hit.document_title, hit.excerpt))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let tool_summary = traces
+            .iter()
+            .filter(|trace| trace.tool_name.is_some())
+            .map(|trace| format!("- {} => {}", trace.title, trace.output))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let completion = llm::runtime::complete_text(
+            &state.http_client,
+            &provider,
+            if agent.system_prompt.trim().is_empty() {
+                "You are an OpenFoundry execution agent. Summarize tool results clearly."
+            } else {
+                &agent.system_prompt
+            },
+            &format!(
+                "Objective: {objective}\nUser message: {}\nKnowledge hits:\n{}\nTool observations:\n{}\nRespond with a concise operator-facing answer.",
+                body.user_message,
+                if knowledge_summary.is_empty() {
+                    "none".to_string()
+                } else {
+                    knowledge_summary
+                },
+                if tool_summary.is_empty() {
+                    "none".to_string()
+                } else {
+                    tool_summary
+                },
+            ),
+            0.2,
+            provider.max_output_tokens.min(512),
+        )
+        .await
+        .map_err(internal_error)?;
+
+        completion.text
+    } else {
+        traces
+            .last()
+            .map(|trace| trace.observation.clone())
+            .unwrap_or_else(|| "Agent execution completed without traces.".to_string())
+    };
     let updated_memory = agents::memory::update_memory(
         &agent.memory,
         &body.user_message,

@@ -7,7 +7,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::AppState;
+use crate::{AppState, domain::type_system::validate_cardinality};
 use crate::models::link_type::*;
 use auth_middleware::layer::AuthUser;
 
@@ -24,6 +24,9 @@ pub async fn create_link_type(
     let cardinality = body
         .cardinality
         .unwrap_or_else(|| "many_to_many".to_string());
+    if let Err(error) = validate_cardinality(&cardinality) {
+        return (StatusCode::BAD_REQUEST, error).into_response();
+    }
 
     let result = sqlx::query_as::<_, LinkType>(
         r#"INSERT INTO link_types (id, name, display_name, description, source_type_id, target_type_id, cardinality, owner_id)

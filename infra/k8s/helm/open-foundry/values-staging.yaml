@@ -1,25 +1,51 @@
+global:
+  existingSecret: open-foundry-staging-env
+  ingress:
+    enabled: true
+    className: nginx
+    hosts:
+      - host: staging.openfoundry.example.com
+        paths:
+          - path: /
+
 services:
-	gateway:
-		autoscaling:
-			minReplicas: 2
-			maxReplicas: 5
-	query-service:
-		env:
-			DISTRIBUTED_QUERY_WORKERS: "4"
-		autoscaling:
-			minReplicas: 2
-			maxReplicas: 8
-			keda:
-				enabled: true
-	pipeline-service:
-		env:
-			DISTRIBUTED_PIPELINE_WORKERS: "4"
-		autoscaling:
-			minReplicas: 2
-			maxReplicas: 6
-			keda:
-				enabled: true
-	geospatial-service:
-		autoscaling:
-			minReplicas: 2
-			maxReplicas: 4
+  gateway:
+    autoscaling:
+      minReplicas: 2
+      maxReplicas: 5
+  auth-service:
+    autoscaling:
+      minReplicas: 2
+      maxReplicas: 4
+  dataset-service:
+    autoscaling:
+      minReplicas: 2
+      maxReplicas: 5
+  query-service:
+    env:
+      DISTRIBUTED_QUERY_WORKERS: "4"
+    autoscaling:
+      minReplicas: 2
+      maxReplicas: 8
+      keda:
+        enabled: true
+  pipeline-service:
+    env:
+      DISTRIBUTED_PIPELINE_WORKERS: "4"
+    autoscaling:
+      minReplicas: 2
+      maxReplicas: 6
+      keda:
+        enabled: true
+  report-service:
+    autoscaling:
+      minReplicas: 2
+      maxReplicas: 5
+  nexus-service:
+    autoscaling:
+      minReplicas: 2
+      maxReplicas: 4
+  geospatial-service:
+    autoscaling:
+      minReplicas: 2
+      maxReplicas: 4

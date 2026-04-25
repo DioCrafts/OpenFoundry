@@ -62,6 +62,14 @@ async fn main() {
             axum::routing::post(handlers::peers::authenticate_peer),
         )
         .route(
+            "/api/v1/nexus/spaces",
+            get(handlers::spaces::list_spaces).post(handlers::spaces::create_space),
+        )
+        .route(
+            "/api/v1/nexus/spaces/{id}",
+            axum::routing::patch(handlers::spaces::update_space),
+        )
+        .route(
             "/api/v1/nexus/contracts",
             get(handlers::contracts::list_contracts).post(handlers::contracts::create_contract),
         )

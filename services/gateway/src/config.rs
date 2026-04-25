@@ -25,6 +25,8 @@ pub struct GatewayConfig {
     pub ontology_service_url: String,
     #[serde(default = "default_workflow_url")]
     pub workflow_service_url: String,
+    #[serde(default = "default_notebook_service_url")]
+    pub notebook_service_url: String,
     #[serde(default = "default_notification_url")]
     pub notification_service_url: String,
     #[serde(default = "default_app_builder_url")]
@@ -79,6 +81,9 @@ fn default_ontology_url() -> String {
 }
 fn default_workflow_url() -> String {
     "http://localhost:50061".to_string()
+}
+fn default_notebook_service_url() -> String {
+    "http://localhost:50062".to_string()
 }
 fn default_notification_url() -> String {
     "http://localhost:50069".to_string()

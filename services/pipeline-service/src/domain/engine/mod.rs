@@ -157,22 +157,23 @@ pub(crate) async fn execute_node(
     }
 
     match node.transform_type.as_str() {
-        "sql" => match runtime::execute_sql_transform(&env.state, env.actor_id, node, &inputs).await
-        {
-            Ok(result) => success_result(
-                node,
-                result.rows_affected,
-                result.output,
-                runtime::build_metadata(
-                    fingerprint,
-                    false,
-                    &inputs,
-                    node.output_dataset_id,
-                    result.output_dataset_version,
+        "sql" => {
+            match runtime::execute_sql_transform(&env.state, env.actor_id, node, &inputs).await {
+                Ok(result) => success_result(
+                    node,
+                    result.rows_affected,
+                    result.output,
+                    runtime::build_metadata(
+                        fingerprint,
+                        false,
+                        &inputs,
+                        node.output_dataset_id,
+                        result.output_dataset_version,
+                    ),
                 ),
-            ),
-            Err(error) => failed_result(node, Some(error)),
-        },
+                Err(error) => failed_result(node, Some(error)),
+            }
+        }
         "python" => {
             match runtime::execute_python_transform(&env.state, env.actor_id, node, &inputs).await {
                 Ok(result) => success_result(
@@ -213,6 +214,56 @@ pub(crate) async fn execute_node(
                         &inputs,
                         node.output_dataset_id,
                         output_dataset_version,
+                    ),
+                    ),
+                Err(error) => failed_result(node, Some(error)),
+            }
+        }
+        "spark" | "pyspark" => {
+            match runtime::execute_remote_compute_transform(
+                &env.state,
+                env.actor_id,
+                node,
+                &inputs,
+                "spark",
+            )
+            .await
+            {
+                Ok(result) => success_result(
+                    node,
+                    result.rows_affected,
+                    result.output,
+                    runtime::build_metadata(
+                        fingerprint,
+                        false,
+                        &inputs,
+                        node.output_dataset_id,
+                        result.output_dataset_version,
+                    ),
+                ),
+                Err(error) => failed_result(node, Some(error)),
+            }
+        }
+        "external" | "remote" => {
+            match runtime::execute_remote_compute_transform(
+                &env.state,
+                env.actor_id,
+                node,
+                &inputs,
+                "external",
+            )
+            .await
+            {
+                Ok(result) => success_result(
+                    node,
+                    result.rows_affected,
+                    result.output,
+                    runtime::build_metadata(
+                        fingerprint,
+                        false,
+                        &inputs,
+                        node.output_dataset_id,
+                        result.output_dataset_version,
                     ),
                 ),
                 Err(error) => failed_result(node, Some(error)),

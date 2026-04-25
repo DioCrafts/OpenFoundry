@@ -27,27 +27,28 @@ pub async fn execute_pipeline(
             .map(move |(position, node_id)| {
                 let stage_fingerprints = stage_fingerprints.clone();
                 async move {
-                let node = node_lookup
-                    .get(node_id.as_str())
-                    .copied()
-                    .ok_or_else(|| format!("pipeline node '{}' not found", node_id))?;
-                let mut result = execute_node_with_retries(
-                    env,
-                    node,
-                    &stage_fingerprints,
-                    request.skip_unchanged,
-                    request.prior_node_results.get(&node.id),
-                    max_attempts,
-                )
-                .await;
-                result.stage_index = Some(stage_index);
-                result.worker_id = Some(format!(
-                    "pipeline-worker-{}",
-                    (position % worker_budget) + 1
-                ));
-                annotate_output(&mut result, stage_index, position % worker_budget);
-                Ok::<_, String>((position, result))
-            }})
+                    let node = node_lookup
+                        .get(node_id.as_str())
+                        .copied()
+                        .ok_or_else(|| format!("pipeline node '{}' not found", node_id))?;
+                    let mut result = execute_node_with_retries(
+                        env,
+                        node,
+                        &stage_fingerprints,
+                        request.skip_unchanged,
+                        request.prior_node_results.get(&node.id),
+                        max_attempts,
+                    )
+                    .await;
+                    result.stage_index = Some(stage_index);
+                    result.worker_id = Some(format!(
+                        "pipeline-worker-{}",
+                        (position % worker_budget) + 1
+                    ));
+                    annotate_output(&mut result, stage_index, position % worker_budget);
+                    Ok::<_, String>((position, result))
+                }
+            })
             .buffer_unordered(worker_budget)
             .try_collect::<Vec<_>>()
             .await?;
@@ -55,7 +56,9 @@ pub async fn execute_pipeline(
         stage_results.sort_by_key(|(position, _)| *position);
         for (_, result) in stage_results {
             let failed = result.status == "failed";
-            if let Some(fingerprint) = super::runtime::fingerprint_from_metadata(result.metadata.as_ref()) {
+            if let Some(fingerprint) =
+                super::runtime::fingerprint_from_metadata(result.metadata.as_ref())
+            {
                 completed_fingerprints.insert(result.node_id.clone(), fingerprint);
             }
             results.push(result);

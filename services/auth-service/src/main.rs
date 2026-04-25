@@ -26,6 +26,12 @@ async fn main() {
         .init();
 
     let cfg = config::AppConfig::from_env().expect("failed to load config");
+    if let Some(nats_url) = cfg.nats_url.as_deref() {
+        tracing::info!(nats_url, "auth-service NATS integration configured");
+    }
+    if let Some(redis_url) = cfg.redis_url.as_deref() {
+        tracing::info!(redis_url, "auth-service Redis integration configured");
+    }
 
     let pool = PgPoolOptions::new()
         .max_connections(20)
@@ -74,10 +80,34 @@ async fn main() {
 
     // Protected routes (auth required)
     let protected = Router::new()
+        .route(
+            "/api/v1/control-panel",
+            get(handlers::control_panel::get_control_panel)
+                .put(handlers::control_panel::update_control_panel),
+        )
+        .route(
+            "/api/v1/control-panel/upgrade-readiness",
+            get(handlers::control_panel::get_upgrade_readiness),
+        )
+        .route(
+            "/api/v2/admin/control-panel",
+            get(handlers::control_panel::get_control_panel)
+                .put(handlers::control_panel::update_control_panel),
+        )
+        .route(
+            "/api/v2/admin/control-panel/upgrade-readiness",
+            get(handlers::control_panel::get_upgrade_readiness),
+        )
         .route("/api/v1/users/me", get(handlers::user_mgmt::me))
+        .route("/api/v2/admin/users/me", get(handlers::user_mgmt::me))
         .route("/api/v1/users", get(handlers::user_mgmt::list_users))
+        .route("/api/v2/admin/users", get(handlers::user_mgmt::list_users))
         .route(
             "/api/v1/users/{id}",
+            patch(handlers::user_mgmt::update_user).delete(handlers::user_mgmt::deactivate_user),
+        )
+        .route(
+            "/api/v2/admin/users/{id}",
             patch(handlers::user_mgmt::update_user).delete(handlers::user_mgmt::deactivate_user),
         )
         .route(
@@ -100,9 +130,19 @@ async fn main() {
             "/api/v1/roles",
             get(handlers::role_mgmt::list_roles).post(handlers::role_mgmt::create_role),
         )
+        .route(
+            "/api/v2/admin/roles",
+            get(handlers::role_mgmt::list_roles).post(handlers::role_mgmt::create_role),
+        )
         .route("/api/v1/roles/{id}", put(handlers::role_mgmt::update_role))
+        .route("/api/v2/admin/roles/{id}", put(handlers::role_mgmt::update_role))
         .route(
             "/api/v1/permissions",
+            get(handlers::permission_mgmt::list_permissions)
+                .post(handlers::permission_mgmt::create_permission),
+        )
+        .route(
+            "/api/v2/admin/permissions",
             get(handlers::permission_mgmt::list_permissions)
                 .post(handlers::permission_mgmt::create_permission),
         )
@@ -111,7 +151,15 @@ async fn main() {
             get(handlers::group_mgmt::list_groups).post(handlers::group_mgmt::create_group),
         )
         .route(
+            "/api/v2/admin/groups",
+            get(handlers::group_mgmt::list_groups).post(handlers::group_mgmt::create_group),
+        )
+        .route(
             "/api/v1/groups/{id}",
+            put(handlers::group_mgmt::update_group),
+        )
+        .route(
+            "/api/v2/admin/groups/{id}",
             put(handlers::group_mgmt::update_group),
         )
         .route(
@@ -119,12 +167,24 @@ async fn main() {
             get(handlers::policy_mgmt::list_policies).post(handlers::policy_mgmt::create_policy),
         )
         .route(
+            "/api/v2/admin/policies",
+            get(handlers::policy_mgmt::list_policies).post(handlers::policy_mgmt::create_policy),
+        )
+        .route(
             "/api/v1/policies/evaluate",
+            post(handlers::policy_mgmt::evaluate_policy),
+        )
+        .route(
+            "/api/v2/admin/policies/evaluate",
             post(handlers::policy_mgmt::evaluate_policy),
         )
         .route(
             "/api/v1/policies/{id}",
             put(handlers::policy_mgmt::update_policy).delete(handlers::policy_mgmt::delete_policy),
+        )
+        .route(
+            "/api/v2/admin/policies/{id}",
+            patch(handlers::policy_mgmt::update_policy).delete(handlers::policy_mgmt::delete_policy),
         )
         .route(
             "/api/v1/api-keys",
@@ -147,6 +207,34 @@ async fn main() {
         .route(
             "/api/v1/auth/sso/providers/{id}",
             put(handlers::sso::update_provider).delete(handlers::sso::delete_provider),
+        )
+        .route(
+            "/api/v1/auth/sessions",
+            get(handlers::sessions::list_scoped_sessions),
+        )
+        .route(
+            "/api/v1/auth/sessions/scoped",
+            post(handlers::sessions::create_scoped_session),
+        )
+        .route(
+            "/api/v1/auth/sessions/guest",
+            post(handlers::sessions::create_guest_session),
+        )
+        .route(
+            "/api/v1/auth/sessions/{id}",
+            delete(handlers::sessions::revoke_scoped_session),
+        )
+        .route(
+            "/api/v1/auth/cipher/hash",
+            post(handlers::security_ops::hash_content),
+        )
+        .route(
+            "/api/v1/auth/cipher/sign",
+            post(handlers::security_ops::sign_content),
+        )
+        .route(
+            "/api/v1/auth/cipher/verify",
+            post(handlers::security_ops::verify_signature),
         )
         .layer(middleware::from_fn_with_state(
             jwt_config,

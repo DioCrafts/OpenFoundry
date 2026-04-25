@@ -6,11 +6,11 @@ use chrono::Utc;
 
 use crate::{
     AppState,
-    domain::{encryption, schema_compat},
+    domain::{encryption, governance, schema_compat},
     handlers::{
         ServiceResult, bad_request, db_error, internal_error, load_access_grants,
         load_contract_row, load_contracts, load_peer_row, load_share_row, load_shares,
-        load_sync_statuses, not_found,
+        load_space_row, load_sync_statuses, not_found,
     },
     models::{
         ListResponse,
@@ -84,25 +84,63 @@ pub async fn create_share(
         .ok_or_else(|| bad_request("contract not found"))?;
     let contract = crate::models::contract::SharingContract::try_from(contract_row)
         .map_err(|cause| internal_error(cause.to_string()))?;
-    if load_peer_row(&state.db, request.provider_peer_id)
+    let provider_peer = load_peer_row(&state.db, request.provider_peer_id)
         .await
         .map_err(|cause| db_error(&cause))?
-        .is_none()
-    {
-        return Err(bad_request("provider peer not found"));
-    }
-    if load_peer_row(&state.db, request.consumer_peer_id)
+        .map(crate::models::peer::PeerOrganization::try_from)
+        .transpose()
+        .map_err(|cause| internal_error(cause.to_string()))?
+        .ok_or_else(|| bad_request("provider peer not found"))?;
+    let consumer_peer = load_peer_row(&state.db, request.consumer_peer_id)
         .await
         .map_err(|cause| db_error(&cause))?
-        .is_none()
-    {
-        return Err(bad_request("consumer peer not found"));
-    }
+        .map(crate::models::peer::PeerOrganization::try_from)
+        .transpose()
+        .map_err(|cause| internal_error(cause.to_string()))?
+        .ok_or_else(|| bad_request("consumer peer not found"))?;
 
     let id = uuid::Uuid::now_v7();
     let grant_id = uuid::Uuid::now_v7();
     let sync_id = uuid::Uuid::now_v7();
     let now = Utc::now();
+    let provider_space = if let Some(space_id) = request.provider_space_id {
+        Some(
+            load_space_row(&state.db, space_id)
+                .await
+                .map_err(|cause| db_error(&cause))?
+                .map(crate::models::space::NexusSpace::try_from)
+                .transpose()
+                .map_err(|cause| internal_error(cause.to_string()))?
+                .ok_or_else(|| bad_request("provider space not found"))?,
+        )
+    } else {
+        None
+    };
+    let consumer_space = if let Some(space_id) = request.consumer_space_id {
+        Some(
+            load_space_row(&state.db, space_id)
+                .await
+                .map_err(|cause| db_error(&cause))?
+                .map(crate::models::space::NexusSpace::try_from)
+                .transpose()
+                .map_err(|cause| internal_error(cause.to_string()))?
+                .ok_or_else(|| bad_request("consumer space not found"))?,
+        )
+    } else {
+        None
+    };
+    governance::validate_share_state(
+        &contract,
+        &provider_peer,
+        &consumer_peer,
+        provider_space.as_ref(),
+        consumer_space.as_ref(),
+        &request.dataset_name,
+        &request.replication_mode,
+        "active",
+        now,
+    )
+    .map_err(bad_request)?;
     let selector = request.selector.clone();
     let provider_schema = request.provider_schema.clone();
     let consumer_schema = request.consumer_schema.clone();
@@ -111,14 +149,18 @@ pub async fn create_share(
     let allowed_purposes = serde_json::to_value(&contract.allowed_purposes)
         .map_err(|cause| internal_error(cause.to_string()))?;
 
+    let mut tx = state.db.begin().await.map_err(|cause| db_error(&cause))?;
+
     sqlx::query(
-		"INSERT INTO nexus_shares (id, contract_id, provider_peer_id, consumer_peer_id, dataset_name, selector, provider_schema, consumer_schema, sample_rows, replication_mode, status, last_sync_at, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11, $12, $13, $14)",
+		"INSERT INTO nexus_shares (id, contract_id, provider_peer_id, consumer_peer_id, provider_space_id, consumer_space_id, dataset_name, selector, provider_schema, consumer_schema, sample_rows, replication_mode, status, last_sync_at, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16)",
 	)
 	.bind(id)
 	.bind(request.contract_id)
 	.bind(request.provider_peer_id)
 	.bind(request.consumer_peer_id)
+	.bind(request.provider_space_id)
+	.bind(request.consumer_space_id)
 	.bind(&request.dataset_name)
 	.bind(selector)
 	.bind(provider_schema)
@@ -129,7 +171,7 @@ pub async fn create_share(
 	.bind(Option::<chrono::DateTime<chrono::Utc>>::None)
 	.bind(now)
 	.bind(now)
-	.execute(&state.db)
+	.execute(&mut *tx)
 	.await
 	.map_err(|cause| db_error(&cause))?;
 
@@ -146,7 +188,7 @@ pub async fn create_share(
 	.bind(allowed_purposes)
 	.bind(contract.expires_at)
 	.bind(now)
-	.execute(&state.db)
+	.execute(&mut *tx)
 	.await
 	.map_err(|cause| db_error(&cause))?;
 
@@ -167,9 +209,11 @@ pub async fn create_share(
 	.bind(Some(now + chrono::Duration::hours(4)))
 	.bind(format!("cursor/{}", id))
 	.bind(now)
-	.execute(&state.db)
+	.execute(&mut *tx)
 	.await
 	.map_err(|cause| db_error(&cause))?;
+
+    tx.commit().await.map_err(|cause| db_error(&cause))?;
 
     let row = load_share_row(&state.db, id)
         .await
@@ -204,7 +248,81 @@ pub async fn update_share(
         .ok_or_else(|| not_found("shared dataset not found"))?;
     let current =
         SharedDataset::try_from(current).map_err(|cause| internal_error(cause.to_string()))?;
+    let contract_row = load_contract_row(&state.db, current.contract_id)
+        .await
+        .map_err(|cause| db_error(&cause))?
+        .ok_or_else(|| bad_request("contract not found"))?;
+    let contract = crate::models::contract::SharingContract::try_from(contract_row)
+        .map_err(|cause| internal_error(cause.to_string()))?;
+    let provider_peer = load_peer_row(&state.db, current.provider_peer_id)
+        .await
+        .map_err(|cause| db_error(&cause))?
+        .map(crate::models::peer::PeerOrganization::try_from)
+        .transpose()
+        .map_err(|cause| internal_error(cause.to_string()))?
+        .ok_or_else(|| bad_request("provider peer not found"))?;
+    let consumer_peer = load_peer_row(&state.db, current.consumer_peer_id)
+        .await
+        .map_err(|cause| db_error(&cause))?
+        .map(crate::models::peer::PeerOrganization::try_from)
+        .transpose()
+        .map_err(|cause| internal_error(cause.to_string()))?
+        .ok_or_else(|| bad_request("consumer peer not found"))?;
+    let provider_space = if let Some(space_id) =
+        request.provider_space_id.or(current.provider_space_id)
+    {
+        Some(
+            load_space_row(&state.db, space_id)
+                .await
+                .map_err(|cause| db_error(&cause))?
+                .map(crate::models::space::NexusSpace::try_from)
+                .transpose()
+                .map_err(|cause| internal_error(cause.to_string()))?
+                .ok_or_else(|| bad_request("provider space not found"))?,
+        )
+    } else {
+        None
+    };
+    let consumer_space = if let Some(space_id) =
+        request.consumer_space_id.or(current.consumer_space_id)
+    {
+        Some(
+            load_space_row(&state.db, space_id)
+                .await
+                .map_err(|cause| db_error(&cause))?
+                .map(crate::models::space::NexusSpace::try_from)
+                .transpose()
+                .map_err(|cause| internal_error(cause.to_string()))?
+                .ok_or_else(|| bad_request("consumer space not found"))?,
+        )
+    } else {
+        None
+    };
     let now = Utc::now();
+    let next_dataset_name = request
+        .dataset_name
+        .clone()
+        .unwrap_or_else(|| current.dataset_name.clone());
+    let next_replication_mode = request
+        .replication_mode
+        .clone()
+        .unwrap_or_else(|| current.replication_mode.clone());
+    let next_status = request
+        .status
+        .clone()
+        .unwrap_or_else(|| current.status.clone());
+    governance::validate_share_state(
+        &contract,
+        &provider_peer,
+        &consumer_peer,
+        provider_space.as_ref(),
+        consumer_space.as_ref(),
+        &next_dataset_name,
+        &next_replication_mode,
+        &next_status,
+        now,
+    )
+    .map_err(bad_request)?;
     let sample_rows = serde_json::to_value(
         request
             .sample_rows
@@ -216,21 +334,25 @@ pub async fn update_share(
     sqlx::query(
         "UPDATE nexus_shares
 		 SET dataset_name = $2,
-			 selector = $3::jsonb,
-			 consumer_schema = $4::jsonb,
-			 sample_rows = $5::jsonb,
-			 replication_mode = $6,
-			 status = $7,
-			 updated_at = $8
+			 provider_space_id = $3,
+			 consumer_space_id = $4,
+			 selector = $5::jsonb,
+			 consumer_schema = $6::jsonb,
+			 sample_rows = $7::jsonb,
+			 replication_mode = $8,
+			 status = $9,
+			 updated_at = $10
 		 WHERE id = $1",
     )
     .bind(id)
-    .bind(request.dataset_name.unwrap_or(current.dataset_name))
+    .bind(next_dataset_name)
+    .bind(request.provider_space_id.or(current.provider_space_id))
+    .bind(request.consumer_space_id.or(current.consumer_space_id))
     .bind(request.selector.unwrap_or(current.selector))
     .bind(request.consumer_schema.unwrap_or(current.consumer_schema))
     .bind(sample_rows)
-    .bind(request.replication_mode.unwrap_or(current.replication_mode))
-    .bind(request.status.unwrap_or(current.status))
+    .bind(next_replication_mode)
+    .bind(next_status)
     .bind(now)
     .execute(&state.db)
     .await

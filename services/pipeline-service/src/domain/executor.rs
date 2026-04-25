@@ -123,7 +123,7 @@ pub async fn start_pipeline_run(
     .map_err(|error| error.to_string())?;
 
     if let Some(results) = results.as_ref() {
-        if let Err(error) = record_pipeline_lineage(&state.db, pipeline.id, &nodes, results).await {
+        if let Err(error) = record_pipeline_lineage(state, pipeline, &nodes, results).await {
             tracing::warn!(pipeline_id = %pipeline.id, "pipeline lineage recording failed: {error}");
         }
     }
@@ -320,12 +320,18 @@ fn enrich_execution_context(
 }
 
 fn finalize_execution_context(context: &Value, results: &[NodeResult]) -> Value {
-    let skipped_nodes = results.iter().filter(|result| result.status == "skipped").count();
+    let skipped_nodes = results
+        .iter()
+        .filter(|result| result.status == "skipped")
+        .count();
     let completed_nodes = results
         .iter()
         .filter(|result| result.status == "completed")
         .count();
-    let failed_nodes = results.iter().filter(|result| result.status == "failed").count();
+    let failed_nodes = results
+        .iter()
+        .filter(|result| result.status == "failed")
+        .count();
     let mut context = context.clone();
     if let Value::Object(map) = &mut context {
         map.insert(
@@ -336,6 +342,11 @@ fn finalize_execution_context(context: &Value, results: &[NodeResult]) -> Value 
                     .and_then(|build| build.get("started_at"))
                     .cloned()
                     .unwrap_or_else(|| json!(Utc::now())),
+                "prior_completed_node_count": map
+                    .get("build")
+                    .and_then(|build| build.get("prior_completed_node_count"))
+                    .cloned()
+                    .unwrap_or_else(|| json!(0)),
                 "finished_at": Utc::now(),
                 "completed_nodes": completed_nodes,
                 "skipped_nodes": skipped_nodes,
@@ -348,8 +359,8 @@ fn finalize_execution_context(context: &Value, results: &[NodeResult]) -> Value 
 }
 
 async fn record_pipeline_lineage(
-    db: &sqlx::PgPool,
-    pipeline_id: Uuid,
+    state: &AppState,
+    pipeline: &Pipeline,
     nodes: &[PipelineNode],
     results: &[NodeResult],
 ) -> Result<(), sqlx::Error> {
@@ -370,10 +381,10 @@ async fn record_pipeline_lineage(
 
         for source_dataset_id in &node.input_dataset_ids {
             lineage::record_lineage(
-                db,
+                &state.db,
                 *source_dataset_id,
                 target_dataset_id,
-                Some(pipeline_id),
+                Some(pipeline.id),
                 Some(&node.id),
             )
             .await?;
@@ -388,12 +399,12 @@ async fn record_pipeline_lineage(
             };
 
             lineage::record_column_lineage(
-                db,
+                &state.db,
                 source_dataset_id,
                 &mapping.source_column,
                 target_dataset_id,
                 &mapping.target_column,
-                Some(pipeline_id),
+                Some(pipeline.id),
                 Some(&node.id),
             )
             .await?;
@@ -406,16 +417,35 @@ async fn record_pipeline_lineage(
 
             for column in identity_columns(node) {
                 lineage::record_column_lineage(
-                    db,
+                    &state.db,
                     source_dataset_id,
                     &column,
                     target_dataset_id,
                     &column,
-                    Some(pipeline_id),
+                    Some(pipeline.id),
                     Some(&node.id),
                 )
                 .await?;
             }
+        }
+
+        if let Err(error) = lineage::propagate_pipeline_runtime_lineage(
+            state,
+            pipeline,
+            &node.id,
+            &node.label,
+            &node.transform_type,
+            &node.input_dataset_ids,
+            target_dataset_id,
+            node.config
+                .get("lineage")
+                .and_then(|value| value.get("marking"))
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        )
+        .await
+        {
+            tracing::warn!(pipeline_id = %pipeline.id, node_id = %node.id, "generalized lineage propagation failed: {error}");
         }
     }
 

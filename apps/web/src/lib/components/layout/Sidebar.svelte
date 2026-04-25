@@ -8,6 +8,7 @@
     { href: '/fusion',    label: 'Fusion',     icon: '🧬' },
     { href: '/streaming', label: 'Streaming',  icon: '🌊' },
     { href: '/reports',   label: 'Reports',    icon: '🧾' },
+    { href: '/control-panel', label: 'Control Panel', icon: '🛠️' },
     { href: '/geospatial', label: 'Geospatial', icon: '🗺️' },
     { href: '/audit',     label: 'Audit',      icon: '🛡️' },
     { href: '/nexus',     label: 'Nexus',      icon: '🤝' },
@@ -15,6 +16,8 @@
     { href: '/developers', label: 'Developers', icon: '</>' },
     { href: '/marketplace', label: 'Marketplace', icon: '🛍️' },
     { href: '/ml',        label: 'ML Studio',  icon: '🧠' },
+    { href: '/contour',   label: 'Contour',    icon: '🧿' },
+    { href: '/quiver',    label: 'Quiver',     icon: '📈' },
     { href: '/dashboards', label: 'Dashboards', icon: '📊' },
     { href: '/datasets',  label: 'Datasets',   icon: '🗄️' },
     { href: '/workflows', label: 'Workflows',  icon: '🧭' },
@@ -22,6 +25,7 @@
     { href: '/pipelines', label: 'Pipelines',  icon: '⚙️' },
     { href: '/ontology',  label: 'Ontology',   icon: '🔗' },
     { href: '/notebooks', label: 'Notebooks',  icon: '📓' },
+    { href: '/notepad',   label: 'Notepad',    icon: '📝' },
     { href: '/settings',  label: 'Settings',   icon: '⚙️' },
   ];
 </script>

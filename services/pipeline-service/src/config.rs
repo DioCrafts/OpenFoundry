@@ -12,6 +12,8 @@ pub struct AppConfig {
     pub data_dir: String,
     #[serde(default = "default_dataset_service_url")]
     pub dataset_service_url: String,
+    #[serde(default = "default_workflow_service_url")]
+    pub workflow_service_url: String,
     #[serde(default = "default_storage_backend")]
     pub storage_backend: String,
     #[serde(default = "default_storage_bucket")]
@@ -41,6 +43,9 @@ fn default_data_dir() -> String {
 }
 fn default_dataset_service_url() -> String {
     "http://localhost:50053".to_string()
+}
+fn default_workflow_service_url() -> String {
+    "http://localhost:50061".to_string()
 }
 fn default_storage_backend() -> String {
     "s3".to_string()

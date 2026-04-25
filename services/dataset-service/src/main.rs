@@ -74,10 +74,15 @@ async fn main() {
         storage,
     };
 
-    let public = Router::new().route(
-        "/health",
-        get(|| async { axum::Json(HealthStatus::ok("dataset-service")) }),
-    );
+    let public = Router::new()
+        .route(
+            "/health",
+            get(|| async { axum::Json(HealthStatus::ok("dataset-service")) }),
+        )
+        .route(
+            "/internal/datasets/{id}/metadata",
+            get(handlers::internal::get_dataset_metadata),
+        );
 
     let protected = Router::new()
         .route("/api/v1/datasets", post(handlers::crud::create_dataset))
@@ -112,8 +117,40 @@ async fn main() {
             get(handlers::versions::list_versions),
         )
         .route(
+            "/api/v1/datasets/{id}/transactions",
+            get(handlers::transactions::list_transactions),
+        )
+        .route(
             "/api/v1/datasets/{id}/files",
             get(handlers::export::list_files),
+        )
+        .route(
+            "/api/v1/datasets/{id}/filesystem",
+            get(handlers::export::list_files),
+        )
+        .route(
+            "/api/v2/filesystem/datasets/{id}",
+            get(handlers::export::list_files),
+        )
+        .route(
+            "/api/v1/datasets/{id}/views",
+            get(handlers::views::list_views),
+        )
+        .route(
+            "/api/v1/datasets/{id}/views",
+            post(handlers::views::create_view),
+        )
+        .route(
+            "/api/v1/datasets/{id}/views/{view_id}",
+            get(handlers::views::get_view),
+        )
+        .route(
+            "/api/v1/datasets/{id}/views/{view_id}/preview",
+            get(handlers::views::preview_view),
+        )
+        .route(
+            "/api/v1/datasets/{id}/views/{view_id}/refresh",
+            post(handlers::views::refresh_view),
         )
         .route(
             "/api/v1/datasets/{id}/branches",

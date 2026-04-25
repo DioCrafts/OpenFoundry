@@ -1,3 +1,4 @@
+pub mod activation;
 pub mod dependency;
 pub mod discovery;
 pub mod registry;

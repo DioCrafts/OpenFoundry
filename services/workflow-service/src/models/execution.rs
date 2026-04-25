@@ -30,6 +30,12 @@ pub struct TriggerEventRequest {
     pub context: Value,
 }
 
+#[derive(Debug, Deserialize, Default)]
+pub struct InternalLineageRunRequest {
+    #[serde(default)]
+    pub context: Value,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ListRunsQuery {
     pub page: Option<i64>,

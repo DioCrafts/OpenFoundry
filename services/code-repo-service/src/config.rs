@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -8,6 +10,8 @@ pub struct AppConfig {
     pub port: u16,
     pub database_url: String,
     pub jwt_secret: String,
+    #[serde(default = "default_repo_storage_root")]
+    pub repo_storage_root: PathBuf,
 }
 
 fn default_host() -> String {
@@ -16,6 +20,10 @@ fn default_host() -> String {
 
 fn default_port() -> u16 {
     50065
+}
+
+fn default_repo_storage_root() -> PathBuf {
+    std::env::temp_dir().join("openfoundry-code-repos")
 }
 
 impl AppConfig {

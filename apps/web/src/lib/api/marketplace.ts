@@ -68,6 +68,14 @@ export interface InstallRecord {
 	workspace_name: string;
 	status: string;
 	dependency_plan: DependencyRequirement[];
+	activation: {
+		kind: string;
+		status: string;
+		resource_id: string | null;
+		resource_slug: string | null;
+		public_url: string | null;
+		notes: string | null;
+	};
 	installed_at: string;
 	ready_at: string | null;
 }

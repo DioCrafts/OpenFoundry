@@ -3,18 +3,20 @@ use axum::{
     extract::{Path, State},
 };
 use chrono::Utc;
+use serde_json::json;
 use sqlx::{query_as, types::Json as SqlJson};
 use uuid::Uuid;
 
 use crate::{
     AppState,
-    domain::rag,
+    domain::{llm, rag},
     models::knowledge_base::{
         CreateKnowledgeBaseRequest, CreateKnowledgeDocumentRequest, KnowledgeBase,
         KnowledgeBaseRow, KnowledgeDocument, KnowledgeDocumentRow, ListKnowledgeBasesResponse,
         ListKnowledgeDocumentsResponse, SearchKnowledgeBaseRequest, SearchKnowledgeBaseResponse,
         UpdateKnowledgeBaseRequest,
     },
+    models::provider::{LlmProvider, ProviderRow},
 };
 
 use super::{ServiceResult, bad_request, db_error, not_found};
@@ -44,6 +46,60 @@ async fn load_knowledge_base_row(
     .bind(knowledge_base_id)
     .fetch_optional(db)
     .await
+}
+
+async fn load_provider_row(
+    db: &sqlx::PgPool,
+    provider_id: Uuid,
+) -> Result<Option<ProviderRow>, sqlx::Error> {
+    query_as::<_, ProviderRow>(
+        r#"
+		SELECT
+			id,
+			name,
+			provider_type,
+			model_name,
+			endpoint_url,
+			api_mode,
+			credential_reference,
+			enabled,
+			load_balance_weight,
+			max_output_tokens,
+			cost_tier,
+			tags,
+			route_rules,
+			health_state,
+			created_at,
+			updated_at
+		FROM ai_providers
+		WHERE id = $1
+		"#,
+    )
+    .bind(provider_id)
+    .fetch_optional(db)
+    .await
+}
+
+async fn resolve_embedding_provider(
+    state: &AppState,
+    provider_reference: &str,
+) -> Result<Option<LlmProvider>, (axum::http::StatusCode, Json<super::ErrorResponse>)> {
+    let Some(provider_id) = provider_reference
+        .strip_prefix("provider:")
+        .and_then(|value| Uuid::parse_str(value).ok())
+    else {
+        return Ok(None);
+    };
+
+    let Some(provider) = load_provider_row(&state.db, provider_id)
+        .await
+        .map_err(|cause| db_error(&cause))?
+        .map(Into::into)
+    else {
+        return Err(not_found("embedding provider not found"));
+    };
+
+    Ok(Some(provider))
 }
 
 pub async fn list_knowledge_bases(
@@ -240,11 +296,36 @@ pub async fn create_document(
 
     let document_id = Uuid::now_v7();
     let knowledge_base: KnowledgeBase = knowledge_base_row.into();
-    let chunks = rag::indexer::index_document(
-        document_id,
-        &body.content,
-        &knowledge_base.chunking_strategy,
-    );
+    let provider =
+        resolve_embedding_provider(&state, &knowledge_base.embedding_provider).await?;
+    let chunks = if let Some(provider) = provider.as_ref() {
+        let max_chars = if knowledge_base.chunking_strategy == "fine" {
+            320
+        } else {
+            520
+        };
+        let mut chunks = Vec::new();
+        for (position, text) in rag::chunker::chunk_text(&body.content, max_chars) {
+            let embedding = llm::runtime::embed_text(&state.http_client, provider, &text)
+                .await
+                .map_err(bad_request)?;
+
+            chunks.push(crate::models::knowledge_base::KnowledgeChunk {
+                id: format!("{}-{position}", document_id),
+                position,
+                text: text.clone(),
+                token_count: text.split_whitespace().count() as i32,
+                embedding,
+                metadata: json!({
+                    "strategy": knowledge_base.chunking_strategy,
+                    "embedding_provider": knowledge_base.embedding_provider,
+                }),
+            });
+        }
+        chunks
+    } else {
+        rag::indexer::index_document(document_id, &body.content, &knowledge_base.chunking_strategy)
+    };
 
     let row = query_as::<_, KnowledgeDocumentRow>(
         r#"
@@ -311,6 +392,11 @@ pub async fn search_knowledge_base(
         .await
         .map_err(|cause| db_error(&cause))?
         .ok_or_else(|| not_found("knowledge base not found"))?;
+    let knowledge_base = load_knowledge_base_row(&state.db, knowledge_base_id)
+        .await
+        .map_err(|cause| db_error(&cause))?
+        .ok_or_else(|| not_found("knowledge base not found"))?;
+    let provider = resolve_embedding_provider(&state, &knowledge_base.embedding_provider).await?;
 
     let rows = query_as::<_, KnowledgeDocumentRow>(
         r#"
@@ -336,8 +422,15 @@ pub async fn search_knowledge_base(
     .await
     .map_err(|cause| db_error(&cause))?;
 
+    let query_embedding = match provider.as_ref() {
+        Some(provider) => llm::runtime::embed_text(&state.http_client, provider, &body.query)
+            .await
+            .map_err(bad_request)?,
+        None => rag::embedder::embed_text(&body.query),
+    };
     let documents = rows.into_iter().map(Into::into).collect::<Vec<_>>();
-    let results = rag::retriever::search(&body.query, &documents, body.top_k, body.min_score);
+    let results =
+        rag::retriever::search_with_embedding(&query_embedding, &documents, body.top_k, body.min_score);
 
     Ok(Json(SearchKnowledgeBaseResponse {
         knowledge_base_id,

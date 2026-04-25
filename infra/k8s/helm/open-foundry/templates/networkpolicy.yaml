@@ -1,0 +1,25 @@
+{{- range $serviceName, $service := .Values.services }}
+{{- if and $service.enabled $.Values.global.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "open-foundry.fullname" (dict "root" $ "serviceName" $serviceName) }}
+  namespace: {{ include "open-foundry.namespace" (dict "root" $) }}
+  labels:
+{{ include "open-foundry.commonLabels" (dict "root" $ "serviceName" $serviceName) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+{{ include "open-foundry.selectorLabels" (dict "root" $ "serviceName" $serviceName) | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: {{ $service.port }}
+  egress:
+    - {}
+---
+{{- end }}
+{{- end }}

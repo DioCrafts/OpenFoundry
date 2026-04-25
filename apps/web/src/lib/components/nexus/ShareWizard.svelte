@@ -1,10 +1,12 @@
 <script lang="ts">
-	import type { PeerOrganization, ShareDetail, SharingContract } from '$lib/api/nexus';
+	import type { NexusSpace, PeerOrganization, ShareDetail, SharingContract } from '$lib/api/nexus';
 
 	interface ShareDraft {
 		contract_id: string;
 		provider_peer_id: string;
 		consumer_peer_id: string;
+		provider_space_id: string;
+		consumer_space_id: string;
 		dataset_name: string;
 		selector_text: string;
 		provider_schema_text: string;
@@ -16,6 +18,7 @@
 	export let shares: ShareDetail[] = [];
 	export let peers: PeerOrganization[] = [];
 	export let contracts: SharingContract[] = [];
+	export let spaces: NexusSpace[] = [];
 	export let draft: ShareDraft;
 	export let busy = false;
 	export let onDraftChange: (patch: Partial<ShareDraft>) => void;
@@ -70,6 +73,24 @@
 						{/each}
 					</select>
 				</label>
+				<label class="block text-sm">
+					<span class="mb-2 block font-medium text-stone-100">Provider space</span>
+					<select class="w-full rounded-2xl border border-stone-700 bg-stone-900 px-4 py-3 outline-none transition focus:border-fuchsia-400" value={draft.provider_space_id} onchange={(event) => onDraftChange({ provider_space_id: (event.currentTarget as HTMLSelectElement).value })}>
+						<option value="">No space</option>
+						{#each spaces as space}
+							<option value={space.id}>{space.display_name}</option>
+						{/each}
+					</select>
+				</label>
+				<label class="block text-sm">
+					<span class="mb-2 block font-medium text-stone-100">Consumer space</span>
+					<select class="w-full rounded-2xl border border-stone-700 bg-stone-900 px-4 py-3 outline-none transition focus:border-fuchsia-400" value={draft.consumer_space_id} onchange={(event) => onDraftChange({ consumer_space_id: (event.currentTarget as HTMLSelectElement).value })}>
+						<option value="">No space</option>
+						{#each spaces as space}
+							<option value={space.id}>{space.display_name}</option>
+						{/each}
+					</select>
+				</label>
 				<label class="block text-sm md:col-span-2">
 					<span class="mb-2 block font-medium text-stone-100">Dataset name</span>
 					<input class="w-full rounded-2xl border border-stone-700 bg-stone-900 px-4 py-3 outline-none transition focus:border-fuchsia-400" value={draft.dataset_name} oninput={(event) => onDraftChange({ dataset_name: inputValue(event) })} />
@@ -108,6 +129,7 @@
 						<span class={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${item.compatibility.compatible ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{item.compatibility.compatible ? 'Compatible' : 'Review'}</span>
 					</div>
 					<p class="mt-3 text-xs text-stone-500">Selector {JSON.stringify(item.share.selector)}</p>
+					<p class="mt-2 text-xs text-stone-500">Spaces {item.share.provider_space_id ?? 'none'} → {item.share.consumer_space_id ?? 'none'}</p>
 				</div>
 			{/each}
 		</div>

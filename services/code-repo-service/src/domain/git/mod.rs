@@ -1,7 +1,8 @@
-mod diff;
 mod files;
-mod history;
+mod runtime;
 
-pub use diff::repository_diff;
-pub use files::{default_repository_files, file_search_results};
-pub use history::{branch_metrics, commit_files_changed, synthetic_signature};
+pub use files::file_search_results;
+pub use runtime::{
+    GitBranchMetadata, apply_commit, create_branch, ensure_storage_root, initialize_repository,
+    list_branches, list_commits, list_files, repository_diff, run_ci_for_repository,
+};

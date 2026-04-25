@@ -90,6 +90,11 @@ async fn main() {
             get(handlers::preview::preview_app),
         )
         .route(
+            "/api/v1/apps/{id}/slate-package",
+            get(handlers::slate::export_slate_package)
+                .post(handlers::slate::import_slate_package),
+        )
+        .route(
             "/api/v1/apps/{id}/pages",
             post(handlers::pages::create_page),
         )

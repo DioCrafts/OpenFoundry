@@ -57,10 +57,15 @@ function createAuthStore() {
     }
   }
 
-  async function handleSsoCallback(code: string, state: string): Promise<AuthFlowResult> {
+  async function handleSsoCallback(payload: {
+    code?: string;
+    state?: string;
+    saml_response?: string;
+    relay_state?: string;
+  }): Promise<AuthFlowResult> {
     loading.set(true);
     try {
-      const resp = await completeSsoLogin({ code, state });
+      const resp = await completeSsoLogin(payload);
       return handleLoginResponse(resp);
     } finally {
       loading.set(false);

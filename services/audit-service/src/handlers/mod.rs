@@ -25,6 +25,15 @@ pub fn bad_request(message: impl Into<String>) -> (StatusCode, Json<ErrorRespons
     )
 }
 
+pub fn forbidden(message: impl Into<String>) -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::FORBIDDEN,
+        Json(ErrorResponse {
+            error: message.into(),
+        }),
+    )
+}
+
 pub fn not_found(message: impl Into<String>) -> (StatusCode, Json<ErrorResponse>) {
     (
         StatusCode::NOT_FOUND,

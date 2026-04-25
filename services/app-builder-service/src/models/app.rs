@@ -8,6 +8,137 @@ use crate::models::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConsumerModeSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub allow_guest_access: bool,
+    #[serde(default)]
+    pub portal_title: Option<String>,
+    #[serde(default)]
+    pub portal_subtitle: Option<String>,
+    #[serde(default)]
+    pub primary_cta_label: Option<String>,
+    #[serde(default)]
+    pub primary_cta_url: Option<String>,
+}
+
+impl Default for ConsumerModeSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            allow_guest_access: false,
+            portal_title: None,
+            portal_subtitle: None,
+            primary_cta_label: None,
+            primary_cta_url: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SlateSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_slate_framework")]
+    pub framework: String,
+    #[serde(default = "default_slate_package_name")]
+    pub package_name: String,
+    #[serde(default = "default_slate_entry_file")]
+    pub entry_file: String,
+    #[serde(default = "default_slate_sdk_import")]
+    pub sdk_import: String,
+    #[serde(default)]
+    pub workspace: SlateWorkspaceSettings,
+    #[serde(default)]
+    pub quiver_embed: QuiverEmbedSettings,
+}
+
+impl Default for SlateSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            framework: default_slate_framework(),
+            package_name: default_slate_package_name(),
+            entry_file: default_slate_entry_file(),
+            sdk_import: default_slate_sdk_import(),
+            workspace: SlateWorkspaceSettings::default(),
+            quiver_embed: QuiverEmbedSettings::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SlateWorkspaceSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub repository_id: Option<String>,
+    #[serde(default = "default_workspace_layout")]
+    pub layout: String,
+    #[serde(default = "default_workspace_runtime")]
+    pub runtime: String,
+    #[serde(default = "default_workspace_dev_command")]
+    pub dev_command: String,
+    #[serde(default = "default_workspace_preview_command")]
+    pub preview_command: String,
+    #[serde(default)]
+    pub files: Vec<SlatePackageFile>,
+}
+
+impl Default for SlateWorkspaceSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            repository_id: None,
+            layout: default_workspace_layout(),
+            runtime: default_workspace_runtime(),
+            dev_command: default_workspace_dev_command(),
+            preview_command: default_workspace_preview_command(),
+            files: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct QuiverEmbedSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub primary_type_id: Option<String>,
+    #[serde(default)]
+    pub secondary_type_id: Option<String>,
+    #[serde(default)]
+    pub join_field: Option<String>,
+    #[serde(default)]
+    pub secondary_join_field: Option<String>,
+    #[serde(default)]
+    pub date_field: Option<String>,
+    #[serde(default)]
+    pub metric_field: Option<String>,
+    #[serde(default)]
+    pub group_field: Option<String>,
+    #[serde(default)]
+    pub selected_group: Option<String>,
+}
+
+impl Default for QuiverEmbedSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            primary_type_id: None,
+            secondary_type_id: None,
+            join_field: None,
+            secondary_join_field: None,
+            date_field: None,
+            metric_field: None,
+            group_field: None,
+            selected_group: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppSettings {
     #[serde(default)]
     pub home_page_id: Option<String>,
@@ -19,6 +150,12 @@ pub struct AppSettings {
     pub show_branding: bool,
     #[serde(default)]
     pub custom_css: Option<String>,
+    #[serde(default = "default_builder_experience")]
+    pub builder_experience: String,
+    #[serde(default)]
+    pub consumer_mode: ConsumerModeSettings,
+    #[serde(default)]
+    pub slate: SlateSettings,
 }
 
 impl Default for AppSettings {
@@ -29,6 +166,9 @@ impl Default for AppSettings {
             max_width: default_max_width(),
             show_branding: default_show_branding(),
             custom_css: None,
+            builder_experience: default_builder_experience(),
+            consumer_mode: ConsumerModeSettings::default(),
+            slate: SlateSettings::default(),
         }
     }
 }
@@ -196,6 +336,54 @@ pub struct AppEmbedInfo {
     pub iframe_html: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SlatePackageFile {
+    pub path: String,
+    pub language: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlatePackageResponse {
+    pub app_id: Uuid,
+    pub app_slug: String,
+    pub framework: String,
+    pub package_name: String,
+    pub entry_file: String,
+    pub sdk_import: String,
+    pub files: Vec<SlatePackageFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportSlatePackageRequest {
+    #[serde(default)]
+    pub package_name: Option<String>,
+    #[serde(default)]
+    pub entry_file: Option<String>,
+    #[serde(default)]
+    pub sdk_import: Option<String>,
+    #[serde(default)]
+    pub framework: Option<String>,
+    #[serde(default)]
+    pub repository_id: Option<String>,
+    #[serde(default)]
+    pub layout: Option<String>,
+    #[serde(default)]
+    pub runtime: Option<String>,
+    #[serde(default)]
+    pub dev_command: Option<String>,
+    #[serde(default)]
+    pub preview_command: Option<String>,
+    #[serde(default)]
+    pub files: Vec<SlatePackageFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlateRoundTripResponse {
+    pub app: App,
+    pub slate_package: SlatePackageResponse,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppPreviewResponse {
     pub app: App,
@@ -287,10 +475,46 @@ fn default_navigation_style() -> String {
     "tabs".to_string()
 }
 
+fn default_builder_experience() -> String {
+    "workshop".to_string()
+}
+
 fn default_max_width() -> String {
     "1280px".to_string()
 }
 
 fn default_show_branding() -> bool {
     true
+}
+
+fn default_slate_framework() -> String {
+    "react".to_string()
+}
+
+fn default_slate_package_name() -> String {
+    "@open-foundry/slate-app".to_string()
+}
+
+fn default_slate_entry_file() -> String {
+    "src/App.tsx".to_string()
+}
+
+fn default_slate_sdk_import() -> String {
+    "@open-foundry/sdk/react".to_string()
+}
+
+fn default_workspace_layout() -> String {
+    "split".to_string()
+}
+
+fn default_workspace_runtime() -> String {
+    "typescript-react".to_string()
+}
+
+fn default_workspace_dev_command() -> String {
+    "pnpm dev".to_string()
+}
+
+fn default_workspace_preview_command() -> String {
+    "pnpm build".to_string()
 }

@@ -1,6 +1,7 @@
 use axum::{
     Json,
     extract::{Path, State},
+    http::HeaderMap,
 };
 use chrono::Utc;
 
@@ -28,6 +29,7 @@ pub async fn get_catalog() -> ServiceResult<ReportCatalog> {
 pub async fn generate_report(
     Path(id): Path<uuid::Uuid>,
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> ServiceResult<ReportExecution> {
     let report_row = load_report_row(&state.db, id)
         .await
@@ -37,7 +39,7 @@ pub async fn generate_report(
         .map_err(|cause| internal_error(cause.to_string()))?;
     let generated_at = Utc::now();
     let execution_id = uuid::Uuid::now_v7();
-    let snapshot = data_fetcher::build_snapshot(&report);
+    let snapshot = data_fetcher::build_snapshot(&state, &report, &headers).await;
     let generated = generators::generate(&report, &snapshot, execution_id, generated_at);
     let distributions = distribution::simulate_distribution(&report, generated_at);
     let preview = serde_json::to_value(&generated.preview)

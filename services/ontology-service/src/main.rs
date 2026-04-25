@@ -6,16 +6,20 @@ mod models;
 use auth_middleware::jwt::JwtConfig;
 use axum::{
     Router, middleware,
-    routing::{delete, get, post, put},
+    routing::{delete, get, patch, post, put},
 };
+use core_models::{health::HealthStatus, observability};
 use sqlx::postgres::PgPoolOptions;
-use tracing_subscriber::EnvFilter;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: sqlx::PgPool,
     pub jwt_config: JwtConfig,
     pub http_client: reqwest::Client,
+    pub audit_service_url: String,
+    pub ontology_service_url: String,
+    pub ai_service_url: String,
+    pub node_runtime_command: String,
 }
 
 impl axum::extract::FromRef<AppState> for JwtConfig {
@@ -26,9 +30,7 @@ impl axum::extract::FromRef<AppState> for JwtConfig {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    observability::init_tracing("ontology-service");
 
     let cfg = config::AppConfig::from_env().expect("failed to load config");
 
@@ -53,9 +55,16 @@ async fn main() {
         db: pool,
         jwt_config: jwt_config.clone(),
         http_client,
+        audit_service_url: cfg.audit_service_url.clone(),
+        ontology_service_url: cfg.ontology_service_url.clone(),
+        ai_service_url: cfg.ai_service_url.clone(),
+        node_runtime_command: cfg.node_runtime_command.clone(),
     };
 
-    let public = Router::new().route("/health", get(|| async { "ok" }));
+    let public = Router::new().route(
+        "/health",
+        get(|| async { axum::Json(HealthStatus::ok("ontology-service")) }),
+    );
 
     let protected = Router::new()
         // Object types
@@ -64,6 +73,89 @@ async fn main() {
         .route("/api/v1/ontology/types/{id}", get(handlers::types::get_object_type))
         .route("/api/v1/ontology/types/{id}", put(handlers::types::update_object_type))
         .route("/api/v1/ontology/types/{id}", delete(handlers::types::delete_object_type))
+        .route(
+            "/api/v1/ontology/types/{type_id}/properties",
+            get(handlers::properties::list_properties).post(handlers::properties::create_property),
+        )
+        .route(
+            "/api/v1/ontology/types/{type_id}/properties/{property_id}",
+            axum::routing::patch(handlers::properties::update_property)
+                .delete(handlers::properties::delete_property),
+        )
+        .route(
+            "/api/v1/ontology/interfaces",
+            get(handlers::interfaces::list_interfaces).post(handlers::interfaces::create_interface),
+        )
+        .route(
+            "/api/v1/ontology/interfaces/{id}",
+            get(handlers::interfaces::get_interface)
+                .patch(handlers::interfaces::update_interface)
+                .delete(handlers::interfaces::delete_interface),
+        )
+        .route(
+            "/api/v1/ontology/interfaces/{id}/properties",
+            get(handlers::interfaces::list_interface_properties)
+                .post(handlers::interfaces::create_interface_property),
+        )
+        .route(
+            "/api/v1/ontology/interfaces/{id}/properties/{property_id}",
+            axum::routing::patch(handlers::interfaces::update_interface_property)
+                .delete(handlers::interfaces::delete_interface_property),
+        )
+        .route(
+            "/api/v1/ontology/functions",
+            get(handlers::functions::list_function_packages)
+                .post(handlers::functions::create_function_package),
+        )
+        .route(
+            "/api/v1/ontology/functions/{id}",
+            get(handlers::functions::get_function_package)
+                .patch(handlers::functions::update_function_package)
+                .delete(handlers::functions::delete_function_package),
+        )
+        .route(
+            "/api/v1/ontology/functions/{id}/validate",
+            post(handlers::functions::validate_function_package),
+        )
+        .route(
+            "/api/v1/ontology/functions/{id}/simulate",
+            post(handlers::functions::simulate_function_package),
+        )
+        .route(
+            "/api/v1/ontology/rules",
+            get(handlers::rules::list_rules).post(handlers::rules::create_rule),
+        )
+        .route(
+            "/api/v1/ontology/rules/insights",
+            get(handlers::rules::get_machinery_insights),
+        )
+        .route(
+            "/api/v1/ontology/rules/{id}",
+            get(handlers::rules::get_rule)
+                .patch(handlers::rules::update_rule)
+                .delete(handlers::rules::delete_rule),
+        )
+        .route(
+            "/api/v1/ontology/rules/{id}/simulate",
+            post(handlers::rules::simulate_rule),
+        )
+        .route(
+            "/api/v1/ontology/rules/{id}/apply",
+            post(handlers::rules::apply_rule),
+        )
+        .route(
+            "/api/v1/ontology/types/{type_id}/interfaces",
+            get(handlers::interfaces::list_type_interfaces),
+        )
+        .route(
+            "/api/v1/ontology/types/{type_id}/rules",
+            get(handlers::rules::list_rules_for_object_type),
+        )
+        .route(
+            "/api/v1/ontology/types/{type_id}/interfaces/{interface_id}",
+            post(handlers::interfaces::attach_interface_to_type)
+                .delete(handlers::interfaces::detach_interface_from_type),
+        )
         // Action types
         .route("/api/v1/ontology/actions", post(handlers::actions::create_action_type))
         .route("/api/v1/ontology/actions", get(handlers::actions::list_action_types))
@@ -72,11 +164,41 @@ async fn main() {
         .route("/api/v1/ontology/actions/{id}", delete(handlers::actions::delete_action_type))
         .route("/api/v1/ontology/actions/{id}/validate", post(handlers::actions::validate_action))
         .route("/api/v1/ontology/actions/{id}/execute", post(handlers::actions::execute_action))
+        .route(
+            "/api/v1/ontology/actions/{id}/execute-batch",
+            post(handlers::actions::execute_action_batch),
+        )
         // Object instances
         .route("/api/v1/ontology/types/{type_id}/objects", post(handlers::objects::create_object))
         .route("/api/v1/ontology/types/{type_id}/objects", get(handlers::objects::list_objects))
+        .route(
+            "/api/v1/ontology/types/{type_id}/objects/query",
+            post(handlers::objects::query_objects),
+        )
         .route("/api/v1/ontology/types/{type_id}/objects/{obj_id}", get(handlers::objects::get_object))
+        .route(
+            "/api/v1/ontology/types/{type_id}/objects/{obj_id}",
+            patch(handlers::objects::update_object),
+        )
         .route("/api/v1/ontology/types/{type_id}/objects/{obj_id}", delete(handlers::objects::delete_object))
+        .route(
+            "/api/v1/ontology/types/{type_id}/objects/{obj_id}/neighbors",
+            get(handlers::objects::list_neighbors),
+        )
+        .route(
+            "/api/v1/ontology/types/{type_id}/objects/{obj_id}/view",
+            get(handlers::objects::get_object_view),
+        )
+        .route(
+            "/api/v1/ontology/types/{type_id}/objects/{obj_id}/simulate",
+            post(handlers::objects::simulate_object),
+        )
+        .route(
+            "/api/v1/ontology/objects/{obj_id}/rule-runs",
+            get(handlers::rules::list_object_rule_runs),
+        )
+        .route("/api/v1/ontology/search", post(handlers::search::search_ontology))
+        .route("/api/v1/ontology/graph", get(handlers::search::get_graph))
 
         // Link types
         .route("/api/v1/ontology/links", post(handlers::links::create_link_type))

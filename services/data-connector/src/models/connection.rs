@@ -39,4 +39,6 @@ pub const VALID_TYPES: &[&str] = &[
     "s3",
     "rest_api",
     "salesforce",
+    "sap",
+    "iot",
 ];

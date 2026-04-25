@@ -4,7 +4,9 @@ apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
   name: {{ include "open-foundry.fullname" (dict "root" $ "serviceName" $serviceName) }}
-  namespace: {{ $.Values.namespace }}
+  namespace: {{ include "open-foundry.namespace" (dict "root" $) }}
+  labels:
+{{ include "open-foundry.commonLabels" (dict "root" $ "serviceName" $serviceName) | nindent 4 }}
 spec:
   scaleTargetRef:
     name: {{ include "open-foundry.fullname" (dict "root" $ "serviceName" $serviceName) }}

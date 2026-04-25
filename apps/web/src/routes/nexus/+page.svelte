@@ -6,21 +6,25 @@
 	import ShareWizard from '$components/nexus/ShareWizard.svelte';
 	import SharedDataBrowser from '$components/nexus/SharedDataBrowser.svelte';
 	import SharingDashboard from '$components/nexus/SharingDashboard.svelte';
+	import SpaceManager from '$components/nexus/SpaceManager.svelte';
 	import {
 		authenticatePeer,
 		createContract,
 		createPeer,
 		createShare,
+		createSpace,
 		getAuditBridge,
 		getOverview,
 		listContracts,
 		listPeers,
 		listReplicationPlans,
 		listShares,
+		listSpaces,
 		runFederatedQuery,
 		updateContract,
 		type AuditBridgeSummary,
 		type FederatedQueryResult,
+		type NexusSpace,
 		type NexusOverview,
 		type PeerOrganization,
 		type ReplicationPlan,
@@ -32,12 +36,26 @@
 	type PeerDraft = {
 		slug: string;
 		display_name: string;
+		organization_type: string;
 		region: string;
 		endpoint_url: string;
 		auth_mode: string;
 		trust_level: string;
 		public_key_fingerprint: string;
 		shared_scopes_text: string;
+		admin_contacts_text: string;
+	};
+
+	type SpaceDraft = {
+		slug: string;
+		display_name: string;
+		description: string;
+		space_kind: string;
+		owner_peer_id: string;
+		region: string;
+		member_peer_ids: string[];
+		governance_tags_text: string;
+		status: string;
 	};
 
 	type ContractDraft = {
@@ -62,6 +80,8 @@
 		contract_id: string;
 		provider_peer_id: string;
 		consumer_peer_id: string;
+		provider_space_id: string;
+		consumer_space_id: string;
 		dataset_name: string;
 		selector_text: string;
 		provider_schema_text: string;
@@ -79,6 +99,7 @@
 
 	let overview = $state<NexusOverview | null>(null);
 	let peers = $state<PeerOrganization[]>([]);
+	let spaces = $state<NexusSpace[]>([]);
 	let contracts = $state<SharingContract[]>([]);
 	let shares = $state<ShareDetail[]>([]);
 	let replicationPlans = $state<ReplicationPlan[]>([]);
@@ -90,6 +111,7 @@
 	let busyAction = $state('');
 	let uiError = $state('');
 	let peerDraft = $state<PeerDraft>(createEmptyPeerDraft());
+	let spaceDraft = $state<SpaceDraft>(createEmptySpaceDraft());
 	let contractDraft = $state<ContractDraft>(createEmptyContractDraft());
 	let shareDraft = $state<ShareDraft>(createEmptyShareDraft());
 	let queryDraft = $state<QueryDraft>(createEmptyQueryDraft());
@@ -105,12 +127,28 @@
 		return {
 			slug: 'partner-new',
 			display_name: 'New Partner Org',
+			organization_type: 'partner',
 			region: 'eu-central-1',
 			endpoint_url: 'https://partner.example.com/nexus',
 			auth_mode: 'mtls+jwt',
 			trust_level: 'partner',
 			public_key_fingerprint: 'SHA256:NEW:PARTNER:FPR',
 			shared_scopes_text: 'catalog, audit',
+			admin_contacts_text: 'ops@example.com, security@example.com',
+		};
+	}
+
+	function createEmptySpaceDraft(): SpaceDraft {
+		return {
+			slug: 'shared-space-new',
+			display_name: 'Shared Partner Space',
+			description: 'Shared data and operating context for cross-org delivery.',
+			space_kind: 'shared',
+			owner_peer_id: '',
+			region: 'eu-west-1',
+			member_peer_ids: [],
+			governance_tags_text: 'partners, regulated',
+			status: 'active',
 		};
 	}
 
@@ -144,6 +182,8 @@
 			contract_id: '',
 			provider_peer_id: '',
 			consumer_peer_id: '',
+			provider_space_id: '',
+			consumer_space_id: '',
 			dataset_name: 'shared_dataset_preview',
 			selector_text: JSON.stringify({ partition: '2026-Q2' }),
 			provider_schema_text: JSON.stringify({ id: 'string', metric: 'number', region: 'string' }, null, 2),
@@ -203,6 +243,10 @@
 		peerDraft = { ...peerDraft, ...patch };
 	}
 
+	function updateSpaceDraft(patch: Partial<SpaceDraft>) {
+		spaceDraft = { ...spaceDraft, ...patch };
+	}
+
 	function updateContractDraft(patch: Partial<ContractDraft>) {
 		contractDraft = { ...contractDraft, ...patch };
 	}
@@ -233,9 +277,10 @@
 		loading = true;
 		uiError = '';
 		try {
-			const [overviewResponse, peersResponse, contractsResponse, sharesResponse, replicationResponse, auditBridgeResponse] = await Promise.all([
+			const [overviewResponse, peersResponse, spacesResponse, contractsResponse, sharesResponse, replicationResponse, auditBridgeResponse] = await Promise.all([
 				getOverview(),
 				listPeers(),
+				listSpaces(),
 				listContracts(),
 				listShares(),
 				listReplicationPlans(),
@@ -244,6 +289,7 @@
 
 			overview = overviewResponse;
 			peers = peersResponse.items;
+			spaces = spacesResponse.items;
 			contracts = contractsResponse.items;
 			shares = sharesResponse.items;
 			replicationPlans = replicationResponse.items;
@@ -274,8 +320,17 @@
 			if (!shareDraft.consumer_peer_id && peersResponse.items[1]) {
 				shareDraft = { ...shareDraft, consumer_peer_id: peersResponse.items[1].id };
 			}
+			if (!shareDraft.provider_space_id && spacesResponse.items[0]) {
+				shareDraft = { ...shareDraft, provider_space_id: spacesResponse.items[0].id };
+			}
+			if (!shareDraft.consumer_space_id && spacesResponse.items[1]) {
+				shareDraft = { ...shareDraft, consumer_space_id: spacesResponse.items[1].id };
+			}
 			if (!contractDraft.peer_id && peersResponse.items[0]) {
 				contractDraft = { ...contractDraft, peer_id: peersResponse.items[0].id };
+			}
+			if (!spaceDraft.owner_peer_id && peersResponse.items[0]) {
+				spaceDraft = { ...spaceDraft, owner_peer_id: peersResponse.items[0].id };
 			}
 		} catch (error) {
 			uiError = error instanceof Error ? error.message : 'Unable to load nexus surfaces';
@@ -291,18 +346,45 @@
 			const peer = await createPeer({
 				slug: peerDraft.slug,
 				display_name: peerDraft.display_name,
+				organization_type: peerDraft.organization_type,
 				region: peerDraft.region,
 				endpoint_url: peerDraft.endpoint_url,
 				auth_mode: peerDraft.auth_mode,
 				trust_level: peerDraft.trust_level,
 				public_key_fingerprint: peerDraft.public_key_fingerprint,
 				shared_scopes: parseCsv(peerDraft.shared_scopes_text),
+				admin_contacts: parseCsv(peerDraft.admin_contacts_text),
 			});
 			peerDraft = createEmptyPeerDraft();
 			await refreshAll();
 			notifications.success(`Registered ${peer.display_name}`);
 		} catch (error) {
 			uiError = error instanceof Error ? error.message : 'Unable to register peer';
+			notifications.error(uiError);
+		} finally {
+			busyAction = '';
+		}
+	}
+
+	async function createSpaceAction() {
+		busyAction = 'create-space';
+		try {
+			const space = await createSpace({
+				slug: spaceDraft.slug,
+				display_name: spaceDraft.display_name,
+				description: spaceDraft.description,
+				space_kind: spaceDraft.space_kind,
+				owner_peer_id: spaceDraft.owner_peer_id || null,
+				region: spaceDraft.region,
+				member_peer_ids: spaceDraft.member_peer_ids,
+				governance_tags: parseCsv(spaceDraft.governance_tags_text),
+				status: spaceDraft.status,
+			});
+			spaceDraft = createEmptySpaceDraft();
+			await refreshAll();
+			notifications.success(`Created space ${space.display_name}`);
+		} catch (error) {
+			uiError = error instanceof Error ? error.message : 'Unable to create space';
 			notifications.error(uiError);
 		} finally {
 			busyAction = '';
@@ -363,6 +445,8 @@
 				contract_id: shareDraft.contract_id,
 				provider_peer_id: shareDraft.provider_peer_id,
 				consumer_peer_id: shareDraft.consumer_peer_id,
+				provider_space_id: shareDraft.provider_space_id || null,
+				consumer_space_id: shareDraft.consumer_space_id || null,
 				dataset_name: shareDraft.dataset_name,
 				selector: parseJson<Record<string, unknown>>(shareDraft.selector_text),
 				provider_schema: parseJson<Record<string, unknown>>(shareDraft.provider_schema_text),
@@ -431,8 +515,10 @@
 		}} />
 	</div>
 
+	<SpaceManager {spaces} {peers} draft={spaceDraft} {busy} onDraftChange={updateSpaceDraft} onCreate={createSpaceAction} />
+
 	<div class="grid gap-6 xl:grid-cols-[0.98fr_1.02fr]">
-		<ShareWizard {shares} {peers} {contracts} draft={shareDraft} {busy} onDraftChange={updateShareDraft} onCreate={createShareAction} />
+		<ShareWizard {shares} {peers} {spaces} {contracts} draft={shareDraft} {busy} onDraftChange={updateShareDraft} onCreate={createShareAction} />
 		<SharedDataBrowser {shares} {selectedShareId} {selectedShare} {replicationPlans} {auditBridge} queryDraft={queryDraft} {queryResult} {busy} onSelectShare={selectShare} onQueryDraftChange={updateQueryDraft} onRunQuery={runQueryAction} />
 	</div>
 </div>

@@ -6,12 +6,14 @@ mod models;
 use auth_middleware::jwt::JwtConfig;
 use axum::{Router, extract::FromRef, middleware, routing::get};
 use sqlx::postgres::PgPoolOptions;
+use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: sqlx::PgPool,
     pub jwt_config: JwtConfig,
+    pub repo_storage_root: PathBuf,
 }
 
 impl FromRef<AppState> for JwtConfig {
@@ -43,6 +45,7 @@ async fn main() {
     let state = AppState {
         db: pool,
         jwt_config: jwt_config.clone(),
+        repo_storage_root: cfg.repo_storage_root.clone(),
     };
 
     let public = Router::new().route("/health", get(|| async { "ok" }));

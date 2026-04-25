@@ -1,31 +1,60 @@
+global:
+  existingSecret: open-foundry-dev-env
+  podDisruptionBudget:
+    enabled: false
+  ingress:
+    enabled: false
+  networkPolicy:
+    enabled: false
+
 services:
-	gateway:
-		replicas: 1
-		autoscaling:
-			minReplicas: 1
-			maxReplicas: 2
-			keda:
-				enabled: false
-	query-service:
-		replicas: 1
-		env:
-			DISTRIBUTED_QUERY_WORKERS: "2"
-		autoscaling:
-			minReplicas: 1
-			maxReplicas: 3
-			keda:
-				enabled: false
-	pipeline-service:
-		replicas: 1
-		env:
-			DISTRIBUTED_PIPELINE_WORKERS: "2"
-		autoscaling:
-			minReplicas: 1
-			maxReplicas: 3
-			keda:
-				enabled: false
-	geospatial-service:
-		replicas: 1
-		autoscaling:
-			minReplicas: 1
-			maxReplicas: 2
+  gateway:
+    replicas: 1
+    autoscaling:
+      minReplicas: 1
+      maxReplicas: 2
+      keda:
+        enabled: false
+  auth-service:
+    replicas: 1
+    autoscaling:
+      minReplicas: 1
+      maxReplicas: 2
+  dataset-service:
+    replicas: 1
+    autoscaling:
+      minReplicas: 1
+      maxReplicas: 3
+  query-service:
+    replicas: 1
+    env:
+      DISTRIBUTED_QUERY_WORKERS: "2"
+    autoscaling:
+      minReplicas: 1
+      maxReplicas: 3
+      keda:
+        enabled: false
+  pipeline-service:
+    replicas: 1
+    env:
+      DISTRIBUTED_PIPELINE_WORKERS: "2"
+    autoscaling:
+      minReplicas: 1
+      maxReplicas: 3
+      keda:
+        enabled: false
+  report-service:
+    replicas: 1
+    autoscaling:
+      minReplicas: 1
+      maxReplicas: 2
+  nexus-service:
+    replicas: 1
+    autoscaling:
+      minReplicas: 1
+      maxReplicas: 2
+  geospatial-service:
+    replicas: 1
+    autoscaling:
+      minReplicas: 1
+      maxReplicas: 2

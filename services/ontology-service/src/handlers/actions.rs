@@ -1,6 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use auth_middleware::layer::AuthUser;
+use auth_middleware::{
+    claims::Claims,
+    jwt::{build_access_claims, encode_token},
+    layer::AuthUser,
+};
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -14,20 +18,30 @@ use uuid::Uuid;
 
 use crate::{
     AppState,
-    domain::type_system::{validate_property_type, validate_property_value},
+    domain::{
+        access::ensure_object_access,
+        function_runtime::{
+            ResolvedInlineFunction, execute_inline_function, resolve_inline_function_config,
+        },
+        schema::{load_effective_properties, validate_object_properties},
+        type_system::{validate_property_type, validate_property_value},
+    },
     models::{
         action_type::{
             ActionInputField, ActionOperationKind, ActionType, ActionTypeRow,
             CreateActionTypeRequest, ExecuteActionRequest, ExecuteActionResponse,
-            ListActionTypesQuery, ListActionTypesResponse, UpdateActionTypeRequest,
-            ValidateActionRequest, ValidateActionResponse,
+            ExecuteBatchActionRequest, ExecuteBatchActionResponse, ListActionTypesQuery,
+            ListActionTypesResponse, UpdateActionTypeRequest, ValidateActionRequest,
+            ValidateActionResponse,
         },
         link_type::LinkType,
-        property::Property,
     },
 };
 
-use super::{links::LinkInstance, objects::ObjectInstance};
+use super::{
+    links::LinkInstance,
+    objects::{ObjectInstance, load_object_instance},
+};
 
 #[derive(Debug, Deserialize)]
 struct UpdateObjectActionConfig {
@@ -88,14 +102,29 @@ enum ActionPlan {
     },
     InvokeFunction {
         target: Option<ObjectInstance>,
-        invocation: HttpInvocationConfig,
+        invocation: FunctionInvocation,
         payload: Value,
+        parameters: HashMap<String, Value>,
     },
     InvokeWebhook {
         target: Option<ObjectInstance>,
         invocation: HttpInvocationConfig,
         payload: Value,
     },
+}
+
+enum FunctionInvocation {
+    Http(HttpInvocationConfig),
+    Inline(ResolvedInlineFunction),
+}
+
+struct ExecutedAction {
+    target_object_id: Option<Uuid>,
+    deleted: bool,
+    preview: Value,
+    object: Option<Value>,
+    link: Option<Value>,
+    result: Option<Value>,
 }
 
 fn default_source_role() -> String {
@@ -122,6 +151,44 @@ fn db_error(message: impl Into<String>) -> Response {
         .into_response()
 }
 
+fn forbidden(message: impl Into<String>) -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(json!({ "error": message.into() })),
+    )
+        .into_response()
+}
+
+fn ensure_action_permission(claims: &Claims, action: &ActionType) -> Result<(), String> {
+    if let Some(permission_key) = action.permission_key.as_deref() {
+        if !claims.has_permission_key(permission_key) {
+            return Err(format!(
+                "forbidden: missing permission '{}'",
+                permission_key
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn ensure_confirmation_justification(
+    action: &ActionType,
+    justification: Option<&str>,
+) -> Result<(), String> {
+    if action.confirmation_required
+        && justification.map(str::trim).filter(|value| !value.is_empty()).is_none()
+    {
+        return Err("justification is required for confirmation_required actions".to_string());
+    }
+
+    Ok(())
+}
+
+fn all_forbidden(errors: &[String]) -> bool {
+    !errors.is_empty() && errors.iter().all(|error| error.starts_with("forbidden:"))
+}
+
 async fn load_action_row(
     state: &AppState,
     action_id: Uuid,
@@ -133,28 +200,6 @@ async fn load_action_row(
     )
     .bind(action_id)
     .fetch_optional(&state.db)
-    .await
-}
-
-async fn load_object_instance(
-    state: &AppState,
-    object_id: Uuid,
-) -> Result<Option<ObjectInstance>, sqlx::Error> {
-    sqlx::query_as::<_, ObjectInstance>("SELECT * FROM object_instances WHERE id = $1")
-        .bind(object_id)
-        .fetch_optional(&state.db)
-        .await
-}
-
-async fn load_object_properties(
-    state: &AppState,
-    object_type_id: Uuid,
-) -> Result<Vec<Property>, sqlx::Error> {
-    sqlx::query_as::<_, Property>(
-        r#"SELECT * FROM properties WHERE object_type_id = $1 ORDER BY created_at ASC"#,
-    )
-    .bind(object_type_id)
-    .fetch_all(&state.db)
     .await
 }
 
@@ -277,10 +322,10 @@ fn build_http_payload(
     json!({
         "action": {
             "id": action.id,
-            "name": action.name,
-            "display_name": action.display_name,
+            "name": &action.name,
+            "display_name": &action.display_name,
             "object_type_id": action.object_type_id,
-            "operation_kind": action.operation_kind,
+            "operation_kind": &action.operation_kind,
         },
         "target_object": target,
         "parameters": parameters,
@@ -337,32 +382,35 @@ async fn apply_object_patch(
     let patch = patch_value
         .as_object()
         .ok_or_else(|| "object_patch must be a JSON object".to_string())?;
-    let properties = load_object_properties(state, target.object_type_id)
+    let definitions = load_effective_properties(&state.db, target.object_type_id)
         .await
         .map_err(|e| format!("failed to load property definitions: {e}"))?;
-    let property_types = properties
-        .into_iter()
-        .map(|property| (property.name, property.property_type))
+    let property_types = definitions
+        .iter()
+        .map(|property| (property.name.as_str(), property.property_type.as_str()))
         .collect::<HashMap<_, _>>();
 
     let mut next_properties = target.properties.as_object().cloned().unwrap_or_default();
     for (property_name, value) in patch {
-        if let Some(property_type) = property_types.get(property_name.as_str()) {
-            validate_property_value(property_type, value)
-                .map_err(|e| format!("{}: {}", property_name, e))?;
-        }
+        let property_type = property_types
+            .get(property_name.as_str())
+            .ok_or_else(|| format!("unknown property '{property_name}' in object_patch"))?;
+        validate_property_value(property_type, value)
+            .map_err(|e| format!("{}: {}", property_name, e))?;
         next_properties.insert(property_name.clone(), value.clone());
     }
+
+    let normalized = validate_object_properties(&definitions, &Value::Object(next_properties))?;
 
     sqlx::query_as::<_, ObjectInstance>(
         r#"UPDATE object_instances
 		   SET properties = $2::jsonb,
 		       updated_at = NOW()
 		   WHERE id = $1
-		   RETURNING *"#,
+		   RETURNING id, object_type_id, properties, created_by, organization_id, marking, created_at, updated_at"#,
     )
     .bind(target.id)
-    .bind(Value::Object(next_properties))
+    .bind(normalized)
     .fetch_one(&state.db)
     .await
     .map_err(|e| format!("failed to apply object patch: {e}"))
@@ -370,14 +418,17 @@ async fn apply_object_patch(
 
 async fn create_link_from_instruction(
     state: &AppState,
+    claims: &Claims,
     actor_id: Uuid,
     target: &ObjectInstance,
     instruction: &FunctionLinkInstruction,
 ) -> Result<LinkInstance, String> {
-    let counterpart = load_object_instance(state, instruction.target_object_id)
+    let counterpart = load_object_instance(&state.db, instruction.target_object_id)
         .await
         .map_err(|e| format!("failed to load linked object: {e}"))?
         .ok_or_else(|| "linked object was not found".to_string())?;
+    ensure_object_access(claims, &counterpart)?;
+
     let link_type = sqlx::query_as::<_, LinkType>("SELECT * FROM link_types WHERE id = $1")
         .bind(instruction.link_type_id)
         .fetch_optional(&state.db)
@@ -436,10 +487,14 @@ fn derive_function_effects(
         return Ok((Some(response.clone()), None, None, false));
     };
 
-    let output = object.get("output").cloned();
-    let object_patch = object.get("object_patch").cloned();
+    let output = object.get("output").filter(|value| !value.is_null()).cloned();
+    let object_patch = object
+        .get("object_patch")
+        .filter(|value| !value.is_null())
+        .cloned();
     let link = object
         .get("link")
+        .filter(|value| !value.is_null())
         .cloned()
         .map(serde_json::from_value::<FunctionLinkInstruction>)
         .transpose()
@@ -487,6 +542,13 @@ async fn validate_action_definition(
         .iter()
         .map(|field| field.name.as_str())
         .collect::<HashSet<_>>();
+    let effective_properties = load_effective_properties(&state.db, object_type_id)
+        .await
+        .map_err(|e| format!("failed to load property definitions: {e}"))?;
+    let property_types = effective_properties
+        .iter()
+        .map(|property| (property.name.as_str(), property.property_type.as_str()))
+        .collect::<HashMap<_, _>>();
 
     match operation_kind {
         ActionOperationKind::UpdateObject => {
@@ -497,10 +559,21 @@ async fn validate_action_definition(
                     "update_object action requires property_mappings or static_patch".to_string(),
                 );
             }
+
             for mapping in cfg.property_mappings {
                 if mapping.property_name.trim().is_empty() {
                     return Err("property_name is required for update_object mappings".to_string());
                 }
+
+                let property_type = property_types
+                    .get(mapping.property_name.as_str())
+                    .ok_or_else(|| {
+                        format!(
+                            "unknown property '{}' in update_object action config",
+                            mapping.property_name
+                        )
+                    })?;
+
                 match (&mapping.input_name, &mapping.value) {
                     (Some(input_name), None) => {
                         if !input_names.contains(input_name.as_str()) {
@@ -509,7 +582,11 @@ async fn validate_action_definition(
                             ));
                         }
                     }
-                    (None, Some(_)) => {}
+                    (None, Some(value)) => {
+                        validate_property_value(property_type, value).map_err(|error| {
+                            format!("{}: {}", mapping.property_name, error)
+                        })?;
+                    }
                     _ => {
                         return Err(
                             "each update_object mapping needs either input_name or value"
@@ -518,9 +595,17 @@ async fn validate_action_definition(
                     }
                 }
             }
-            if let Some(static_patch) = config.get("static_patch") {
-                if !static_patch.is_object() {
-                    return Err("static_patch must be a JSON object".to_string());
+
+            if let Some(static_patch) = cfg.static_patch {
+                let values = static_patch
+                    .as_object()
+                    .ok_or_else(|| "static_patch must be a JSON object".to_string())?;
+                for (property_name, value) in values {
+                    let property_type = property_types
+                        .get(property_name.as_str())
+                        .ok_or_else(|| format!("unknown property '{property_name}' in static_patch"))?;
+                    validate_property_value(property_type, value)
+                        .map_err(|error| format!("{}: {}", property_name, error))?;
                 }
             }
         }
@@ -571,7 +656,12 @@ async fn validate_action_definition(
                 return Err("delete_object actions do not accept config".to_string());
             }
         }
-        ActionOperationKind::InvokeFunction | ActionOperationKind::InvokeWebhook => {
+        ActionOperationKind::InvokeFunction => {
+            if resolve_inline_function_config(state, config).await?.is_none() {
+                validate_http_invocation_config(config)?;
+            }
+        }
+        ActionOperationKind::InvokeWebhook => {
             validate_http_invocation_config(config)?;
         }
     }
@@ -579,8 +669,24 @@ async fn validate_action_definition(
     Ok(operation_kind)
 }
 
+async fn load_and_authorize_target(
+    state: &AppState,
+    claims: &Claims,
+    target_object_id: Uuid,
+    object_type_id: Uuid,
+) -> Result<ObjectInstance, Vec<String>> {
+    let target = load_object_instance(&state.db, target_object_id)
+        .await
+        .map_err(|e| vec![format!("failed to load target object: {e}")])?
+        .ok_or_else(|| vec!["target object was not found".to_string()])?;
+    ensure_object_type_match(&target, object_type_id).map_err(|e| vec![e])?;
+    ensure_object_access(claims, &target).map_err(|e| vec![e])?;
+    Ok(target)
+}
+
 async fn plan_action(
     state: &AppState,
+    claims: &Claims,
     action: &ActionType,
     request: &ValidateActionRequest,
 ) -> Result<ActionPlan, Vec<String>> {
@@ -595,24 +701,29 @@ async fn plan_action(
             let target_object_id = request.target_object_id.ok_or_else(|| {
                 vec!["target_object_id is required for update_object actions".to_string()]
             })?;
-            let target = load_object_instance(state, target_object_id)
-                .await
-                .map_err(|e| vec![format!("failed to load target object: {e}")])?
-                .ok_or_else(|| vec!["target object was not found".to_string()])?;
-            ensure_object_type_match(&target, action.object_type_id).map_err(|e| vec![e])?;
+            let target =
+                load_and_authorize_target(state, claims, target_object_id, action.object_type_id)
+                    .await?;
 
             let cfg: UpdateObjectActionConfig = serde_json::from_value(action.config.clone())
                 .map_err(|e| vec![format!("invalid action config: {e}")])?;
-            let properties = load_object_properties(state, action.object_type_id)
+            let property_types = load_effective_properties(&state.db, action.object_type_id)
                 .await
-                .map_err(|e| vec![format!("failed to load property definitions: {e}")])?;
-            let property_types = properties
+                .map_err(|e| vec![format!("failed to load property definitions: {e}")])?
                 .into_iter()
                 .map(|property| (property.name, property.property_type))
                 .collect::<HashMap<_, _>>();
 
             let mut patch = Map::new();
             for mapping in cfg.property_mappings {
+                let property_type = property_types
+                    .get(mapping.property_name.as_str())
+                    .ok_or_else(|| {
+                        vec![format!(
+                            "unknown property '{}' in update_object action config",
+                            mapping.property_name
+                        )]
+                    })?;
                 let value = if let Some(input_name) = mapping.input_name {
                     parameters.get(&input_name).cloned().ok_or_else(|| {
                         vec![format!("missing input '{input_name}' for property mapping")]
@@ -621,21 +732,19 @@ async fn plan_action(
                     mapping.value.unwrap_or(Value::Null)
                 };
 
-                if let Some(property_type) = property_types.get(mapping.property_name.as_str()) {
-                    validate_property_value(property_type, &value)
-                        .map_err(|e| vec![format!("{}: {}", mapping.property_name, e)])?;
-                }
-
+                validate_property_value(property_type, &value)
+                    .map_err(|e| vec![format!("{}: {}", mapping.property_name, e)])?;
                 patch.insert(mapping.property_name, value);
             }
 
             if let Some(static_patch) = cfg.static_patch {
                 if let Some(values) = static_patch.as_object() {
                     for (property_name, value) in values {
-                        if let Some(property_type) = property_types.get(property_name.as_str()) {
-                            validate_property_value(property_type, value)
-                                .map_err(|e| vec![format!("{}: {}", property_name, e)])?;
-                        }
+                        let property_type = property_types.get(property_name.as_str()).ok_or_else(|| {
+                            vec![format!("unknown property '{property_name}' in static_patch")]
+                        })?;
+                        validate_property_value(property_type, value)
+                            .map_err(|e| vec![format!("{}: {}", property_name, e)])?;
                         patch.insert(property_name.to_string(), value.clone());
                     }
                 }
@@ -647,20 +756,19 @@ async fn plan_action(
             let target_object_id = request.target_object_id.ok_or_else(|| {
                 vec!["target_object_id is required for create_link actions".to_string()]
             })?;
-            let target = load_object_instance(state, target_object_id)
-                .await
-                .map_err(|e| vec![format!("failed to load target object: {e}")])?
-                .ok_or_else(|| vec!["target object was not found".to_string()])?;
-            ensure_object_type_match(&target, action.object_type_id).map_err(|e| vec![e])?;
+            let target =
+                load_and_authorize_target(state, claims, target_object_id, action.object_type_id)
+                    .await?;
 
             let cfg: CreateLinkActionConfig = serde_json::from_value(action.config.clone())
                 .map_err(|e| vec![format!("invalid action config: {e}")])?;
             let counterpart_id =
                 resolve_uuid_parameter(&parameters, &cfg.target_input_name).map_err(|e| vec![e])?;
-            let counterpart = load_object_instance(state, counterpart_id)
+            let counterpart = load_object_instance(&state.db, counterpart_id)
                 .await
                 .map_err(|e| vec![format!("failed to load linked object: {e}")])?
                 .ok_or_else(|| vec!["linked object was not found".to_string()])?;
+            ensure_object_access(claims, &counterpart).map_err(|e| vec![e])?;
             let link_type = sqlx::query_as::<_, LinkType>("SELECT * FROM link_types WHERE id = $1")
                 .bind(cfg.link_type_id)
                 .fetch_optional(&state.db)
@@ -698,42 +806,53 @@ async fn plan_action(
             let target_object_id = request.target_object_id.ok_or_else(|| {
                 vec!["target_object_id is required for delete_object actions".to_string()]
             })?;
-            let target = load_object_instance(state, target_object_id)
-                .await
-                .map_err(|e| vec![format!("failed to load target object: {e}")])?
-                .ok_or_else(|| vec!["target object was not found".to_string()])?;
-            ensure_object_type_match(&target, action.object_type_id).map_err(|e| vec![e])?;
+            let target =
+                load_and_authorize_target(state, claims, target_object_id, action.object_type_id)
+                    .await?;
 
             Ok(ActionPlan::DeleteObject { target })
         }
-        ActionOperationKind::InvokeFunction | ActionOperationKind::InvokeWebhook => {
-            let invocation =
-                validate_http_invocation_config(&action.config).map_err(|e| vec![e])?;
-            let target = if let Some(target_object_id) = request.target_object_id {
-                let target = load_object_instance(state, target_object_id)
-                    .await
-                    .map_err(|e| vec![format!("failed to load target object: {e}")])?
-                    .ok_or_else(|| vec!["target object was not found".to_string()])?;
-                ensure_object_type_match(&target, action.object_type_id).map_err(|e| vec![e])?;
-                Some(target)
-            } else {
-                None
+        ActionOperationKind::InvokeFunction => {
+            let target = match request.target_object_id {
+                Some(target_object_id) => Some(
+                    load_and_authorize_target(state, claims, target_object_id, action.object_type_id)
+                        .await?,
+                ),
+                None => None,
             };
             let payload = build_http_payload(action, target.as_ref(), &parameters);
+            let invocation = match resolve_inline_function_config(state, &action.config).await {
+                Ok(Some(config)) => FunctionInvocation::Inline(config),
+                Ok(None) => FunctionInvocation::Http(
+                    validate_http_invocation_config(&action.config).map_err(|e| vec![e])?,
+                ),
+                Err(error) => return Err(vec![error]),
+            };
 
-            if operation_kind == ActionOperationKind::InvokeFunction {
-                Ok(ActionPlan::InvokeFunction {
-                    target,
-                    invocation,
-                    payload,
-                })
-            } else {
-                Ok(ActionPlan::InvokeWebhook {
-                    target,
-                    invocation,
-                    payload,
-                })
-            }
+            Ok(ActionPlan::InvokeFunction {
+                target,
+                invocation,
+                payload,
+                parameters,
+            })
+        }
+        ActionOperationKind::InvokeWebhook => {
+            let target = match request.target_object_id {
+                Some(target_object_id) => Some(
+                    load_and_authorize_target(state, claims, target_object_id, action.object_type_id)
+                        .await?,
+                ),
+                None => None,
+            };
+            let payload = build_http_payload(action, target.as_ref(), &parameters);
+            let invocation =
+                validate_http_invocation_config(&action.config).map_err(|e| vec![e])?;
+
+            Ok(ActionPlan::InvokeWebhook {
+                target,
+                invocation,
+                payload,
+            })
         }
     }
 }
@@ -769,16 +888,31 @@ fn plan_preview(plan: &ActionPlan) -> Value {
             target,
             invocation,
             payload,
-        } => json!({
-            "kind": "invoke_function",
-            "target_object_id": target.as_ref().map(|object| object.id),
-            "request": {
-                "url": invocation.url,
-                "method": invocation.method,
-                "headers": invocation.headers,
-                "payload": payload,
-            },
-        }),
+            ..
+        } => match invocation {
+            FunctionInvocation::Http(invocation) => json!({
+                "kind": "invoke_function",
+                "runtime": "http",
+                "target_object_id": target.as_ref().map(|object| object.id),
+                "request": {
+                    "url": &invocation.url,
+                    "method": &invocation.method,
+                    "headers": &invocation.headers,
+                    "payload": payload,
+                },
+            }),
+            FunctionInvocation::Inline(invocation) => json!({
+                "kind": "invoke_function",
+                "runtime": invocation.runtime_name(),
+                "target_object_id": target.as_ref().map(|object| object.id),
+                "request": {
+                    "payload": payload,
+                },
+                "source_length": invocation.source_len(),
+                "capabilities": invocation.capabilities,
+                "function_package": invocation.package,
+            }),
+        },
         ActionPlan::InvokeWebhook {
             target,
             invocation,
@@ -787,13 +921,321 @@ fn plan_preview(plan: &ActionPlan) -> Value {
             "kind": "invoke_webhook",
             "target_object_id": target.as_ref().map(|object| object.id),
             "request": {
-                "url": invocation.url,
-                "method": invocation.method,
-                "headers": invocation.headers,
+                "url": &invocation.url,
+                "method": &invocation.method,
+                "headers": &invocation.headers,
                 "payload": payload,
             },
         }),
     }
+}
+
+fn issue_service_token(state: &AppState, claims: &Claims) -> Result<String, String> {
+    let service_claims = build_access_claims(
+        &state.jwt_config,
+        Uuid::now_v7(),
+        "ontology-service@internal.openfoundry",
+        "ontology-service",
+        vec!["admin".to_string()],
+        vec!["*:*".to_string()],
+        claims.org_id,
+        json!({
+            "service": "ontology-service",
+            "classification_clearance": "pii",
+            "impersonated_actor_id": claims.sub,
+        }),
+        vec!["service".to_string()],
+    );
+    let token = encode_token(&state.jwt_config, &service_claims)
+        .map_err(|error| format!("failed to issue service token for audit: {error}"))?;
+    Ok(format!("Bearer {token}"))
+}
+
+fn classification_for_target(target: Option<&ObjectInstance>) -> &'static str {
+    match target.map(|object| object.marking.as_str()) {
+        Some("confidential") => "confidential",
+        Some("pii") => "pii",
+        _ => "public",
+    }
+}
+
+async fn emit_action_audit_event(
+    state: &AppState,
+    claims: &Claims,
+    action: &ActionType,
+    target: Option<&ObjectInstance>,
+    target_object_id: Option<Uuid>,
+    status: &str,
+    severity: &str,
+    message: Option<&str>,
+    justification: Option<&str>,
+    parameters: &Value,
+    preview: Option<&Value>,
+    result: Option<&Value>,
+) -> Result<(), String> {
+    let token = issue_service_token(state, claims)?;
+    let url = format!(
+        "{}/api/v1/audit/events",
+        state.audit_service_url.trim_end_matches('/')
+    );
+    let resource_id = target_object_id.unwrap_or(action.id).to_string();
+    let metadata = json!({
+        "action_id": action.id,
+        "action_name": &action.name,
+        "operation_kind": &action.operation_kind,
+        "object_type_id": action.object_type_id,
+        "permission_key": &action.permission_key,
+        "target_object_id": target_object_id,
+        "justification": justification,
+        "parameters": parameters,
+        "preview": preview,
+        "result": result,
+        "message": message,
+        "actor_id": claims.sub,
+        "actor_roles": &claims.roles,
+        "organization_id": claims.org_id,
+    });
+
+    let response = state
+        .http_client
+        .post(url)
+        .header("authorization", token)
+        .json(&json!({
+            "source_service": "ontology-service",
+            "channel": "api",
+            "actor": &claims.email,
+            "action": "ontology.action.execute",
+            "resource_type": if target_object_id.is_some() {
+                "ontology_object"
+            } else {
+                "ontology_action"
+            },
+            "resource_id": resource_id,
+            "status": status,
+            "severity": severity,
+            "classification": classification_for_target(target),
+            "subject_id": claims.sub.to_string(),
+            "metadata": metadata,
+            "labels": ["ontology", "action", status, action.operation_kind.as_str()],
+        }))
+        .send()
+        .await
+        .map_err(|error| format!("failed to send audit event: {error}"))?;
+
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        Err(format!("audit service returned {status}: {body}"))
+    }
+}
+
+async fn execute_plan(
+    state: &AppState,
+    claims: &Claims,
+    action: &ActionType,
+    justification: Option<&str>,
+    plan: ActionPlan,
+) -> Result<ExecutedAction, String> {
+    let preview = plan_preview(&plan);
+
+    match plan {
+        ActionPlan::UpdateObject { target, patch } => {
+            let updated = apply_object_patch(state, &target, &Value::Object(patch)).await?;
+            Ok(ExecutedAction {
+                target_object_id: Some(target.id),
+                deleted: false,
+                preview,
+                object: Some(json!(updated)),
+                link: None,
+                result: None,
+            })
+        }
+        ActionPlan::CreateLink {
+            target,
+            link_type,
+            properties,
+            source_object_id,
+            target_object_id,
+            ..
+        } => {
+            let link = sqlx::query_as::<_, LinkInstance>(
+				r#"INSERT INTO link_instances (id, link_type_id, source_object_id, target_object_id, properties, created_by)
+				   VALUES ($1, $2, $3, $4, $5, $6)
+				   RETURNING *"#,
+			)
+			.bind(Uuid::now_v7())
+			.bind(link_type.id)
+			.bind(source_object_id)
+			.bind(target_object_id)
+			.bind(properties)
+			.bind(claims.sub)
+			.fetch_one(&state.db)
+			.await
+            .map_err(|e| format!("failed to execute create_link action: {e}"))?;
+
+            Ok(ExecutedAction {
+                target_object_id: Some(target.id),
+                deleted: false,
+                preview,
+                object: None,
+                link: Some(json!(link)),
+                result: None,
+            })
+        }
+        ActionPlan::DeleteObject { target } => {
+            let result = sqlx::query("DELETE FROM object_instances WHERE id = $1")
+                .bind(target.id)
+                .execute(&state.db)
+                .await
+                .map_err(|e| format!("failed to execute delete_object action: {e}"))?;
+
+            if result.rows_affected() == 0 {
+                return Err("target object no longer exists".to_string());
+            }
+
+            Ok(ExecutedAction {
+                target_object_id: Some(target.id),
+                deleted: true,
+                preview,
+                object: None,
+                link: None,
+                result: None,
+            })
+        }
+        ActionPlan::InvokeWebhook {
+            target,
+            invocation,
+            payload,
+        } => {
+            let result = invoke_http_action(state, &invocation, &payload).await?;
+            Ok(ExecutedAction {
+                target_object_id: target.as_ref().map(|object| object.id),
+                deleted: false,
+                preview,
+                object: None,
+                link: None,
+                result: Some(result),
+            })
+        }
+        ActionPlan::InvokeFunction {
+            target,
+            invocation,
+            payload,
+            parameters,
+        } => {
+            let response = match &invocation {
+                FunctionInvocation::Http(invocation) => {
+                    invoke_http_action(state, invocation, &payload).await?
+                }
+                FunctionInvocation::Inline(config) => {
+                    execute_inline_function(
+                        state,
+                        claims,
+                        action,
+                        target.as_ref(),
+                        &parameters,
+                        config,
+                        justification,
+                    )
+                    .await?
+                }
+            };
+
+            let (result, object_patch, link_instruction, delete_object) =
+                derive_function_effects(&response)
+                    .map_err(|e| format!("invalid function response: {e}"))?;
+
+            let Some(target_object) = target.as_ref() else {
+                if object_patch.is_some() || link_instruction.is_some() || delete_object {
+                    return Err(
+                        "function response requested ontology mutations but target_object_id was not provided"
+                            .to_string(),
+                    );
+                }
+
+                return Ok(ExecutedAction {
+                    target_object_id: None,
+                    deleted: false,
+                    preview,
+                    object: None,
+                    link: None,
+                    result: result.or(Some(response)),
+                });
+            };
+
+            let object = match object_patch {
+                Some(patch) => Some(json!(apply_object_patch(state, target_object, &patch).await?)),
+                None => None,
+            };
+
+            let link = match link_instruction {
+                Some(instruction) => Some(json!(
+                    create_link_from_instruction(state, claims, claims.sub, target_object, &instruction)
+                        .await?
+                )),
+                None => None,
+            };
+
+            let deleted = if delete_object {
+                let result = sqlx::query("DELETE FROM object_instances WHERE id = $1")
+                    .bind(target_object.id)
+                    .execute(&state.db)
+                    .await
+                    .map_err(|e| format!("failed to delete object from function response: {e}"))?;
+                if result.rows_affected() == 0 {
+                    return Err("target object no longer exists".to_string());
+                }
+                true
+            } else {
+                false
+            };
+
+            Ok(ExecutedAction {
+                target_object_id: Some(target_object.id),
+                deleted,
+                preview,
+                object,
+                link,
+                result: result.or(Some(response)),
+            })
+        }
+    }
+}
+
+fn log_audit_failure(action_id: Uuid, error: &str) {
+    tracing::warn!(%action_id, %error, "failed to emit ontology action audit event");
+}
+
+pub(crate) async fn preview_action_for_simulation(
+    state: &AppState,
+    claims: &Claims,
+    action_id: Uuid,
+    target_object_id: Option<Uuid>,
+    parameters: Value,
+) -> Result<Value, String> {
+    let row = load_action_row(state, action_id)
+        .await
+        .map_err(|error| format!("failed to load action type: {error}"))?
+        .ok_or_else(|| "action type was not found".to_string())?;
+    let action =
+        ActionType::try_from(row).map_err(|error| format!("failed to decode action type: {error}"))?;
+
+    ensure_action_permission(claims, &action)?;
+    let plan = plan_action(
+        state,
+        claims,
+        &action,
+        &ValidateActionRequest {
+            target_object_id,
+            parameters,
+        },
+    )
+    .await
+    .map_err(|errors| errors.join("; "))?;
+
+    Ok(plan_preview(&plan))
 }
 
 pub async fn create_action_type(
@@ -1016,7 +1458,7 @@ pub async fn delete_action_type(
 }
 
 pub async fn validate_action(
-    _user: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
     Json(body): Json<ValidateActionRequest>,
@@ -1033,19 +1475,29 @@ pub async fn validate_action(
         Err(e) => return db_error(format!("failed to decode action type: {e}")),
     };
 
-    match plan_action(&state, &action, &body).await {
+    if let Err(error) = ensure_action_permission(&claims, &action) {
+        return forbidden(error);
+    }
+
+    match plan_action(&state, &claims, &action, &body).await {
         Ok(plan) => Json(ValidateActionResponse {
             valid: true,
             errors: vec![],
             preview: plan_preview(&plan),
         })
         .into_response(),
-        Err(errors) => Json(ValidateActionResponse {
-            valid: false,
-            errors,
-            preview: Value::Null,
-        })
-        .into_response(),
+        Err(errors) => {
+            if all_forbidden(&errors) {
+                forbidden(errors.join("; "))
+            } else {
+                Json(ValidateActionResponse {
+                    valid: false,
+                    errors,
+                    preview: Value::Null,
+                })
+                .into_response()
+            }
+        }
     }
 }
 
@@ -1066,212 +1518,371 @@ pub async fn execute_action(
         Ok(action_type) => action_type,
         Err(e) => return db_error(format!("failed to decode action type: {e}")),
     };
+
+    if let Err(error) = ensure_action_permission(&claims, &action) {
+        if let Err(audit_error) = emit_action_audit_event(
+            &state,
+            &claims,
+            &action,
+            None,
+            body.target_object_id,
+            "denied",
+            "medium",
+            Some(&error),
+            body.justification.as_deref(),
+            &body.parameters,
+            None,
+            None,
+        )
+        .await
+        {
+            log_audit_failure(action.id, &audit_error);
+        }
+        return forbidden(error);
+    }
+
+    if let Err(error) = ensure_confirmation_justification(&action, body.justification.as_deref()) {
+        if let Err(audit_error) = emit_action_audit_event(
+            &state,
+            &claims,
+            &action,
+            None,
+            body.target_object_id,
+            "failure",
+            "medium",
+            Some(&error),
+            body.justification.as_deref(),
+            &body.parameters,
+            None,
+            None,
+        )
+        .await
+        {
+            log_audit_failure(action.id, &audit_error);
+        }
+        return invalid_action(error);
+    }
+
     let validation_request = ValidateActionRequest {
         target_object_id: body.target_object_id,
-        parameters: body.parameters,
+        parameters: body.parameters.clone(),
     };
-    let plan = match plan_action(&state, &action, &validation_request).await {
+    let plan = match plan_action(&state, &claims, &action, &validation_request).await {
         Ok(plan) => plan,
         Err(errors) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": "action validation failed", "details": errors })),
+            let status = if all_forbidden(&errors) {
+                "denied"
+            } else {
+                "failure"
+            };
+            let severity = if all_forbidden(&errors) {
+                "medium"
+            } else {
+                "medium"
+            };
+            if let Err(audit_error) = emit_action_audit_event(
+                &state,
+                &claims,
+                &action,
+                None,
+                body.target_object_id,
+                status,
+                severity,
+                Some("action validation failed"),
+                body.justification.as_deref(),
+                &body.parameters,
+                None,
+                Some(&json!({ "details": errors })),
             )
-                .into_response();
+            .await
+            {
+                log_audit_failure(action.id, &audit_error);
+            }
+            let payload = Json(json!({ "error": "action validation failed", "details": errors }));
+            return if status == "denied" {
+                (StatusCode::FORBIDDEN, payload).into_response()
+            } else {
+                (StatusCode::BAD_REQUEST, payload).into_response()
+            };
         }
     };
-    let preview = plan_preview(&plan);
 
-    match plan {
-        ActionPlan::UpdateObject { target, patch } => {
-            let mut next_properties = target.properties.as_object().cloned().unwrap_or_default();
-            for (key, value) in &patch {
-                next_properties.insert(key.clone(), value.clone());
-            }
+    let target_snapshot = match &plan {
+        ActionPlan::UpdateObject { target, .. }
+        | ActionPlan::CreateLink { target, .. }
+        | ActionPlan::DeleteObject { target }
+        | ActionPlan::InvokeFunction {
+            target: Some(target), ..
+        }
+        | ActionPlan::InvokeWebhook {
+            target: Some(target), ..
+        } => Some(target.clone()),
+        _ => None,
+    };
 
-            let updated = sqlx::query_as::<_, ObjectInstance>(
-                r#"UPDATE object_instances
-				   SET properties = $2::jsonb,
-				       updated_at = NOW()
-				   WHERE id = $1
-				   RETURNING *"#,
+    match execute_plan(&state, &claims, &action, body.justification.as_deref(), plan).await {
+        Ok(executed) => {
+            let audit_result = json!({
+                "deleted": executed.deleted,
+                "object": executed.object,
+                "link": executed.link,
+                "result": executed.result,
+            });
+            if let Err(audit_error) = emit_action_audit_event(
+                &state,
+                &claims,
+                &action,
+                target_snapshot.as_ref(),
+                executed.target_object_id,
+                "success",
+                "low",
+                None,
+                body.justification.as_deref(),
+                &body.parameters,
+                Some(&executed.preview),
+                Some(&audit_result),
             )
-            .bind(target.id)
-            .bind(Value::Object(next_properties))
-            .fetch_one(&state.db)
-            .await;
-
-            match updated {
-                Ok(object) => Json(ExecuteActionResponse {
-                    action,
-                    target_object_id: Some(target.id),
-                    deleted: false,
-                    preview: preview.clone(),
-                    object: Some(json!(object)),
-                    link: None,
-                    result: None,
-                })
-                .into_response(),
-                Err(e) => db_error(format!("failed to execute update_object action: {e}")),
-            }
-        }
-        ActionPlan::CreateLink {
-            target,
-            link_type,
-            properties,
-            source_object_id,
-            target_object_id,
-            ..
-        } => {
-            let created = sqlx::query_as::<_, LinkInstance>(
-				r#"INSERT INTO link_instances (id, link_type_id, source_object_id, target_object_id, properties, created_by)
-				   VALUES ($1, $2, $3, $4, $5, $6)
-				   RETURNING *"#,
-			)
-			.bind(Uuid::now_v7())
-			.bind(link_type.id)
-			.bind(source_object_id)
-			.bind(target_object_id)
-			.bind(properties)
-			.bind(claims.sub)
-			.fetch_one(&state.db)
-			.await;
-
-            match created {
-                Ok(link) => Json(ExecuteActionResponse {
-                    action,
-                    target_object_id: Some(target.id),
-                    deleted: false,
-                    preview: preview.clone(),
-                    object: None,
-                    link: Some(json!(link)),
-                    result: None,
-                })
-                .into_response(),
-                Err(e) => db_error(format!("failed to execute create_link action: {e}")),
-            }
-        }
-        ActionPlan::DeleteObject { target } => {
-            match sqlx::query("DELETE FROM object_instances WHERE id = $1")
-                .bind(target.id)
-                .execute(&state.db)
-                .await
+            .await
             {
-                Ok(result) if result.rows_affected() > 0 => Json(ExecuteActionResponse {
-                    action,
-                    target_object_id: Some(target.id),
-                    deleted: true,
-                    preview: preview.clone(),
-                    object: None,
-                    link: None,
-                    result: None,
-                })
-                .into_response(),
-                Ok(_) => StatusCode::NOT_FOUND.into_response(),
-                Err(e) => db_error(format!("failed to execute delete_object action: {e}")),
+                log_audit_failure(action.id, &audit_error);
+            }
+
+            Json(ExecuteActionResponse {
+                action,
+                target_object_id: executed.target_object_id,
+                deleted: executed.deleted,
+                preview: executed.preview,
+                object: executed.object,
+                link: executed.link,
+                result: executed.result,
+            })
+            .into_response()
+        }
+        Err(error) => {
+            if let Err(audit_error) = emit_action_audit_event(
+                &state,
+                &claims,
+                &action,
+                target_snapshot.as_ref(),
+                body.target_object_id,
+                "failure",
+                "high",
+                Some(&error),
+                body.justification.as_deref(),
+                &body.parameters,
+                None,
+                None,
+            )
+            .await
+            {
+                log_audit_failure(action.id, &audit_error);
+            }
+            db_error(error)
+        }
+    }
+}
+
+pub async fn execute_action_batch(
+    AuthUser(claims): AuthUser,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<ExecuteBatchActionRequest>,
+) -> impl IntoResponse {
+    if body.target_object_ids.is_empty() {
+        return invalid_action("target_object_ids must not be empty");
+    }
+
+    let Some(row) = (match load_action_row(&state, id).await {
+        Ok(row) => row,
+        Err(e) => return db_error(format!("failed to load action type: {e}")),
+    }) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let action = match ActionType::try_from(row) {
+        Ok(action_type) => action_type,
+        Err(e) => return db_error(format!("failed to decode action type: {e}")),
+    };
+
+    if let Err(error) = ensure_action_permission(&claims, &action) {
+        if let Err(audit_error) = emit_action_audit_event(
+            &state,
+            &claims,
+            &action,
+            None,
+            None,
+            "denied",
+            "medium",
+            Some(&error),
+            body.justification.as_deref(),
+            &body.parameters,
+            None,
+            Some(&json!({ "target_count": body.target_object_ids.len() })),
+        )
+        .await
+        {
+            log_audit_failure(action.id, &audit_error);
+        }
+        return forbidden(error);
+    }
+
+    if let Err(error) = ensure_confirmation_justification(&action, body.justification.as_deref()) {
+        if let Err(audit_error) = emit_action_audit_event(
+            &state,
+            &claims,
+            &action,
+            None,
+            None,
+            "failure",
+            "medium",
+            Some(&error),
+            body.justification.as_deref(),
+            &body.parameters,
+            None,
+            Some(&json!({ "target_count": body.target_object_ids.len() })),
+        )
+        .await
+        {
+            log_audit_failure(action.id, &audit_error);
+        }
+        return invalid_action(error);
+    }
+
+    let total = body.target_object_ids.len();
+    let mut succeeded = 0usize;
+    let mut results = Vec::with_capacity(total);
+
+    for target_object_id in body.target_object_ids {
+        let validation_request = ValidateActionRequest {
+            target_object_id: Some(target_object_id),
+            parameters: body.parameters.clone(),
+        };
+
+        match plan_action(&state, &claims, &action, &validation_request).await {
+            Ok(plan) => {
+                let target_snapshot = match &plan {
+                    ActionPlan::UpdateObject { target, .. }
+                    | ActionPlan::CreateLink { target, .. }
+                    | ActionPlan::DeleteObject { target }
+                    | ActionPlan::InvokeFunction {
+                        target: Some(target), ..
+                    }
+                    | ActionPlan::InvokeWebhook {
+                        target: Some(target), ..
+                    } => Some(target.clone()),
+                    _ => None,
+                };
+
+                match execute_plan(
+                    &state,
+                    &claims,
+                    &action,
+                    body.justification.as_deref(),
+                    plan,
+                )
+                .await {
+                    Ok(executed) => {
+                        succeeded += 1;
+                        let audit_result = json!({
+                            "deleted": executed.deleted,
+                            "object": executed.object,
+                            "link": executed.link,
+                            "result": executed.result,
+                            "batch": true,
+                        });
+                        if let Err(audit_error) = emit_action_audit_event(
+                            &state,
+                            &claims,
+                            &action,
+                            target_snapshot.as_ref(),
+                            executed.target_object_id,
+                            "success",
+                            "low",
+                            None,
+                            body.justification.as_deref(),
+                            &body.parameters,
+                            Some(&executed.preview),
+                            Some(&audit_result),
+                        )
+                        .await
+                        {
+                            log_audit_failure(action.id, &audit_error);
+                        }
+
+                        results.push(json!({
+                            "target_object_id": target_object_id,
+                            "status": "succeeded",
+                            "deleted": executed.deleted,
+                            "preview": executed.preview,
+                            "object": executed.object,
+                            "link": executed.link,
+                            "result": executed.result,
+                        }));
+                    }
+                    Err(error) => {
+                        if let Err(audit_error) = emit_action_audit_event(
+                            &state,
+                            &claims,
+                            &action,
+                            target_snapshot.as_ref(),
+                            Some(target_object_id),
+                            "failure",
+                            "high",
+                            Some(&error),
+                            body.justification.as_deref(),
+                            &body.parameters,
+                            None,
+                            Some(&json!({ "batch": true })),
+                        )
+                        .await
+                        {
+                            log_audit_failure(action.id, &audit_error);
+                        }
+
+                        results.push(json!({
+                            "target_object_id": target_object_id,
+                            "status": "failed",
+                            "error": error,
+                        }));
+                    }
+                }
+            }
+            Err(errors) => {
+                let denied = all_forbidden(&errors);
+                if let Err(audit_error) = emit_action_audit_event(
+                    &state,
+                    &claims,
+                    &action,
+                    None,
+                    Some(target_object_id),
+                    if denied { "denied" } else { "failure" },
+                    "medium",
+                    Some("action validation failed"),
+                    body.justification.as_deref(),
+                    &body.parameters,
+                    None,
+                    Some(&json!({ "details": errors, "batch": true })),
+                )
+                .await
+                {
+                    log_audit_failure(action.id, &audit_error);
+                }
+
+                results.push(json!({
+                    "target_object_id": target_object_id,
+                    "status": if denied { "denied" } else { "failed" },
+                    "errors": errors,
+                }));
             }
         }
-        ActionPlan::InvokeWebhook {
-            target,
-            invocation,
-            payload,
-        } => match invoke_http_action(&state, &invocation, &payload).await {
-            Ok(result) => Json(ExecuteActionResponse {
-                action,
-                target_object_id: target.as_ref().map(|object| object.id),
-                deleted: false,
-                preview: preview.clone(),
-                object: None,
-                link: None,
-                result: Some(result),
-            })
-            .into_response(),
-            Err(e) => db_error(format!("failed to execute webhook action: {e}")),
-        },
-        ActionPlan::InvokeFunction {
-            target,
-            invocation,
-            payload,
-        } => match invoke_http_action(&state, &invocation, &payload).await {
-            Ok(response) => {
-                let (result, object_patch, link_instruction, delete_object) =
-                    match derive_function_effects(&response) {
-                        Ok(effects) => effects,
-                        Err(e) => return db_error(format!("invalid function response: {e}")),
-                    };
-
-                let Some(target_object) = target.as_ref() else {
-                    if object_patch.is_some() || link_instruction.is_some() || delete_object {
-                        return invalid_action(
-                            "function response requested ontology mutations but target_object_id was not provided",
-                        );
-                    }
-
-                    return Json(ExecuteActionResponse {
-                        action,
-                        target_object_id: None,
-                        deleted: false,
-                        preview: preview.clone(),
-                        object: None,
-                        link: None,
-                        result: result.or(Some(response)),
-                    })
-                    .into_response();
-                };
-
-                let object = match object_patch {
-                    Some(patch) => match apply_object_patch(&state, target_object, &patch).await {
-                        Ok(updated) => Some(json!(updated)),
-                        Err(e) => return db_error(e),
-                    },
-                    None => None,
-                };
-
-                let link = match link_instruction {
-                    Some(instruction) => match create_link_from_instruction(
-                        &state,
-                        claims.sub,
-                        target_object,
-                        &instruction,
-                    )
-                    .await
-                    {
-                        Ok(created) => Some(json!(created)),
-                        Err(e) => return db_error(e),
-                    },
-                    None => None,
-                };
-
-                let deleted = if delete_object {
-                    match sqlx::query("DELETE FROM object_instances WHERE id = $1")
-                        .bind(target_object.id)
-                        .execute(&state.db)
-                        .await
-                    {
-                        Ok(result) if result.rows_affected() > 0 => true,
-                        Ok(_) => return StatusCode::NOT_FOUND.into_response(),
-                        Err(e) => {
-                            return db_error(format!(
-                                "failed to delete object from function response: {e}"
-                            ));
-                        }
-                    }
-                } else {
-                    false
-                };
-
-                Json(ExecuteActionResponse {
-                    action,
-                    target_object_id: Some(target_object.id),
-                    deleted,
-                    preview: preview.clone(),
-                    object,
-                    link,
-                    result: result.or(Some(response)),
-                })
-                .into_response()
-            }
-            Err(e) => db_error(format!("failed to execute function action: {e}")),
-        },
     }
+
+    Json(ExecuteBatchActionResponse {
+        action,
+        total,
+        succeeded,
+        failed: total.saturating_sub(succeeded),
+        results,
+    })
+    .into_response()
 }

@@ -32,6 +32,7 @@ struct DeploymentRow {
 struct ModelVersionRow {
     id: Uuid,
     version_number: i32,
+    schema: Value,
 }
 
 #[derive(Debug, FromRow)]
@@ -72,7 +73,7 @@ async fn load_deployment(
 async fn load_versions(
     db: &sqlx::PgPool,
     splits: &[TrafficSplitEntry],
-) -> Result<HashMap<Uuid, i32>, sqlx::Error> {
+) -> Result<HashMap<Uuid, predictions::ModelRuntime>, sqlx::Error> {
     let mut versions = HashMap::new();
     for split in splits {
         if versions.contains_key(&split.model_version_id) {
@@ -80,13 +81,19 @@ async fn load_versions(
         }
 
         if let Some(row) = query_as::<_, ModelVersionRow>(
-            "SELECT id, version_number FROM ml_model_versions WHERE id = $1",
+            "SELECT id, version_number, schema FROM ml_model_versions WHERE id = $1",
         )
         .bind(split.model_version_id)
         .fetch_optional(db)
         .await?
         {
-            versions.insert(row.id, row.version_number);
+            versions.insert(
+                row.id,
+                predictions::ModelRuntime {
+                    version_number: row.version_number,
+                    schema: row.schema,
+                },
+            );
         }
     }
 
@@ -127,11 +134,11 @@ pub async fn realtime_predict(
         .enumerate()
         .filter_map(|(index, input)| {
             let split = predictions::route_variant(&splits, index)?;
-            let version_number = *version_map.get(&split.model_version_id)?;
+            let runtime = version_map.get(&split.model_version_id)?;
             Some(predictions::predict_record(
                 input,
                 &split,
-                version_number,
+                runtime,
                 body.explain,
                 index,
             ))
@@ -205,11 +212,11 @@ pub async fn create_batch_prediction(
         .enumerate()
         .filter_map(|(index, input)| {
             let split = predictions::route_variant(&splits, index)?;
-            let version_number = *version_map.get(&split.model_version_id)?;
+            let runtime = version_map.get(&split.model_version_id)?;
             Some(predictions::predict_record(
                 input,
                 &split,
-                version_number,
+                runtime,
                 true,
                 index,
             ))

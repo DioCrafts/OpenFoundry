@@ -2,13 +2,17 @@
 
 use std::time::Instant;
 
-use reqwest::{
-    Client, Url,
-    header::{HeaderMap, HeaderName, HeaderValue},
-};
+use reqwest::{Url, header::HeaderMap};
 use serde_json::{Value, json};
 
-use super::{ConnectionTestResult, SyncPayload};
+use super::{
+    ConnectionTestResult, SyncPayload, add_source_signature, basic_discovered_source, http_runtime,
+    virtual_table_response,
+};
+use crate::{
+    AppState,
+    models::registration::{DiscoveredSource, VirtualTableQueryRequest, VirtualTableQueryResponse},
+};
 
 pub fn validate_config(config: &Value) -> Result<(), String> {
     if config.get("base_url").is_none() {
@@ -17,57 +21,71 @@ pub fn validate_config(config: &Value) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn test_connection(config: &Value) -> Result<ConnectionTestResult, String> {
+pub async fn test_connection(
+    state: &AppState,
+    config: &Value,
+    agent_url: Option<&str>,
+) -> Result<ConnectionTestResult, String> {
     validate_config(config)?;
 
-    let client = Client::new();
     let started = Instant::now();
     let url = build_url(config, None, true)?;
-    let mut request = client.get(url.clone());
-    request = apply_headers(request, config)?;
-
-    let response = request.send().await.map_err(|error| error.to_string())?;
+    let response = http_runtime::get(
+        state,
+        config,
+        url.clone(),
+        build_headers(config)?,
+        bearer_token(config),
+        agent_url,
+    )
+    .await?;
     let latency_ms = started.elapsed().as_millis();
-    if !response.status().is_success() {
-        return Err(format!("REST source returned HTTP {}", response.status()));
+    if !(200..300).contains(&response.status) {
+        return Err(format!("REST source returned HTTP {}", response.status));
     }
 
-    let body = response.text().await.unwrap_or_default();
     Ok(ConnectionTestResult {
         success: true,
-        message: format!("GET {} returned HTTP 200", url.path()),
+        message: format!("GET {} returned HTTP {}", url.path(), response.status),
         latency_ms,
         details: Some(json!({
             "path": url.path(),
-            "response_bytes": body.len(),
+            "response_bytes": response.bytes.len(),
+            "agent_url": agent_url,
         })),
     })
 }
 
-pub async fn fetch_dataset(config: &Value, selector: &str) -> Result<SyncPayload, String> {
+pub async fn fetch_dataset(
+    state: &AppState,
+    config: &Value,
+    selector: &str,
+    agent_url: Option<&str>,
+) -> Result<SyncPayload, String> {
     validate_config(config)?;
 
-    let client = Client::new();
     let url = build_url(config, Some(selector), false)?;
-    let mut request = client.get(url.clone());
-    request = apply_headers(request, config)?;
-
-    let response = request.send().await.map_err(|error| error.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!("REST source returned HTTP {}", response.status()));
+    let response = http_runtime::get(
+        state,
+        config,
+        url.clone(),
+        build_headers(config)?,
+        bearer_token(config),
+        agent_url,
+    )
+    .await?;
+    if !(200..300).contains(&response.status) {
+        return Err(format!("REST source returned HTTP {}", response.status));
     }
 
-    let payload = response
-        .json::<Value>()
-        .await
-        .map_err(|error| error.to_string())?;
+    let payload = http_runtime::json_body(&response)?;
     let normalized = normalize_records(payload);
     let rows_synced = normalized
         .as_array()
         .map(|rows| rows.len() as i64)
         .unwrap_or(0);
 
-    Ok(SyncPayload {
+    let mut sync_payload = SyncPayload {
         bytes: serde_json::to_vec(&normalized).map_err(|error| error.to_string())?,
         format: "json".to_string(),
         rows_synced,
@@ -75,8 +93,91 @@ pub async fn fetch_dataset(config: &Value, selector: &str) -> Result<SyncPayload
         metadata: json!({
             "url": url.as_str(),
             "rows": rows_synced,
+            "headers": response.headers,
+            "agent_url": agent_url,
         }),
-    })
+    };
+    add_source_signature(&mut sync_payload);
+    Ok(sync_payload)
+}
+
+pub async fn discover_sources(
+    state: &AppState,
+    config: &Value,
+    agent_url: Option<&str>,
+) -> Result<Vec<DiscoveredSource>, String> {
+    validate_config(config)?;
+    if let Some(resources) = config.get("resources").and_then(Value::as_array) {
+        return Ok(resources
+            .iter()
+            .filter_map(discovered_from_config)
+            .collect());
+    }
+
+    if let Some(catalog_path) = config.get("catalog_path").and_then(Value::as_str) {
+        let url = build_url(config, Some(catalog_path), false)?;
+        let response = http_runtime::get(
+            state,
+            config,
+            url,
+            build_headers(config)?,
+            bearer_token(config),
+            agent_url,
+        )
+        .await?;
+        if !(200..300).contains(&response.status) {
+            return Err(format!("REST catalog returned HTTP {}", response.status));
+        }
+        let payload = http_runtime::json_body(&response)?;
+        let entries = normalize_records(payload)
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|entry| discovered_from_config(&entry))
+            .collect::<Vec<_>>();
+        if !entries.is_empty() {
+            return Ok(entries);
+        }
+    }
+
+    Ok(vec![basic_discovered_source(
+        config
+            .get("resource_path")
+            .and_then(Value::as_str)
+            .unwrap_or("/"),
+        config
+            .get("resource_name")
+            .and_then(Value::as_str)
+            .unwrap_or("REST resource"),
+        "rest_resource",
+        json!({
+            "base_url": config.get("base_url").and_then(Value::as_str),
+        }),
+    )])
+}
+
+pub async fn query_virtual_table(
+    state: &AppState,
+    config: &Value,
+    request: &VirtualTableQueryRequest,
+    agent_url: Option<&str>,
+) -> Result<VirtualTableQueryResponse, String> {
+    let payload = fetch_dataset(state, config, &request.selector, agent_url).await?;
+    let rows = serde_json::from_slice::<Value>(&payload.bytes)
+        .map_err(|error| error.to_string())?
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .take(request.limit.unwrap_or(50).clamp(1, 500))
+        .collect::<Vec<_>>();
+
+    Ok(virtual_table_response(
+        &request.selector,
+        rows,
+        payload.metadata,
+    ))
 }
 
 fn build_url(config: &Value, selector: Option<&str>, for_health: bool) -> Result<Url, String> {
@@ -103,30 +204,15 @@ fn build_url(config: &Value, selector: Option<&str>, for_health: bool) -> Result
     base.join(path).map_err(|error| error.to_string())
 }
 
-fn apply_headers(
-    mut request: reqwest::RequestBuilder,
-    config: &Value,
-) -> Result<reqwest::RequestBuilder, String> {
-    if let Some(token) = config.get("bearer_token").and_then(Value::as_str) {
-        request = request.bearer_auth(token);
-    }
+fn build_headers(config: &Value) -> Result<HeaderMap, String> {
+    http_runtime::header_map(config)
+}
 
-    let mut headers = HeaderMap::new();
-    if let Some(header_map) = config.get("headers").and_then(Value::as_object) {
-        for (name, value) in header_map {
-            let header_name =
-                HeaderName::from_bytes(name.as_bytes()).map_err(|error| error.to_string())?;
-            let header_value = HeaderValue::from_str(
-                value
-                    .as_str()
-                    .ok_or_else(|| format!("header '{name}' must be a string"))?,
-            )
-            .map_err(|error| error.to_string())?;
-            headers.insert(header_name, header_value);
-        }
-    }
-
-    Ok(request.headers(headers))
+fn bearer_token(config: &Value) -> Option<String> {
+    config
+        .get("bearer_token")
+        .and_then(Value::as_str)
+        .map(|value| value.to_string())
 }
 
 fn normalize_records(payload: Value) -> Value {
@@ -139,6 +225,8 @@ fn normalize_records(payload: Value) -> Value {
                 Value::Array(records)
             } else if let Some(records) = object.remove("records").and_then(array_if_any) {
                 Value::Array(records)
+            } else if let Some(records) = object.remove("value").and_then(array_if_any) {
+                Value::Array(records)
             } else {
                 Value::Array(vec![Value::Object(object)])
             }
@@ -149,6 +237,26 @@ fn normalize_records(payload: Value) -> Value {
 
 fn array_if_any(value: Value) -> Option<Vec<Value>> {
     value.as_array().cloned()
+}
+
+fn discovered_from_config(value: &Value) -> Option<DiscoveredSource> {
+    let selector = value
+        .get("selector")
+        .or_else(|| value.get("path"))
+        .and_then(Value::as_str)?
+        .to_string();
+    let display_name = value
+        .get("display_name")
+        .or_else(|| value.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or(&selector)
+        .to_string();
+    Some(basic_discovered_source(
+        selector,
+        display_name,
+        "rest_resource",
+        value.clone(),
+    ))
 }
 
 fn file_name(selector: &str) -> String {
@@ -190,6 +298,10 @@ mod tests {
         assert_eq!(
             normalize_records(json!({ "status": "ok" })),
             json!([{ "status": "ok" }])
+        );
+        assert_eq!(
+            normalize_records(json!({ "value": [{ "asset": "pump-01" }] })),
+            json!([{ "asset": "pump-01" }])
         );
     }
 }

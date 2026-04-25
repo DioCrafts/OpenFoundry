@@ -7,7 +7,7 @@ export interface ListResponse<T> {
 export type ClassificationLevel = 'public' | 'confidential' | 'pii';
 export type AuditEventStatus = 'success' | 'failure' | 'denied';
 export type AuditSeverity = 'low' | 'medium' | 'high' | 'critical';
-export type ComplianceStandard = 'soc2' | 'iso27001' | 'hipaa';
+export type ComplianceStandard = 'soc2' | 'iso27001' | 'hipaa' | 'gdpr' | 'itar';
 
 export interface AuditEvent {
 	id: string;
@@ -122,6 +122,38 @@ export interface ComplianceReport {
 	expires_at: string;
 }
 
+export interface GovernanceTemplatePolicy {
+	name: string;
+	description: string;
+	scope: string;
+	classification: ClassificationLevel;
+	retention_days: number;
+	legal_hold: boolean;
+	purge_mode: string;
+	rules: string[];
+}
+
+export interface GovernanceTemplate {
+	slug: string;
+	name: string;
+	summary: string;
+	standards: string[];
+	policies: GovernanceTemplatePolicy[];
+}
+
+export interface SensitiveDataFinding {
+	kind: string;
+	redacted: string;
+	value: string;
+	match_count: number;
+}
+
+export interface SensitiveDataScanResponse {
+	risk_score: number;
+	findings: SensitiveDataFinding[];
+	redacted_content: string;
+}
+
 export interface GdprExportPayload {
 	subject_id: string;
 	generated_at: string;
@@ -227,6 +259,20 @@ export function updatePolicy(
 	return api.patch<AuditPolicy>(`/audit/policies/${id}`, body);
 }
 
+export function listGovernanceTemplates() {
+	return api.get<GovernanceTemplate[]>('/audit/governance/templates');
+}
+
+export function applyGovernanceTemplate(
+	slug: string,
+	body: {
+		scope?: string;
+		updated_by: string;
+	},
+) {
+	return api.post<ListResponse<AuditPolicy>>(`/audit/governance/templates/${slug}/apply`, body);
+}
+
 export function listReports() {
 	return api.get<ListResponse<ComplianceReport>>('/audit/reports');
 }
@@ -239,6 +285,10 @@ export function generateReport(body: {
 	window_end: string;
 }) {
 	return api.post<ComplianceReport>('/audit/reports/generate', body);
+}
+
+export function scanSensitiveData(body: { content: string; redact?: boolean }) {
+	return api.post<SensitiveDataScanResponse>('/audit/sds/scan', body);
 }
 
 export function exportSubjectData(body: { subject_id: string; portable_format?: string }) {

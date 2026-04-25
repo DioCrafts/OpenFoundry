@@ -1,3 +1,4 @@
+pub mod control_panel;
 pub mod api_key;
 pub mod group;
 pub mod mfa;

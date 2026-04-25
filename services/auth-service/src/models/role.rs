@@ -10,10 +10,3 @@ pub struct Role {
     pub description: Option<String>,
     pub created_at: DateTime<Utc>,
 }
-
-#[derive(Debug, Clone, FromRow)]
-pub struct UserRole {
-    pub user_id: Uuid,
-    pub role_id: Uuid,
-    pub assigned_at: DateTime<Utc>,
-}

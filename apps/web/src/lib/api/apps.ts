@@ -19,6 +19,50 @@ export interface AppSettings {
 	max_width: string;
 	show_branding: boolean;
 	custom_css: string | null;
+	builder_experience: string;
+	consumer_mode: ConsumerModeSettings;
+	slate: SlateSettings;
+}
+
+export interface ConsumerModeSettings {
+	enabled: boolean;
+	allow_guest_access: boolean;
+	portal_title: string | null;
+	portal_subtitle: string | null;
+	primary_cta_label: string | null;
+	primary_cta_url: string | null;
+}
+
+export interface SlateSettings {
+	enabled: boolean;
+	framework: string;
+	package_name: string;
+	entry_file: string;
+	sdk_import: string;
+	workspace: SlateWorkspaceSettings;
+	quiver_embed: QuiverEmbedSettings;
+}
+
+export interface SlateWorkspaceSettings {
+	enabled: boolean;
+	repository_id: string | null;
+	layout: string;
+	runtime: string;
+	dev_command: string;
+	preview_command: string;
+	files: SlatePackageFile[];
+}
+
+export interface QuiverEmbedSettings {
+	enabled: boolean;
+	primary_type_id: string | null;
+	secondary_type_id: string | null;
+	join_field: string | null;
+	secondary_join_field: string | null;
+	date_field: string | null;
+	metric_field: string | null;
+	group_field: string | null;
+	selected_group: string | null;
 }
 
 export interface AppWidgetPosition {
@@ -165,6 +209,40 @@ export interface PublishedAppResponse {
 	published_at: string;
 }
 
+export interface SlatePackageFile {
+	path: string;
+	language: string;
+	content: string;
+}
+
+export interface SlatePackageResponse {
+	app_id: string;
+	app_slug: string;
+	framework: string;
+	package_name: string;
+	entry_file: string;
+	sdk_import: string;
+	files: SlatePackageFile[];
+}
+
+export interface ImportSlatePackageParams {
+	package_name?: string | null;
+	entry_file?: string | null;
+	sdk_import?: string | null;
+	framework?: string | null;
+	repository_id?: string | null;
+	layout?: string | null;
+	runtime?: string | null;
+	dev_command?: string | null;
+	preview_command?: string | null;
+	files: SlatePackageFile[];
+}
+
+export interface SlateRoundTripResponse {
+	app: AppDefinition;
+	slate_package: SlatePackageResponse;
+}
+
 export interface AppVersionSnapshot {
 	name: string;
 	slug: string;
@@ -270,6 +348,14 @@ export function deletePage(appId: string, pageId: string) {
 
 export function previewApp(id: string) {
 	return api.get<AppPreviewResponse>(`/apps/${id}/preview`);
+}
+
+export function getSlatePackage(id: string) {
+	return api.get<SlatePackageResponse>(`/apps/${id}/slate-package`);
+}
+
+export function importSlatePackage(id: string, body: ImportSlatePackageParams) {
+	return api.post<SlateRoundTripResponse>(`/apps/${id}/slate-package`, body);
 }
 
 export function listAppVersions(appId: string) {

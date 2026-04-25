@@ -1,4 +1,9 @@
 pub mod actions;
+pub mod functions;
+pub mod interfaces;
 pub mod links;
 pub mod objects;
+pub mod properties;
+pub mod rules;
+pub mod search;
 pub mod types;

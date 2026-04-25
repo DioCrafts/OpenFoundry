@@ -1,8 +1,9 @@
+use auth_middleware::layer::AuthUser;
 use axum::{Json, extract::State};
 
 use crate::{
     AppState,
-    domain::{export, gdpr},
+    domain::{export, gdpr, security},
     handlers::{ServiceResult, db_error, internal_error, load_events, load_policies, load_reports},
     models::{
         ListResponse,
@@ -24,11 +25,15 @@ pub async fn list_reports(
 
 pub async fn generate_report(
     State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
     Json(request): Json<ComplianceReportRequest>,
 ) -> ServiceResult<ComplianceReport> {
-    let events = load_events(&state.db)
+    let events = security::filter_events_for_claims(
+        load_events(&state.db)
         .await
-        .map_err(|cause| db_error(&cause))?;
+        .map_err(|cause| db_error(&cause))?,
+        &claims,
+    );
     let policies = load_policies(&state.db)
         .await
         .map_err(|cause| db_error(&cause))?;
@@ -65,21 +70,41 @@ pub async fn generate_report(
 
 pub async fn export_subject_data(
     State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
     Json(request): Json<GdprExportRequest>,
 ) -> ServiceResult<GdprExportPayload> {
-    let events = load_events(&state.db)
+    if !security::can_access_subject(&claims, &request.subject_id) {
+        return Err(crate::handlers::bad_request(
+            "session scope does not allow this subject export",
+        ));
+    }
+
+    let events = security::filter_events_for_claims(
+        load_events(&state.db)
         .await
-        .map_err(|cause| db_error(&cause))?;
+        .map_err(|cause| db_error(&cause))?,
+        &claims,
+    );
     Ok(Json(gdpr::export_payload(&request, &events)))
 }
 
 pub async fn erase_subject_data(
     State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
     Json(request): Json<GdprEraseRequest>,
 ) -> ServiceResult<GdprEraseResponse> {
-    let events = load_events(&state.db)
+    if !security::can_access_subject(&claims, &request.subject_id) {
+        return Err(crate::handlers::bad_request(
+            "session scope does not allow this subject erase",
+        ));
+    }
+
+    let events = security::filter_events_for_claims(
+        load_events(&state.db)
         .await
-        .map_err(|cause| db_error(&cause))?;
+        .map_err(|cause| db_error(&cause))?,
+        &claims,
+    );
     let response = gdpr::erase_response(&request, &events);
 
     sqlx::query(

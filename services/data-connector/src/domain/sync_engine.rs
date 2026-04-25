@@ -8,7 +8,11 @@ use uuid::Uuid;
 use crate::{
     AppState,
     connectors::{self, SyncPayload},
-    models::{connection::Connection, sync_job::SyncJob, sync_status::SyncStatus},
+    domain::agent_registry,
+    models::{
+        connection::Connection, registration::ConnectionRegistration, sync_job::SyncJob,
+        sync_status::SyncStatus,
+    },
 };
 
 pub async fn run_due_jobs(state: &AppState) -> Result<usize, String> {
@@ -66,11 +70,36 @@ async fn process_job(state: &AppState, job: &SyncJob) -> Result<(), String> {
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("connection {} not found", job.connection_id))?;
 
-    let target_dataset_id = job
-        .target_dataset_id
+    let registration = lookup_registration(state, connection.id, &job.table_name).await?;
+    let payload = fetch_source_payload(state, &connection, job).await?;
+    let source_signature = payload
+        .metadata
+        .get("source_signature")
+        .and_then(Value::as_str)
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| connectors::source_signature(&payload.bytes));
+
+    if let Some(registration) = registration.as_ref()
+        && registration.update_detection
+        && registration.last_source_signature.as_deref() == Some(source_signature.as_str())
+    {
+        return mark_sync_skipped(
+            state,
+            &connection,
+            job,
+            registration,
+            &payload,
+            &source_signature,
+        )
+        .await;
+    }
+
+    let target_dataset_id = registration
+        .as_ref()
+        .and_then(|registration| registration.target_dataset_id)
+        .or(job.target_dataset_id)
         .ok_or_else(|| "target_dataset_id is required for sync jobs".to_string())?;
 
-    let payload = fetch_source_payload(&connection, job).await?;
     let upload_result = upload_dataset(state, &connection, target_dataset_id, &payload).await?;
 
     sqlx::query(
@@ -90,10 +119,28 @@ async fn process_job(state: &AppState, job: &SyncJob) -> Result<(), String> {
     .bind(json!({
         "source": payload.metadata,
         "upload": upload_result.metadata,
+        "source_signature": source_signature,
+        "change_detection": "changed",
     }))
     .execute(&state.db)
     .await
     .map_err(|error| error.to_string())?;
+
+    if let Some(registration) = registration {
+        sqlx::query(
+            r#"UPDATE connection_registrations
+               SET last_source_signature = $2,
+                   last_dataset_version = $3,
+                   updated_at = NOW()
+               WHERE id = $1"#,
+        )
+        .bind(registration.id)
+        .bind(&source_signature)
+        .bind(upload_result.version)
+        .execute(&state.db)
+        .await
+        .map_err(|error| error.to_string())?;
+    }
 
     sqlx::query(
         "UPDATE connections SET status = 'connected', last_sync_at = NOW(), updated_at = NOW() WHERE id = $1",
@@ -115,23 +162,111 @@ async fn process_job(state: &AppState, job: &SyncJob) -> Result<(), String> {
 }
 
 async fn fetch_source_payload(
+    state: &AppState,
     connection: &Connection,
     job: &SyncJob,
 ) -> Result<SyncPayload, String> {
+    let agent_url = agent_registry::resolve_agent_url(state, &connection.config).await?;
     match connection.connector_type.as_str() {
         "postgresql" => {
             connectors::postgres::fetch_dataset(&connection.config, &job.table_name).await
         }
-        "csv" => connectors::csv::fetch_dataset(&connection.config, &job.table_name).await,
-        "json" => connectors::json::fetch_dataset(&connection.config, &job.table_name).await,
+        "csv" => connectors::csv::fetch_dataset(state, &connection.config, &job.table_name).await,
+        "json" => connectors::json::fetch_dataset(state, &connection.config, &job.table_name).await,
         "rest_api" => {
-            connectors::rest_api::fetch_dataset(&connection.config, &job.table_name).await
+            connectors::rest_api::fetch_dataset(
+                state,
+                &connection.config,
+                &job.table_name,
+                agent_url.as_deref(),
+            )
+            .await
         }
         "salesforce" => {
-            connectors::salesforce::fetch_dataset(&connection.config, &job.table_name).await
+            connectors::salesforce::fetch_dataset(
+                state,
+                &connection.config,
+                &job.table_name,
+                agent_url.as_deref(),
+            )
+            .await
+        }
+        "sap" => {
+            connectors::sap::fetch_dataset(
+                state,
+                &connection.config,
+                &job.table_name,
+                agent_url.as_deref(),
+            )
+            .await
+        }
+        "iot" => {
+            connectors::iot::fetch_dataset(
+                state,
+                &connection.config,
+                &job.table_name,
+                agent_url.as_deref(),
+            )
+            .await
         }
         other => Err(format!("unsupported connector type for sync: {other}")),
     }
+}
+
+async fn lookup_registration(
+    state: &AppState,
+    connection_id: Uuid,
+    selector: &str,
+) -> Result<Option<ConnectionRegistration>, String> {
+    sqlx::query_as::<_, ConnectionRegistration>(
+        "SELECT * FROM connection_registrations WHERE connection_id = $1 AND selector = $2",
+    )
+    .bind(connection_id)
+    .bind(selector)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| error.to_string())
+}
+
+async fn mark_sync_skipped(
+    state: &AppState,
+    connection: &Connection,
+    job: &SyncJob,
+    registration: &ConnectionRegistration,
+    payload: &SyncPayload,
+    source_signature: &str,
+) -> Result<(), String> {
+    sqlx::query(
+        r#"UPDATE sync_jobs
+           SET status = 'completed',
+               rows_synced = 0,
+               error = NULL,
+               result_dataset_version = $3,
+               next_retry_at = NULL,
+               sync_metadata = $4::jsonb,
+               completed_at = NOW()
+           WHERE id = $1"#,
+    )
+    .bind(job.id)
+    .bind(0_i64)
+    .bind(registration.last_dataset_version)
+    .bind(json!({
+        "source": payload.metadata,
+        "source_signature": source_signature,
+        "change_detection": "unchanged",
+        "skipped": true,
+    }))
+    .execute(&state.db)
+    .await
+    .map_err(|error| error.to_string())?;
+
+    sqlx::query("UPDATE connections SET status = 'connected', updated_at = NOW() WHERE id = $1")
+        .bind(connection.id)
+        .execute(&state.db)
+        .await
+        .map_err(|error| error.to_string())?;
+
+    Ok(())
 }
 
 struct DatasetUploadResult {
