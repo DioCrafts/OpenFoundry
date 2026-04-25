@@ -47,6 +47,7 @@ pub async fn trigger_run(
         None,
         1,
         tenant.clamp_pipeline_workers(state.distributed_pipeline_workers),
+        body.skip_unchanged,
         context,
     )
     .await
@@ -92,6 +93,7 @@ pub async fn retry_run(
         &previous_run,
         body.from_node_id,
         tenant.clamp_pipeline_workers(state.distributed_pipeline_workers),
+        body.skip_unchanged,
     )
     .await
     {

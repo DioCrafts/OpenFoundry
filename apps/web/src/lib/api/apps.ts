@@ -21,6 +21,7 @@ export interface AppSettings {
 	custom_css: string | null;
 	builder_experience: string;
 	consumer_mode: ConsumerModeSettings;
+	interactive_workshop: WorkshopInteractiveSettings;
 	slate: SlateSettings;
 }
 
@@ -31,6 +32,25 @@ export interface ConsumerModeSettings {
 	portal_subtitle: string | null;
 	primary_cta_label: string | null;
 	primary_cta_url: string | null;
+}
+
+export interface WorkshopScenarioPreset {
+	id: string;
+	label: string;
+	description: string | null;
+	parameters: Record<string, string>;
+	prompt_template: string | null;
+}
+
+export interface WorkshopInteractiveSettings {
+	enabled: boolean;
+	title: string | null;
+	subtitle: string | null;
+	briefing_template: string | null;
+	primary_scenario_widget_id: string | null;
+	primary_agent_widget_id: string | null;
+	suggested_questions: string[];
+	scenario_presets: WorkshopScenarioPreset[];
 }
 
 export interface SlateSettings {

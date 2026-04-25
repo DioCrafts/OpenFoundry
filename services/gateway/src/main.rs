@@ -3,6 +3,7 @@ mod middleware;
 mod proxy;
 mod routes;
 
+use auth_middleware::JwtConfig;
 use axum::{Router, middleware as axum_mw, routing::get};
 use core_models::{health::HealthStatus, observability};
 use tower_http::trace::TraceLayer;
@@ -12,13 +13,18 @@ async fn main() {
     observability::init_tracing("gateway");
 
     let cfg = config::GatewayConfig::from_env().expect("failed to load config");
+    let jwt_config = JwtConfig::new(&cfg.jwt_secret).with_env_defaults();
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .expect("failed to build HTTP client");
-    let rate_limit_state =
-        middleware::rate_limit::RateLimitState::new(&cfg.jwt_secret, cfg.rate_limit.clone());
+    let rate_limit_state = middleware::rate_limit::RateLimitState::new(
+        jwt_config.clone(),
+        cfg.rate_limit.clone(),
+        cfg.redis_url.clone(),
+    )
+    .await;
 
     // Health check (unauthenticated)
     let health = Router::new().route(
@@ -27,7 +33,7 @@ async fn main() {
     );
 
     // API proxy routes
-    let api = routes::v1::router(cfg.clone(), client, rate_limit_state);
+    let api = routes::v1::router(cfg.clone(), client, jwt_config, rate_limit_state);
 
     let app = Router::new()
         .merge(health)

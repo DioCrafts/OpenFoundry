@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "open-foundry.platformProfileConfigMapName" (dict "root" .) }}
+  namespace: {{ include "open-foundry.namespace" (dict "root" .) }}
+  labels:
+{{ include "open-foundry.commonLabels" (dict "root" . "serviceName" "platform-profile") | nindent 4 }}
+data:
+  deployment-fabric.yaml: |
+    publicWebOrigin: {{ .Values.global.publicWebOrigin | quote }}
+    cloud: {{ .Values.global.deploymentFabric.cloud | quote }}
+    environment: {{ .Values.global.deploymentFabric.environment | quote }}
+    cell: {{ .Values.global.deploymentFabric.cell | quote }}
+    region: {{ .Values.global.deploymentFabric.region | quote }}
+    multiCloud:
+{{ toYaml .Values.global.deploymentFabric.multiCloud | nindent 6 }}
+    airGap:
+{{ toYaml .Values.global.deploymentFabric.airGap | nindent 6 }}
+    geoRestrictions:
+{{ toYaml .Values.global.deploymentFabric.geoRestrictions | nindent 6 }}
+  apollo-rollout.yaml: |
+    enabled: {{ .Values.apollo.enabled }}
+    schedule: {{ .Values.apollo.schedule | quote }}
+    actionMode: {{ .Values.apollo.actionMode | quote }}
+    gatewayUrl: {{ include "open-foundry.apolloGatewayUrl" (dict "root" .) | quote }}
+    readinessPath: {{ .Values.apollo.readinessPath | quote }}
+    fleetsPath: {{ .Values.apollo.fleetsPath | quote }}
+    reconcileFleetIds:
+{{ toYaml .Values.apollo.reconcileFleetIds | nindent 6 }}
+    promoteWebhookPath: {{ .Values.apollo.promoteWebhookPath | quote }}

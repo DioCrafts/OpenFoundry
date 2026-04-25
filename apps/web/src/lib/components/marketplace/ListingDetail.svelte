@@ -1,6 +1,6 @@
 <script lang="ts">
 	import InstallDialog from '$components/marketplace/InstallDialog.svelte';
-	import type { ListingDetail as ListingDetailModel } from '$lib/api/marketplace';
+	import type { ListingDetail as ListingDetailModel, ProductFleetRecord } from '$lib/api/marketplace';
 
 	type ReviewDraft = {
 		author: string;
@@ -13,11 +13,15 @@
 	type InstallDraft = {
 		version: string;
 		workspace_name: string;
+		release_channel: string;
+		fleet_id: string;
+		enrollment_branch: string;
 	};
 
 	export let detail: ListingDetailModel | null = null;
 	export let reviewDraft: ReviewDraft;
 	export let installDraft: InstallDraft;
+	export let fleets: ProductFleetRecord[] = [];
 	export let busy = false;
 	export let onReviewDraftChange: (patch: Partial<ReviewDraft>) => void;
 	export let onInstallDraftChange: (patch: Partial<InstallDraft>) => void;
@@ -73,7 +77,10 @@
 							<div class="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-4">
 								<div class="flex items-center justify-between gap-3">
 									<p class="font-medium text-stone-900">{version.version}</p>
-									<span class="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-stone-600">{version.dependency_mode}</span>
+									<div class="flex flex-wrap gap-2">
+										<span class="rounded-full bg-cyan-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-cyan-700">{version.release_channel}</span>
+										<span class="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-stone-600">{version.dependency_mode}</span>
+									</div>
 								</div>
 								<p class="mt-2 text-sm text-stone-600">{version.changelog}</p>
 								<div class="mt-3 flex flex-wrap gap-2">
@@ -81,6 +88,16 @@
 										<span class="rounded-full bg-white px-2 py-1 text-xs text-stone-600">{dependency.package_slug} {dependency.version_req}</span>
 									{/each}
 								</div>
+								{#if version.packaged_resources.length > 0}
+									<div class="mt-3 rounded-2xl border border-stone-200 bg-white px-3 py-3">
+										<p class="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Packaged resources</p>
+										<div class="mt-2 flex flex-wrap gap-2">
+											{#each version.packaged_resources as resource}
+												<span class="rounded-full bg-stone-100 px-2 py-1 text-xs text-stone-700">{resource.kind} · {resource.name}</span>
+											{/each}
+										</div>
+									</div>
+								{/if}
 							</div>
 						{/each}
 					</div>
@@ -110,9 +127,16 @@
 					versions={detail.versions.map((version) => version.version)}
 					version={installDraft.version}
 					workspaceName={installDraft.workspace_name}
+					releaseChannel={installDraft.release_channel}
+					fleetId={installDraft.fleet_id}
+					enrollmentBranch={installDraft.enrollment_branch}
+					fleets={fleets.filter((fleet) => fleet.listing_id === detail.listing.id)}
 					{busy}
 					onVersionChange={(version) => onInstallDraftChange({ version })}
 					onWorkspaceNameChange={(workspace_name) => onInstallDraftChange({ workspace_name })}
+					onReleaseChannelChange={(release_channel) => onInstallDraftChange({ release_channel })}
+					onFleetChange={(fleet_id) => onInstallDraftChange({ fleet_id })}
+					onEnrollmentBranchChange={(enrollment_branch) => onInstallDraftChange({ enrollment_branch })}
 					onInstall={onInstall}
 				/>
 

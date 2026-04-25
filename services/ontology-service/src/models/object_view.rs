@@ -31,6 +31,23 @@ pub struct ObjectSimulationRequest {
 }
 
 #[derive(Debug, Serialize)]
+pub struct ObjectSimulationImpactSummary {
+    pub scope: String,
+    pub action_kind: String,
+    pub predicted_delete: bool,
+    pub impacted_object_count: usize,
+    pub impacted_type_count: usize,
+    pub impacted_types: Vec<String>,
+    pub direct_neighbors: usize,
+    pub max_hops_reached: usize,
+    pub boundary_crossings: usize,
+    pub sensitive_objects: usize,
+    pub sensitive_markings: Vec<String>,
+    pub matching_rules: usize,
+    pub changed_properties: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct ObjectSimulationResponse {
     pub before: Value,
     pub after: Option<Value>,
@@ -38,6 +55,7 @@ pub struct ObjectSimulationResponse {
     pub action_preview: Value,
     pub matching_rules: Vec<RuleMatchResponse>,
     pub graph: GraphResponse,
+    pub impact_summary: ObjectSimulationImpactSummary,
     pub impacted_objects: Vec<Uuid>,
     pub timeline: Vec<Value>,
 }

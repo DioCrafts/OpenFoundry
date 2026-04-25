@@ -7,7 +7,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::{
-    domain::rbac,
+    domain::{access, rbac},
     models::{
         session::{ScopedSession, ScopedSessionKind, ScopedSessionRow, ScopedSessionWithToken},
         user::User,
@@ -187,11 +187,23 @@ fn normalize_scope(
     scope.allowed_subject_ids.dedup();
     scope.allowed_org_ids.sort();
     scope.allowed_org_ids.dedup();
+    scope.allowed_markings =
+        access::normalize_markings(&scope.allowed_markings).unwrap_or_default();
+    scope.restricted_view_ids.sort();
+    scope.restricted_view_ids.dedup();
 
     if scope.allowed_org_ids.is_empty() {
         if let Some(org_id) = user_org_id {
             scope.allowed_org_ids.push(org_id);
         }
+    }
+
+    if scope.classification_clearance.is_none() {
+        scope.classification_clearance = access::max_marking(&scope.allowed_markings);
+    }
+    if scope.allowed_markings.is_empty() {
+        scope.allowed_markings =
+            access::markings_for_clearance(scope.classification_clearance.as_deref());
     }
 
     if session_kind == ScopedSessionKind::Guest {
@@ -210,6 +222,10 @@ fn normalize_scope(
         if scope.classification_clearance.is_none() {
             scope.classification_clearance = Some("public".to_string());
         }
+        if scope.allowed_markings.is_empty() {
+            scope.allowed_markings = vec!["public".to_string()];
+        }
+        scope.consumer_mode = true;
     }
 }
 
@@ -249,18 +265,18 @@ mod tests {
     #[test]
     fn normalize_guest_scope_sets_safe_defaults() {
         let mut scope = SessionScope::default();
-        normalize_scope(
-            &mut scope,
-            Some(Uuid::nil()),
-            ScopedSessionKind::Guest,
-        );
+        normalize_scope(&mut scope, Some(Uuid::nil()), ScopedSessionKind::Guest);
         assert_eq!(scope.allowed_methods, vec!["GET".to_string()]);
-        assert!(scope
-            .allowed_path_prefixes
-            .iter()
-            .any(|prefix| prefix == "/api/v1/datasets"));
+        assert!(
+            scope
+                .allowed_path_prefixes
+                .iter()
+                .any(|prefix| prefix == "/api/v1/datasets")
+        );
         assert_eq!(scope.allowed_org_ids, vec![Uuid::nil()]);
         assert_eq!(scope.classification_clearance.as_deref(), Some("public"));
+        assert_eq!(scope.allowed_markings, vec!["public".to_string()]);
+        assert!(scope.consumer_mode);
     }
 
     #[test]

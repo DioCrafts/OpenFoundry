@@ -37,6 +37,19 @@ describe('app builder utilities', () => {
         primary_cta_label: null,
         primary_cta_url: null,
       },
+      interactive_workshop: {
+        enabled: false,
+        title: 'Interactive Workshop',
+        subtitle: 'Coordinate scenario presets, decision briefs, and copilots from one runtime surface.',
+        primary_scenario_widget_id: null,
+        primary_agent_widget_id: null,
+        briefing_template: 'Current scenario context:\n{{demand_multiplier}} demand multiplier\n{{service_level}} service level\nUse these assumptions to brief the operator.',
+        suggested_questions: [
+          'What changed versus the baseline scenario?',
+          'Which mitigations should the team prioritize first?',
+        ],
+        scenario_presets: [],
+      },
       slate: {
         enabled: false,
         framework: 'react',

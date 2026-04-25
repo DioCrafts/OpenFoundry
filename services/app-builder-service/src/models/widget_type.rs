@@ -160,7 +160,8 @@ pub fn widget_catalog() -> Vec<WidgetCatalogItem> {
                     }
                 ],
                 "apply_label": "Apply scenario",
-                "reset_label": "Reset"
+                "reset_label": "Reset",
+                "summary_template": "Scenario now set to {{demand_multiplier}} demand and {{service_level}} service level."
             }),
             default_size: WidgetDefaultSize {
                 width: 6,
@@ -183,7 +184,9 @@ pub fn widget_catalog() -> Vec<WidgetCatalogItem> {
                 "welcome_message": "This widget can call a real OpenFoundry agent and bring the response back into the app.",
                 "knowledge_base_id": "",
                 "show_traces": true,
-                "submit_label": "Run agent"
+                "submit_label": "Run agent",
+                "include_runtime_context": true,
+                "runtime_context_intro": "Current Workshop scenario context:"
             }),
             default_size: WidgetDefaultSize {
                 width: 6,

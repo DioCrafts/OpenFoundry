@@ -1,7 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
-  import { askCopilot, type CopilotResponse } from '$lib/api/ai';
+  import {
+    askCopilot,
+    listKnowledgeBases,
+    listProviders,
+    type CopilotResponse,
+    type KnowledgeBase,
+    type LlmProvider,
+  } from '$lib/api/ai';
   import { listDatasets, type Dataset } from '$lib/api/datasets';
   import {
     createPipeline,
@@ -48,6 +55,8 @@
   let columnLineage = $state<ColumnLineageEdge[]>([]);
   let topologies = $state<TopologyDefinition[]>([]);
   let topologyRuntime = $state<TopologyRuntimeSnapshot | null>(null);
+  let llmProviders = $state<LlmProvider[]>([]);
+  let knowledgeBases = $state<KnowledgeBase[]>([]);
   let loading = $state(true);
   let saving = $state(false);
   let running = $state(false);
@@ -63,9 +72,12 @@
   let copilotResponse = $state<CopilotResponse | null>(null);
   let copilotError = $state('');
   let draft = $state<PipelineDraft>(createEmptyPipeline());
+  let buildMode = $state<'incremental' | 'full_rebuild'>('incremental');
 
   type HybridCanvasMode = 'hybrid' | 'batch';
   let canvasMode = $state<HybridCanvasMode>('hybrid');
+
+  type SuggestedTransform = 'spark' | 'external' | 'llm' | 'pyspark';
 
   function makeId() {
     if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -75,21 +87,54 @@
     return `node_${Date.now()}_${Math.floor(Math.random() * 10_000)}`;
   }
 
+  function transformTypeLabel(transformType: string) {
+    if (transformType === 'pyspark') return 'PySpark';
+    if (transformType === 'llm') return 'LLM';
+    if (transformType === 'wasm') return 'WASM';
+    return transformType.charAt(0).toUpperCase() + transformType.slice(1);
+  }
+
+  function isSparkFamily(node: PipelineNode) {
+    return node.transform_type === 'spark' || node.transform_type === 'pyspark';
+  }
+
+  function isRemoteComputeNode(node: PipelineNode) {
+    return isSparkFamily(node) || node.transform_type === 'external';
+  }
+
   function createNode(transformType = 'sql'): PipelineNode {
     const config: Record<string, unknown> =
       transformType === 'sql'
         ? { sql: 'SELECT 1 AS value' }
         : transformType === 'python'
           ? { source: 'rows_affected = 0\nresult = "python transform ready"' }
+          : transformType === 'llm'
+            ? {
+                system_prompt: 'You are an OpenFoundry pipeline LLM transform. Produce concise, factual outputs.',
+                prompt:
+                  'Classify or enrich the following record and return the result.\n\n{{input_json}}',
+                input_field: '',
+                output_field: 'llm_response',
+                response_format: 'text',
+                flatten_json_output: false,
+                preserve_input: true,
+                fallback_enabled: true,
+                max_rows: 25,
+                max_tokens: 256,
+                temperature: 0.2,
+                knowledge_base_id: '',
+                preferred_provider_id: '',
+              }
           : transformType === 'wasm'
             ? { module: '(module (func (export "run") (result i32) i32.const 0))', function: 'run' }
-            : transformType === 'spark'
+            : transformType === 'spark' || transformType === 'pyspark'
               ? {
                   endpoint: '',
                   auth_mode: 'service_jwt',
                   job_type: 'spark-batch',
                   cluster_profile: 'shared',
                   entrypoint: 'main',
+                  runtime: transformType,
                   source:
                     'from pyspark.sql import functions as F\n# Remote Spark runner receives config + prepared inputs.\n# Emit result_rows from the external compute service.',
                 }
@@ -104,7 +149,7 @@
 
     return {
       id: makeId(),
-      label: `${transformType.toUpperCase()} transform`,
+      label: `${transformTypeLabel(transformType)} transform`,
       transform_type: transformType,
       config,
       depends_on: [],
@@ -173,6 +218,21 @@
     return typeof node.config?.[key] === 'string' ? String(node.config[key]) : fallback;
   }
 
+  function numericConfig(node: PipelineNode, key: string, fallback = 0) {
+    const value = node.config?.[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return fallback;
+  }
+
+  function booleanConfig(node: PipelineNode, key: string, fallback = false) {
+    const value = node.config?.[key];
+    return typeof value === 'boolean' ? value : fallback;
+  }
+
   function identityColumns(node: PipelineNode) {
     const columns = node.config?.['identity_columns'];
     return Array.isArray(columns) ? columns.filter((value): value is string => typeof value === 'string').join(', ') : '';
@@ -180,15 +240,17 @@
 
   function nodeCodeKey(node: PipelineNode) {
     if (node.transform_type === 'sql') return 'sql';
+    if (node.transform_type === 'llm') return 'prompt';
     if (node.transform_type === 'wasm') return 'module';
     return 'source';
   }
 
   function nodeCode(node: PipelineNode) {
     if (node.transform_type === 'sql') return stringConfig(node, 'sql');
-    if (node.transform_type === 'python' || node.transform_type === 'spark' || node.transform_type === 'external') {
+    if (node.transform_type === 'python' || isRemoteComputeNode(node)) {
       return stringConfig(node, 'source');
     }
+    if (node.transform_type === 'llm') return stringConfig(node, 'prompt');
     if (node.transform_type === 'wasm') return stringConfig(node, 'module');
     return '';
   }
@@ -196,8 +258,10 @@
   function nodeCodeLabel(node: PipelineNode) {
     if (node.transform_type === 'sql') return 'SQL';
     if (node.transform_type === 'python') return 'Python source';
+    if (node.transform_type === 'llm') return 'Prompt template';
     if (node.transform_type === 'wasm') return 'WASM module';
     if (node.transform_type === 'spark') return 'Remote Spark job spec';
+    if (node.transform_type === 'pyspark') return 'Remote PySpark job spec';
     if (node.transform_type === 'external') return 'External compute payload';
     return 'Passthrough config';
   }
@@ -221,6 +285,20 @@
       topologyCount: topologies.length,
       streamingEdges: topologyRuntime?.topology.edges.length ?? 0,
     };
+  }
+
+  function buildContext(run: PipelineRun) {
+    const build = run.execution_context?.['build'];
+    return build && typeof build === 'object' ? build as Record<string, unknown> : null;
+  }
+
+  function buildModeLabel(run: PipelineRun) {
+    return buildContext(run)?.['mode'] === 'full_rebuild' ? 'Full rebuild' : 'Incremental';
+  }
+
+  function buildMetric(run: PipelineRun, key: string) {
+    const value = buildContext(run)?.[key];
+    return typeof value === 'number' ? value : 0;
   }
 
   function updateNode(nodeId: string, updater: (node: PipelineNode) => PipelineNode) {
@@ -256,6 +334,21 @@
     ]);
     pipelines = pipelineResponse.data;
     datasets = datasetResponse.data;
+  }
+
+  async function loadAiRegistry() {
+    try {
+      const [providerResponse, knowledgeBaseResponse] = await Promise.all([
+        listProviders(),
+        listKnowledgeBases(),
+      ]);
+      llmProviders = providerResponse.data;
+      knowledgeBases = knowledgeBaseResponse.data;
+    } catch (cause) {
+      console.warn('Failed to load AI registry for pipeline builder', cause);
+      llmProviders = [];
+      knowledgeBases = [];
+    }
   }
 
   async function loadTopologyRuntime(id: string) {
@@ -347,14 +440,14 @@
     notifications.success('AI SQL node added to the pipeline draft');
   }
 
-  function applyRemoteTemplate(transformType: 'spark' | 'external') {
+  function applySuggestedNode(transformType: SuggestedTransform) {
     const node = createNode(transformType);
     const suggestion = copilotResponse?.pipeline_suggestions[0];
     if (suggestion) {
       node.label = suggestion.length > 48 ? `${suggestion.slice(0, 45)}...` : suggestion;
     }
     draft = { ...draft, nodes: [...draft.nodes, node] };
-    notifications.success(`${transformType === 'spark' ? 'Spark' : 'External compute'} node added`);
+    notifications.success(`${transformTypeLabel(transformType)} node added`);
   }
 
   async function loadRuns() {
@@ -398,7 +491,7 @@
     loading = true;
     error = '';
     try {
-      await Promise.all([loadRegistry(), loadStreamingRegistry()]);
+      await Promise.all([loadRegistry(), loadStreamingRegistry(), loadAiRegistry()]);
       if (selectedPipelineId) {
         await selectPipeline(selectedPipelineId);
       } else if (pipelines.length > 0) {
@@ -560,8 +653,13 @@
     running = true;
     error = '';
     try {
-      await triggerRun(draft.id, {});
-      notifications.success('Pipeline run started');
+      await triggerRun(draft.id, {
+        skip_unchanged: buildMode !== 'full_rebuild',
+        context: {
+          requested_build_mode: buildMode,
+        },
+      });
+      notifications.success(buildMode === 'full_rebuild' ? 'Full rebuild started' : 'Incremental pipeline run started');
       await Promise.all([loadRuns(), loadLineage(), loadRegistry()]);
     } catch (cause) {
       error = cause instanceof Error ? cause.message : 'Failed to run pipeline';
@@ -576,8 +674,11 @@
     error = '';
     try {
       const failedNode = partial ? (run.node_results ?? []).find((result) => result.status === 'failed')?.node_id : undefined;
-      await retryPipelineRun(draft.id, run.id, failedNode ? { from_node_id: failedNode } : {});
-      notifications.success(partial ? 'Partial re-execution started' : 'Retry started');
+      await retryPipelineRun(draft.id, run.id, {
+        ...(failedNode ? { from_node_id: failedNode } : {}),
+        skip_unchanged: buildMode !== 'full_rebuild',
+      });
+      notifications.success(partial ? 'Partial re-execution started' : buildMode === 'full_rebuild' ? 'Full rebuild retry started' : 'Incremental retry started');
       await Promise.all([loadRuns(), loadLineage(), loadRegistry()]);
     } catch (cause) {
       error = cause instanceof Error ? cause.message : 'Failed to retry pipeline';
@@ -615,7 +716,7 @@
   <div class="flex items-center justify-between">
     <div>
       <h1 class="text-2xl font-bold">Pipeline Enhancements</h1>
-      <p class="mt-1 text-sm text-gray-500">Author hybrid batch and streaming flows with SQL, Python, Spark, external compute, in-builder AI assist, lineage, and rerun controls.</p>
+      <p class="mt-1 text-sm text-gray-500">Author hybrid batch and streaming flows with SQL, Python, PySpark, LLM transforms, external compute, in-builder AI assist, lineage, and rerun controls.</p>
     </div>
     <div class="flex gap-2">
       <button type="button" onclick={newPipeline} class="rounded-xl border border-slate-200 px-4 py-2 hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">New pipeline</button>
@@ -737,10 +838,26 @@
           </div>
         </div>
 
-        <div class="mt-4 flex flex-wrap gap-2">
-          <button type="button" onclick={() => void runPipeline()} disabled={!draft.id || running} class="rounded-xl bg-slate-900 px-4 py-2 text-white disabled:opacity-50 dark:bg-white dark:text-slate-900">
-            {running ? 'Running...' : 'Run now'}
-          </button>
+        <div class="mt-4 space-y-3">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-sm font-medium">Build mode</span>
+            <button type="button" onclick={() => buildMode = 'incremental'} class={`rounded-xl px-3 py-2 text-sm ${buildMode === 'incremental' ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'border border-slate-200 hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800'}`}>Incremental</button>
+            <button type="button" onclick={() => buildMode = 'full_rebuild'} class={`rounded-xl px-3 py-2 text-sm ${buildMode === 'full_rebuild' ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'border border-slate-200 hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800'}`}>Full rebuild</button>
+            <span class="text-xs text-gray-500">{buildMode === 'incremental' ? 'Reuse unchanged node results when fingerprints match.' : 'Force every node to re-run even if inputs are unchanged.'}</span>
+          </div>
+
+          <div class="flex flex-wrap gap-2">
+            <button type="button" onclick={() => void runPipeline()} disabled={!draft.id || running} class="rounded-xl bg-slate-900 px-4 py-2 text-white disabled:opacity-50 dark:bg-white dark:text-slate-900">
+              {running ? 'Running...' : buildMode === 'full_rebuild' ? 'Run full rebuild' : 'Run incremental'}
+            </button>
+            <button type="button" onclick={() => { buildMode = 'full_rebuild'; void runPipeline(); }} disabled={!draft.id || running || buildMode === 'full_rebuild'} class="rounded-xl border border-slate-200 px-4 py-2 disabled:opacity-50 hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">
+              Force full rebuild
+            </button>
+            <button type="button" onclick={() => { buildMode = 'incremental'; void runPipeline(); }} disabled={!draft.id || running || buildMode === 'incremental'} class="rounded-xl border border-slate-200 px-4 py-2 disabled:opacity-50 hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">
+              Force incremental
+            </button>
+          </div>
+
           <button type="button" onclick={() => void runSchedules()} disabled={running} class="rounded-xl border border-slate-200 px-4 py-2 disabled:opacity-50 hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">
             Evaluate due schedules
           </button>
@@ -756,7 +873,7 @@
         <div class="flex items-center justify-between">
           <div>
             <div class="text-xs uppercase tracking-[0.22em] text-gray-400">Pipeline builder</div>
-            <div class="mt-1 text-sm text-gray-500">Author hybrid batch and streaming orchestration with remote Spark, external compute, in-builder AI assist, and shared operational context.</div>
+            <div class="mt-1 text-sm text-gray-500">Author hybrid batch and streaming orchestration with remote Spark, PySpark, LLM transforms, external compute, in-builder AI assist, and shared operational context.</div>
           </div>
           <div class="flex flex-wrap gap-2">
             <button type="button" onclick={() => canvasMode = 'hybrid'} class={`rounded-xl px-3 py-2 text-sm ${canvasMode === 'hybrid' ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'border border-slate-200 hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800'}`}>Hybrid view</button>
@@ -764,6 +881,8 @@
             <button type="button" onclick={() => addNode('sql')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">+ SQL</button>
             <button type="button" onclick={() => addNode('python')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">+ Python</button>
             <button type="button" onclick={() => addNode('spark')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">+ Spark</button>
+            <button type="button" onclick={() => addNode('pyspark')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">+ PySpark</button>
+            <button type="button" onclick={() => addNode('llm')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">+ LLM</button>
             <button type="button" onclick={() => addNode('external')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">+ External</button>
             <button type="button" onclick={() => addNode('wasm')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">+ WASM</button>
             <button type="button" onclick={() => addNode('passthrough')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">+ Passthrough</button>
@@ -799,7 +918,7 @@
               <div class="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 shadow-sm dark:border-gray-700 dark:bg-gray-950/40">
                 <div class="flex items-center justify-between gap-3">
                   <div class="flex items-center gap-3">
-                    <span class="rounded-full bg-white px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-600 dark:bg-gray-900 dark:text-gray-300">{node.transform_type}</span>
+                    <span class="rounded-full bg-white px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-600 dark:bg-gray-900 dark:text-gray-300">{transformTypeLabel(node.transform_type)}</span>
                     <input aria-label="Node label" value={node.label} oninput={(event) => setNodeField(node.id, 'label', (event.currentTarget as HTMLInputElement).value)} class="rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900" />
                   </div>
                   <div class="flex items-center gap-2">
@@ -807,6 +926,8 @@
                       <option value="sql">SQL</option>
                       <option value="python">Python</option>
                       <option value="spark">Spark</option>
+                      <option value="pyspark">PySpark</option>
+                      <option value="llm">LLM</option>
                       <option value="external">External</option>
                       <option value="wasm">WASM</option>
                       <option value="passthrough">Passthrough</option>
@@ -881,7 +1002,7 @@
                       </div>
                     {/if}
 
-                    {#if node.transform_type === 'spark' || node.transform_type === 'external'}
+                    {#if isRemoteComputeNode(node)}
                       <div class="rounded-xl border border-slate-200 p-4 dark:border-gray-700">
                         <div class="grid gap-4 md:grid-cols-2">
                           <div>
@@ -889,23 +1010,102 @@
                             <input id={`endpoint-${node.id}`} value={stringConfig(node, 'endpoint')} oninput={(event) => setNodeConfig(node.id, 'endpoint', (event.currentTarget as HTMLInputElement).value)} placeholder="http://compute.local/jobs/run" class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
                           </div>
                           <div>
-                            <label for={`job-type-${node.id}`} class="mb-1 block text-sm font-medium">{node.transform_type === 'spark' ? 'Job type' : 'External job type'}</label>
-                            <input id={`job-type-${node.id}`} value={stringConfig(node, 'job_type', node.transform_type === 'spark' ? 'spark-batch' : 'external-job')} oninput={(event) => setNodeConfig(node.id, 'job_type', (event.currentTarget as HTMLInputElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
+                            <label for={`job-type-${node.id}`} class="mb-1 block text-sm font-medium">{isSparkFamily(node) ? 'Job type' : 'External job type'}</label>
+                            <input id={`job-type-${node.id}`} value={stringConfig(node, 'job_type', isSparkFamily(node) ? 'spark-batch' : 'external-job')} oninput={(event) => setNodeConfig(node.id, 'job_type', (event.currentTarget as HTMLInputElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
                           </div>
                           <div>
                             <label for={`auth-mode-${node.id}`} class="mb-1 block text-sm font-medium">Auth mode</label>
-                            <select id={`auth-mode-${node.id}`} value={stringConfig(node, 'auth_mode', node.transform_type === 'spark' ? 'service_jwt' : 'none')} oninput={(event) => setNodeConfig(node.id, 'auth_mode', (event.currentTarget as HTMLSelectElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
+                            <select id={`auth-mode-${node.id}`} value={stringConfig(node, 'auth_mode', isSparkFamily(node) ? 'service_jwt' : 'none')} oninput={(event) => setNodeConfig(node.id, 'auth_mode', (event.currentTarget as HTMLSelectElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
                               <option value="none">None</option>
                               <option value="service_jwt">Service JWT</option>
                             </select>
                           </div>
                           <div>
-                            <label for={`profile-${node.id}`} class="mb-1 block text-sm font-medium">{node.transform_type === 'spark' ? 'Cluster profile' : 'Entrypoint'}</label>
-                            <input id={`profile-${node.id}`} value={stringConfig(node, node.transform_type === 'spark' ? 'cluster_profile' : 'entrypoint', node.transform_type === 'spark' ? 'shared' : 'main')} oninput={(event) => setNodeConfig(node.id, node.transform_type === 'spark' ? 'cluster_profile' : 'entrypoint', (event.currentTarget as HTMLInputElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
+                            <label for={`profile-${node.id}`} class="mb-1 block text-sm font-medium">{isSparkFamily(node) ? 'Cluster profile' : 'Entrypoint'}</label>
+                            <input id={`profile-${node.id}`} value={stringConfig(node, isSparkFamily(node) ? 'cluster_profile' : 'entrypoint', isSparkFamily(node) ? 'shared' : 'main')} oninput={(event) => setNodeConfig(node.id, isSparkFamily(node) ? 'cluster_profile' : 'entrypoint', (event.currentTarget as HTMLInputElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
                           </div>
                         </div>
                         <div class="mt-3 rounded-xl bg-slate-100 px-3 py-3 text-xs text-slate-600 dark:bg-slate-950/60 dark:text-slate-300">
                           Remote compute contract: the builder posts `job_type`, full `config`, prepared input rows, and the optional `output_dataset_id`. The remote runner should return JSON with `status`, optional `output`, and optional `result_rows`.
+                        </div>
+                      </div>
+                    {/if}
+
+                    {#if node.transform_type === 'llm'}
+                      <div class="rounded-xl border border-slate-200 p-4 dark:border-gray-700">
+                        <div class="grid gap-4 md:grid-cols-2">
+                          <div>
+                            <label for={`llm-input-field-${node.id}`} class="mb-1 block text-sm font-medium">Input field</label>
+                            <input id={`llm-input-field-${node.id}`} value={stringConfig(node, 'input_field')} oninput={(event) => setNodeConfig(node.id, 'input_field', (event.currentTarget as HTMLInputElement).value)} placeholder="review_text" class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
+                          </div>
+                          <div>
+                            <label for={`llm-output-field-${node.id}`} class="mb-1 block text-sm font-medium">Output field</label>
+                            <input id={`llm-output-field-${node.id}`} value={stringConfig(node, 'output_field', 'llm_response')} oninput={(event) => setNodeConfig(node.id, 'output_field', (event.currentTarget as HTMLInputElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
+                          </div>
+                          <div>
+                            <label for={`llm-provider-${node.id}`} class="mb-1 block text-sm font-medium">Preferred provider</label>
+                            <select id={`llm-provider-${node.id}`} value={stringConfig(node, 'preferred_provider_id')} oninput={(event) => setNodeConfig(node.id, 'preferred_provider_id', (event.currentTarget as HTMLSelectElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
+                              <option value="">Auto-route provider</option>
+                              {#each llmProviders as provider (provider.id)}
+                                <option value={provider.id}>{provider.name} · {provider.model_name}</option>
+                              {/each}
+                            </select>
+                          </div>
+                          <div>
+                            <label for={`llm-kb-${node.id}`} class="mb-1 block text-sm font-medium">Knowledge base</label>
+                            <select id={`llm-kb-${node.id}`} value={stringConfig(node, 'knowledge_base_id')} oninput={(event) => setNodeConfig(node.id, 'knowledge_base_id', (event.currentTarget as HTMLSelectElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
+                              <option value="">No retrieval</option>
+                              {#each knowledgeBases as knowledgeBase (knowledgeBase.id)}
+                                <option value={knowledgeBase.id}>{knowledgeBase.name}</option>
+                              {/each}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div class="mt-4">
+                          <label for={`llm-system-${node.id}`} class="mb-1 block text-sm font-medium">System prompt</label>
+                          <textarea id={`llm-system-${node.id}`} rows="3" value={stringConfig(node, 'system_prompt')} oninput={(event) => setNodeConfig(node.id, 'system_prompt', (event.currentTarget as HTMLTextAreaElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900"></textarea>
+                        </div>
+
+                        <div class="mt-4 grid gap-4 md:grid-cols-2">
+                          <div>
+                            <label for={`llm-response-format-${node.id}`} class="mb-1 block text-sm font-medium">Response format</label>
+                            <select id={`llm-response-format-${node.id}`} value={stringConfig(node, 'response_format', 'text')} oninput={(event) => setNodeConfig(node.id, 'response_format', (event.currentTarget as HTMLSelectElement).value)} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
+                              <option value="text">Text</option>
+                              <option value="json">JSON</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label for={`llm-max-rows-${node.id}`} class="mb-1 block text-sm font-medium">Max rows per run</label>
+                            <input id={`llm-max-rows-${node.id}`} type="number" min="1" value={numericConfig(node, 'max_rows', 25)} oninput={(event) => setNodeConfig(node.id, 'max_rows', Number((event.currentTarget as HTMLInputElement).value || 25))} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
+                          </div>
+                          <div>
+                            <label for={`llm-max-tokens-${node.id}`} class="mb-1 block text-sm font-medium">Max tokens</label>
+                            <input id={`llm-max-tokens-${node.id}`} type="number" min="32" step="32" value={numericConfig(node, 'max_tokens', 256)} oninput={(event) => setNodeConfig(node.id, 'max_tokens', Number((event.currentTarget as HTMLInputElement).value || 256))} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
+                          </div>
+                          <div>
+                            <label for={`llm-temperature-${node.id}`} class="mb-1 block text-sm font-medium">Temperature</label>
+                            <input id={`llm-temperature-${node.id}`} type="number" min="0" max="2" step="0.1" value={numericConfig(node, 'temperature', 0.2)} oninput={(event) => setNodeConfig(node.id, 'temperature', Number((event.currentTarget as HTMLInputElement).value || 0.2))} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
+                          </div>
+                        </div>
+
+                        <div class="mt-4 grid gap-3 md:grid-cols-3 text-sm">
+                          <label class="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700">
+                            <span>Preserve input fields</span>
+                            <input type="checkbox" checked={booleanConfig(node, 'preserve_input', true)} onchange={(event) => setNodeConfig(node.id, 'preserve_input', (event.currentTarget as HTMLInputElement).checked)} />
+                          </label>
+                          <label class="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700">
+                            <span>Flatten JSON output</span>
+                            <input type="checkbox" checked={booleanConfig(node, 'flatten_json_output', false)} onchange={(event) => setNodeConfig(node.id, 'flatten_json_output', (event.currentTarget as HTMLInputElement).checked)} />
+                          </label>
+                          <label class="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 dark:border-gray-700">
+                            <span>Fallback providers</span>
+                            <input type="checkbox" checked={booleanConfig(node, 'fallback_enabled', true)} onchange={(event) => setNodeConfig(node.id, 'fallback_enabled', (event.currentTarget as HTMLInputElement).checked)} />
+                          </label>
+                        </div>
+
+                        <div class="mt-3 rounded-xl bg-slate-100 px-3 py-3 text-xs text-slate-600 dark:bg-slate-950/60 dark:text-slate-300">
+                          Prompt placeholders: <code>{'{{input_json}}'}</code>, <code>{'{{input_text}}'}</code>, <code>{'{{dataset_name}}'}</code>, <code>{'{{dataset_id}}'}</code>, <code>{'{{dataset_alias}}'}</code>, <code>{'{{row_index}}'}</code>, <code>{'{{row_count}}'}</code>, <code>{'{{input_rows_json}}'}</code>.
                         </div>
                       </div>
                     {/if}
@@ -950,7 +1150,7 @@
                 <div class="flex items-center justify-between gap-3">
                   <div>
                     <div class="text-xs uppercase tracking-[0.22em] text-gray-400">AI builder assist</div>
-                    <div class="mt-1 text-sm text-gray-500">Generate starter SQL and node ideas from the datasets already wired into the draft.</div>
+                    <div class="mt-1 text-sm text-gray-500">Generate starter SQL plus LLM, PySpark, Spark, and external node ideas from the datasets already wired into the draft.</div>
                   </div>
                   <button type="button" onclick={() => void requestCopilotPlan()} disabled={copilotLoading} class="rounded-xl bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-50 dark:bg-white dark:text-slate-900">
                     {copilotLoading ? 'Thinking...' : 'Ask Copilot'}
@@ -987,9 +1187,11 @@
                             <div class="rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-gray-700">{suggestion}</div>
                           {/each}
                         </div>
-                        <div class="mt-3 flex gap-2">
-                          <button type="button" onclick={() => applyRemoteTemplate('spark')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">Add Spark node</button>
-                          <button type="button" onclick={() => applyRemoteTemplate('external')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">Add External node</button>
+                        <div class="mt-3 flex flex-wrap gap-2">
+                          <button type="button" onclick={() => applySuggestedNode('llm')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">Add LLM node</button>
+                          <button type="button" onclick={() => applySuggestedNode('pyspark')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">Add PySpark node</button>
+                          <button type="button" onclick={() => applySuggestedNode('spark')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">Add Spark node</button>
+                          <button type="button" onclick={() => applySuggestedNode('external')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">Add External node</button>
                         </div>
                       </div>
                     {/if}
@@ -1051,13 +1253,13 @@
                           <div class="grid gap-3 md:grid-cols-2">
                             <div class="rounded-xl border border-slate-200 p-3 dark:border-gray-700">
                               <div class="text-xs uppercase tracking-[0.22em] text-gray-400">Latest run</div>
-                              <div class="mt-2 text-sm font-medium">{topologyRuntime.latest_run?.status ?? 'No runs yet'}</div>
-                              <div class="mt-1 text-xs text-gray-500">{topologyRuntime.latest_run ? `${topologyRuntime.latest_run.metrics.input_events} input events` : 'Trigger the topology to capture runtime metrics.'}</div>
+                              <div class="mt-2 text-sm font-medium">{topologyRuntime.latest_run?.status ?? (topologyRuntime.preview ? 'Live preview' : 'No runs yet')}</div>
+                              <div class="mt-1 text-xs text-gray-500">{topologyRuntime.latest_run ? `${topologyRuntime.latest_run.metrics.input_events} input events` : topologyRuntime.preview ? `${topologyRuntime.preview.backlog_events} backlog event(s) ready to process` : 'Trigger the topology to capture runtime metrics.'}</div>
                             </div>
                             <div class="rounded-xl border border-slate-200 p-3 dark:border-gray-700">
                               <div class="text-xs uppercase tracking-[0.22em] text-gray-400">Latency</div>
-                              <div class="mt-2 text-sm font-medium">{topologyRuntime.latest_run?.metrics.avg_latency_ms ?? 0} ms avg</div>
-                              <div class="mt-1 text-xs text-gray-500">{topologyRuntime.latest_run?.metrics.throughput_per_second ?? 0} events/s</div>
+                              <div class="mt-2 text-sm font-medium">{topologyRuntime.latest_run?.metrics.avg_latency_ms ?? topologyRuntime.preview?.metrics.avg_latency_ms ?? 0} ms avg</div>
+                              <div class="mt-1 text-xs text-gray-500">{topologyRuntime.latest_run?.metrics.throughput_per_second ?? topologyRuntime.preview?.metrics.throughput_per_second ?? 0} events/s</div>
                             </div>
                           </div>
 
@@ -1115,9 +1317,13 @@
                     <div class="flex items-center gap-2">
                       <div class="font-medium">{run.trigger_type} run</div>
                       <span class={`rounded-full px-2.5 py-1 text-xs font-medium ${statusBadge(run.status)}`}>{run.status}</span>
+                      <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 dark:bg-gray-800 dark:text-gray-200">{buildModeLabel(run)}</span>
                     </div>
                     <div class="mt-1 text-sm text-gray-500">Attempt {run.attempt_number} · {nodeResultSummary(run)}</div>
                     <div class="mt-1 text-xs text-gray-500">Started {new Date(run.started_at).toLocaleString()}</div>
+                    <div class="mt-1 text-xs text-gray-500">
+                      Completed {buildMetric(run, 'completed_nodes')} · Skipped {buildMetric(run, 'skipped_nodes')} · Failed {buildMetric(run, 'failed_nodes')}
+                    </div>
                     {#if run.started_from_node_id}
                       <div class="mt-1 text-xs text-gray-500">Partial from node {run.started_from_node_id}</div>
                     {/if}
@@ -1126,7 +1332,9 @@
                     {/if}
                   </div>
                   <div class="flex flex-col gap-2">
-                    <button type="button" onclick={() => void rerunPipeline(run, false)} disabled={running} class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm disabled:opacity-50 hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">Retry full</button>
+                    <button type="button" onclick={() => void rerunPipeline(run, false)} disabled={running} class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm disabled:opacity-50 hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">
+                      {buildMode === 'full_rebuild' ? 'Retry full rebuild' : 'Retry incremental'}
+                    </button>
                     <button type="button" onclick={() => void rerunPipeline(run, true)} disabled={running || !draft.retry_policy.allow_partial_reexecution} class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm disabled:opacity-50 hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">Retry failed slice</button>
                   </div>
                 </div>

@@ -23,6 +23,7 @@
 		user_message: string;
 		objective: string;
 		knowledge_base_id: string;
+		context_text: string;
 	}
 
 	interface Props {
@@ -73,6 +74,7 @@
 		user_message: '',
 		objective: '',
 		knowledge_base_id: '',
+		context_text: '',
 	});
 
 	$effect(() => {
@@ -163,6 +165,7 @@
 							<option value={knowledgeBase.id}>{knowledgeBase.name}</option>
 						{/each}
 					</select>
+					<textarea class="h-40 rounded-2xl border border-slate-200 bg-white px-4 py-3 font-mono text-xs dark:border-slate-800 dark:bg-slate-950" oninput={(event) => updateExecution('context_text', (event.currentTarget as HTMLTextAreaElement).value)}>{localExecutionDraft.context_text}</textarea>
 				</div>
 
 				{#if executionResponse}
@@ -174,10 +177,11 @@
 						{#each executionResponse.traces as trace}
 							<div class="rounded-2xl border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950">
 								<div class="flex items-center justify-between gap-3 text-sm">
-									<span class="font-semibold text-slate-900 dark:text-slate-100">Step {trace.step_number}</span>
+									<span class="font-semibold text-slate-900 dark:text-slate-100">{trace.title}</span>
 									<span class="text-xs text-slate-500">{trace.tool_name ?? 'reasoning'}</span>
 								</div>
 								<p class="mt-2 text-sm text-slate-600 dark:text-slate-300">{trace.observation}</p>
+								<pre class="mt-3 overflow-x-auto rounded-2xl bg-slate-950 px-3 py-3 text-xs text-cyan-100">{JSON.stringify(trace.output, null, 2)}</pre>
 							</div>
 						{/each}
 					</div>

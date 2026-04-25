@@ -15,6 +15,14 @@ pub struct ProviderRoutingRules {
     pub weight: i32,
     #[serde(default = "default_context_tokens")]
     pub max_context_tokens: i32,
+    #[serde(default = "default_network_scope")]
+    pub network_scope: String,
+    #[serde(default = "default_supported_modalities")]
+    pub supported_modalities: Vec<String>,
+    #[serde(default)]
+    pub input_cost_per_1k_tokens_usd: f32,
+    #[serde(default)]
+    pub output_cost_per_1k_tokens_usd: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,6 +174,14 @@ fn default_context_tokens() -> i32 {
 
 fn default_provider_type() -> String {
     "openai".to_string()
+}
+
+fn default_network_scope() -> String {
+    "public".to_string()
+}
+
+fn default_supported_modalities() -> Vec<String> {
+    vec!["text".to_string()]
 }
 
 fn default_model_name() -> String {

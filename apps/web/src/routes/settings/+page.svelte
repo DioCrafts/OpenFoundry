@@ -8,10 +8,12 @@
     createGroup,
     createPermission,
     createPolicy,
+    createRestrictedView,
     createRole,
     createSsoProvider,
     deactivateUser,
     deletePolicy,
+    deleteRestrictedView,
     deleteSsoProvider,
     disableMfa,
     enrollMfa,
@@ -21,6 +23,7 @@
     listGroups,
     listPermissions,
     listPolicies,
+    listRestrictedViews,
     listRoles,
     listSsoProviders,
     listUsers,
@@ -37,6 +40,7 @@
     type PermissionRecord,
     type PolicyEvaluationResult,
     type PolicyRecord,
+    type RestrictedViewRecord,
     type RoleRecord,
     type SsoProviderRecord,
     type UserProfile,
@@ -58,6 +62,7 @@
   let roles = $state<RoleRecord[]>([]);
   let groups = $state<GroupRecord[]>([]);
   let policies = $state<PolicyRecord[]>([]);
+  let restrictedViews = $state<RestrictedViewRecord[]>([]);
   let apiKeys = $state<ApiKeyRecord[]>([]);
   let mfaStatus = $state<MfaStatusResponse | null>(null);
   let mfaEnrollment = $state<MfaEnrollmentResponse | null>(null);
@@ -83,10 +88,25 @@
     row_filter: '',
     enabled: true,
   });
+  let restrictedViewForm = $state({
+    name: '',
+    description: '',
+    resource: 'datasets',
+    action: 'read',
+    conditions: '{\n  "subject": {},\n  "resource": {\n    "organization_id": null,\n    "effective_marking": "public"\n  }\n}',
+    row_filter: '',
+    hidden_columns: 'ssn, salary',
+    allowed_org_ids: '',
+    allowed_markings: 'public',
+    consumer_mode_enabled: false,
+    allow_guest_access: true,
+    enabled: true,
+  });
   let policyEvaluationForm = $state({
     resource: 'datasets',
     action: 'read',
-    resource_attributes: '{\n  "organization_id": null\n}',
+    resource_attributes:
+      '{\n  "organization_id": null,\n  "effective_marking": "public",\n  "consumer_surface": "workshop"\n}',
   });
   let apiKeyForm = $state({ name: '', scopes: '', expires_at: '' });
   let mfaVerifyCode = $state('');
@@ -174,6 +194,13 @@
       .filter(Boolean);
   }
 
+  function toList(value: string) {
+    return value
+      .split(/[\n,]/)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+
   function parseJson(value: string) {
     return value.trim() ? JSON.parse(value) : {};
   }
@@ -235,6 +262,11 @@
     policies = await listPolicies();
   }
 
+  async function refreshRestrictedViews() {
+    if (!canReadPolicies()) return;
+    restrictedViews = await listRestrictedViews();
+  }
+
   async function refreshMfa() {
     await loadOptional(getMfaStatus, (value) => {
       mfaStatus = value;
@@ -269,6 +301,7 @@
         refreshRoles(),
         refreshGroups(),
         refreshPolicies(),
+        refreshRestrictedViews(),
         refreshMfa(),
         refreshApiKeys(),
         refreshSsoProviders(),
@@ -436,6 +469,50 @@
       await deletePolicy(policyId);
       await refreshPolicies();
       notice = 'Policy deleted.';
+    });
+  }
+
+  async function handleCreateRestrictedView() {
+    await withSaving('restricted-view', async () => {
+      await createRestrictedView({
+        name: restrictedViewForm.name,
+        description: toOptionalString(restrictedViewForm.description),
+        resource: restrictedViewForm.resource,
+        action: restrictedViewForm.action,
+        conditions: parseJson(restrictedViewForm.conditions),
+        row_filter: toOptionalString(restrictedViewForm.row_filter),
+        hidden_columns: toList(restrictedViewForm.hidden_columns),
+        allowed_org_ids: toList(restrictedViewForm.allowed_org_ids),
+        allowed_markings: toList(restrictedViewForm.allowed_markings),
+        consumer_mode_enabled: restrictedViewForm.consumer_mode_enabled,
+        allow_guest_access: restrictedViewForm.allow_guest_access,
+        enabled: restrictedViewForm.enabled,
+      });
+      restrictedViewForm = {
+        name: '',
+        description: '',
+        resource: 'datasets',
+        action: 'read',
+        conditions:
+          '{\n  "subject": {},\n  "resource": {\n    "organization_id": null,\n    "effective_marking": "public"\n  }\n}',
+        row_filter: '',
+        hidden_columns: 'ssn, salary',
+        allowed_org_ids: '',
+        allowed_markings: 'public',
+        consumer_mode_enabled: false,
+        allow_guest_access: true,
+        enabled: true,
+      };
+      await refreshRestrictedViews();
+      notice = 'Restricted view created.';
+    });
+  }
+
+  async function handleDeleteRestrictedView(viewId: string) {
+    await withSaving(`delete-restricted-view-${viewId}`, async () => {
+      await deleteRestrictedView(viewId);
+      await refreshRestrictedViews();
+      notice = 'Restricted view deleted.';
     });
   }
 
@@ -1007,6 +1084,55 @@
                 </article>
               {/each}
             </div>
+
+            <div class="mt-8">
+              <div class="text-xs uppercase tracking-[0.2em] text-gray-400">Restricted views</div>
+              <p class="mt-2 max-w-2xl text-sm text-gray-500 dark:text-gray-400">
+                Granular row and column cuts with explicit org, marking and consumer-mode boundaries.
+              </p>
+
+              <div class="mt-4 space-y-4">
+                {#each restrictedViews as view}
+                  <article class="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-950">
+                    <div class="flex items-start justify-between gap-4">
+                      <div>
+                        <h3 class="font-semibold">{view.name}</h3>
+                        <p class="text-sm text-gray-500">{view.resource}:{view.action}</p>
+                      </div>
+                      <div class="flex flex-wrap gap-2 text-xs">
+                        <span class={`rounded-full px-3 py-1 font-medium ${view.enabled ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-300'}`}>
+                          {view.enabled ? 'Enabled' : 'Disabled'}
+                        </span>
+                        {#if view.allow_guest_access}
+                          <span class="rounded-full bg-sky-100 px-3 py-1 font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300">Guest</span>
+                        {/if}
+                        {#if view.consumer_mode_enabled}
+                          <span class="rounded-full bg-amber-100 px-3 py-1 font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-300">Consumer</span>
+                        {/if}
+                      </div>
+                    </div>
+                    {#if view.description}
+                      <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">{view.description}</p>
+                    {/if}
+                    <div class="mt-3 flex flex-wrap gap-2">
+                      {#each view.allowed_markings as marking}
+                        <span class="rounded-full bg-violet-100 px-3 py-1 text-xs font-medium text-violet-700 dark:bg-violet-950 dark:text-violet-300">{marking}</span>
+                      {/each}
+                      {#each view.hidden_columns as column}
+                        <span class="rounded-full bg-rose-100 px-3 py-1 text-xs font-medium text-rose-700 dark:bg-rose-950 dark:text-rose-300">Hide {column}</span>
+                      {/each}
+                    </div>
+                    {#if view.row_filter}
+                      <div class="mt-3 rounded-xl bg-white px-3 py-2 text-xs dark:bg-gray-900">{view.row_filter}</div>
+                    {/if}
+                    <pre class="mt-3 overflow-auto rounded-xl bg-white p-3 text-xs dark:bg-gray-900">{JSON.stringify(view.conditions, null, 2)}</pre>
+                    {#if canManagePolicies()}
+                      <button onclick={() => handleDeleteRestrictedView(view.id)} disabled={saving === `delete-restricted-view-${view.id}`} class="mt-4 rounded-xl border border-red-300 px-3 py-2 text-sm font-medium text-red-700 hover:border-red-400 dark:border-red-800 dark:text-red-300 disabled:opacity-50">Delete restricted view</button>
+                    {/if}
+                  </article>
+                {/each}
+              </div>
+            </div>
           </div>
 
           <div class="space-y-6">
@@ -1031,6 +1157,34 @@
                 </label>
                 <button disabled={saving === 'policy'} class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">Create policy</button>
               </form>
+
+              <form class="space-y-4 rounded-3xl border border-dashed border-gray-300 p-5 dark:border-gray-700" onsubmit={(event) => { event.preventDefault(); handleCreateRestrictedView(); }}>
+                <div class="text-xs uppercase tracking-[0.2em] text-gray-400">Create restricted view</div>
+                <input bind:value={restrictedViewForm.name} required placeholder="Restricted view name" class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
+                <textarea bind:value={restrictedViewForm.description} rows="2" placeholder="Description" class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900"></textarea>
+                <div class="grid gap-3 md:grid-cols-2">
+                  <input bind:value={restrictedViewForm.resource} required placeholder="Resource" class="rounded-xl border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
+                  <input bind:value={restrictedViewForm.action} required placeholder="Action" class="rounded-xl border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
+                </div>
+                <textarea bind:value={restrictedViewForm.conditions} rows="6" class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 font-mono text-sm dark:border-gray-700 dark:bg-gray-900"></textarea>
+                <input bind:value={restrictedViewForm.row_filter} placeholder="Row filter template" class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
+                <input bind:value={restrictedViewForm.hidden_columns} placeholder="Hidden columns, comma separated" class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
+                <input bind:value={restrictedViewForm.allowed_org_ids} placeholder="Allowed org IDs, comma separated" class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
+                <input bind:value={restrictedViewForm.allowed_markings} placeholder="Allowed markings, comma separated" class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900" />
+                <label class="flex items-center gap-2 text-sm">
+                  <input type="checkbox" bind:checked={restrictedViewForm.allow_guest_access} />
+                  Allow guest access
+                </label>
+                <label class="flex items-center gap-2 text-sm">
+                  <input type="checkbox" bind:checked={restrictedViewForm.consumer_mode_enabled} />
+                  Consumer mode enabled
+                </label>
+                <label class="flex items-center gap-2 text-sm">
+                  <input type="checkbox" bind:checked={restrictedViewForm.enabled} />
+                  Enabled
+                </label>
+                <button disabled={saving === 'restricted-view'} class="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">Create restricted view</button>
+              </form>
             {/if}
 
             <form class="space-y-4 rounded-3xl border border-gray-200 p-5 dark:border-gray-800" onsubmit={(event) => { event.preventDefault(); handleEvaluatePolicy(); }}>
@@ -1043,7 +1197,27 @@
               {#if policyEvaluation}
                 <div class="rounded-2xl bg-gray-50 p-4 text-sm dark:bg-gray-950">
                   <div class="font-medium">{policyEvaluation.allowed ? 'Allowed' : 'Denied'}</div>
-                  <div class="mt-2 text-gray-500">Matched: {policyEvaluation.matched_policy_ids.length} · Deny hits: {policyEvaluation.deny_policy_ids.length}</div>
+                  <div class="mt-2 text-gray-500">
+                    Matched: {policyEvaluation.matched_policy_ids.length}
+                    · Restricted views: {policyEvaluation.matched_restricted_view_ids.length}
+                    · Deny hits: {policyEvaluation.deny_policy_ids.length}
+                  </div>
+                  <div class="mt-3 flex flex-wrap gap-2">
+                    {#each policyEvaluation.allowed_markings as marking}
+                      <span class="rounded-full bg-violet-100 px-3 py-1 text-xs font-medium text-violet-700 dark:bg-violet-950 dark:text-violet-300">{marking}</span>
+                    {/each}
+                    {#each policyEvaluation.hidden_columns as column}
+                      <span class="rounded-full bg-rose-100 px-3 py-1 text-xs font-medium text-rose-700 dark:bg-rose-950 dark:text-rose-300">Hide {column}</span>
+                    {/each}
+                    {#if policyEvaluation.consumer_mode}
+                      <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-300">Consumer mode</span>
+                    {/if}
+                  </div>
+                  {#if policyEvaluation.deny_reasons.length}
+                    <div class="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950 dark:text-red-300">
+                      {policyEvaluation.deny_reasons.join(' · ')}
+                    </div>
+                  {/if}
                   <pre class="mt-3 overflow-auto rounded-xl bg-white p-3 text-xs dark:bg-gray-900">{JSON.stringify(policyEvaluation, null, 2)}</pre>
                 </div>
               {/if}

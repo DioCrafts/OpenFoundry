@@ -17,9 +17,23 @@
 				<div class="flex items-center justify-between gap-3">
 					<div>
 						<p class="font-semibold text-stone-900">{install.listing_name}</p>
-						<p class="text-sm text-stone-500">{install.workspace_name} • {install.version}</p>
+						<p class="text-sm text-stone-500">{install.workspace_name} • {install.version} • {install.release_channel}</p>
 					</div>
 					<span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">{install.status}</span>
+				</div>
+				<div class="mt-3 flex flex-wrap gap-2 text-xs text-stone-600">
+					{#if install.fleet_name}
+						<span class="rounded-full bg-white px-2 py-1">Fleet: {install.fleet_name}</span>
+					{/if}
+					{#if install.enrollment_branch}
+						<span class="rounded-full bg-white px-2 py-1">Branch: {install.enrollment_branch}</span>
+					{/if}
+					{#if install.auto_upgrade_enabled}
+						<span class="rounded-full bg-white px-2 py-1">Auto-upgrade</span>
+					{/if}
+					{#if install.maintenance_window}
+						<span class="rounded-full bg-white px-2 py-1">Window: {install.maintenance_window.days.join(', ')} {install.maintenance_window.start_hour_utc}:00 UTC</span>
+					{/if}
 				</div>
 				<div class="mt-3 flex flex-wrap gap-2">
 					{#each install.dependency_plan as dependency}

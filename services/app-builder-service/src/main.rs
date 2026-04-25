@@ -43,7 +43,7 @@ async fn main() {
         .await
         .expect("failed to run migrations");
 
-    let jwt_config = JwtConfig::new(&cfg.jwt_secret);
+    let jwt_config = JwtConfig::new(&cfg.jwt_secret).with_env_defaults();
 
     let state = AppState {
         db: pool,
@@ -91,8 +91,7 @@ async fn main() {
         )
         .route(
             "/api/v1/apps/{id}/slate-package",
-            get(handlers::slate::export_slate_package)
-                .post(handlers::slate::import_slate_package),
+            get(handlers::slate::export_slate_package).post(handlers::slate::import_slate_package),
         )
         .route(
             "/api/v1/apps/{id}/pages",

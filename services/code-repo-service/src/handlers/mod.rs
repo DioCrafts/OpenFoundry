@@ -10,8 +10,9 @@ use axum::{Json, http::StatusCode};
 use serde::Serialize;
 
 use crate::models::{
+    branch::BranchRow,
     comment::CommentRow,
-    commit::CiRunRow,
+    commit::{CiRun, CiRunRow},
     integration::{IntegrationRow, SyncRunRow},
     merge_request::MergeRequestRow,
     repository::RepositoryRow,
@@ -189,6 +190,71 @@ pub async fn load_ci_runs(
                 cause,
             )))
         })
+}
+
+pub async fn load_branch_row(
+    db: &sqlx::PgPool,
+    repository_id: uuid::Uuid,
+    branch_name: &str,
+) -> Result<Option<BranchRow>, sqlx::Error> {
+    sqlx::query_as::<_, BranchRow>(
+        "SELECT id, repository_id, name, head_sha, base_branch, is_default, protected, ahead_by, pending_reviews, updated_at
+         FROM code_repository_branches
+         WHERE repository_id = $1 AND name = $2",
+    )
+    .bind(repository_id)
+    .bind(branch_name)
+    .fetch_optional(db)
+    .await
+}
+
+pub async fn persist_ci_run(db: &sqlx::PgPool, run: &CiRun) -> Result<(), sqlx::Error> {
+    let checks = serde_json::to_value(&run.checks).map_err(|cause| {
+        sqlx::Error::Decode(Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            cause,
+        )))
+    })?;
+
+    sqlx::query(
+        "INSERT INTO code_ci_runs (id, repository_id, branch_name, commit_sha, pipeline_name, status, trigger, started_at, completed_at, checks)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)",
+    )
+    .bind(run.id)
+    .bind(run.repository_id)
+    .bind(&run.branch_name)
+    .bind(&run.commit_sha)
+    .bind(&run.pipeline_name)
+    .bind(&run.status)
+    .bind(&run.trigger)
+    .bind(run.started_at)
+    .bind(run.completed_at)
+    .bind(checks)
+    .execute(db)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn sync_branch_head(
+    db: &sqlx::PgPool,
+    repository_id: uuid::Uuid,
+    branch_name: &str,
+    head_sha: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE code_repository_branches
+         SET head_sha = $3,
+             updated_at = NOW()
+         WHERE repository_id = $1
+           AND name = $2",
+    )
+    .bind(repository_id)
+    .bind(branch_name)
+    .bind(head_sha)
+    .execute(db)
+    .await?;
+    Ok(())
 }
 
 pub async fn load_integrations(

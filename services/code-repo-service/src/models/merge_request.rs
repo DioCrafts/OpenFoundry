@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::models::{comment::ReviewComment, decode_json};
+use crate::models::{comment::ReviewComment, commit::CiRun, decode_json};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -73,6 +73,19 @@ pub struct MergeRequestDetail {
     pub comments: Vec<ReviewComment>,
     pub approval_count: usize,
     pub thread_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeMergeRequestRequest {
+    pub merged_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeRequestMergeResult {
+    pub merge_request: MergeRequestDefinition,
+    pub merge_commit_sha: String,
+    pub target_branch: String,
+    pub ci_run: Option<CiRun>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

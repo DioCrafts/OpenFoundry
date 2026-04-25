@@ -27,6 +27,10 @@ resource "terraform_data" "edge_cache_profile" {
     regions                       = var.regions
     price_class                   = var.price_class
     waf_enabled                   = var.waf_enabled
+    allowed_countries             = var.allowed_countries
+    geo_restriction_mode          = var.geo_restriction_mode
+    origin_residency_region       = var.origin_residency_region
+    airgapped_origin              = var.airgapped_origin
     enable_http3                  = var.enable_http3
     stale_while_revalidate_seconds = var.stale_while_revalidate_seconds
     stale_if_error_seconds         = var.stale_if_error_seconds

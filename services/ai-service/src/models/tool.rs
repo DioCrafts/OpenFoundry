@@ -94,6 +94,22 @@ impl From<ToolRow> for ToolDefinition {
     }
 }
 
+pub fn supported_execution_modes() -> &'static [&'static str] {
+    &[
+        "simulated",
+        "http_json",
+        "openfoundry_api",
+        "native_sql",
+        "native_dataset",
+        "native_ontology",
+        "native_pipeline",
+        "native_report",
+        "native_workflow",
+        "native_code_repo",
+        "knowledge_search",
+    ]
+}
+
 fn default_tool_category() -> String {
     "analysis".to_string()
 }

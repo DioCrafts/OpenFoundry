@@ -1,0 +1,6 @@
+host = "0.0.0.0"
+port = 50056
+storage_backend = "s3"
+storage_bucket = "datasets"
+s3_region = "us-east-1"
+distributed_pipeline_workers = 4

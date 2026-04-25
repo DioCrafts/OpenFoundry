@@ -1,0 +1,104 @@
+{{- if .Values.apollo.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ printf "%s-apollo" (include "open-foundry.name" .) | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "open-foundry.namespace" (dict "root" .) }}
+  labels:
+{{ include "open-foundry.commonLabels" (dict "root" . "serviceName" "apollo") | nindent 4 }}
+spec:
+  schedule: {{ .Values.apollo.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+{{ include "open-foundry.commonLabels" (dict "root" . "serviceName" "apollo") | nindent 12 }}
+        spec:
+          serviceAccountName: {{ include "open-foundry.serviceAccountName" (dict "root" .) }}
+{{- if gt (len .Values.global.imagePullSecrets) 0 }}
+          imagePullSecrets:
+{{- range .Values.global.imagePullSecrets }}
+            - name: {{ . | quote }}
+{{- end }}
+{{- end }}
+          restartPolicy: OnFailure
+          securityContext:
+{{ toYaml .Values.global.podSecurityContext | indent 12 }}
+          containers:
+            - name: apollo
+              image: "{{ include "open-foundry.image" (dict "root" . "repository" .Values.apollo.image.repository "tag" .Values.apollo.image.tag) }}"
+              imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+              command:
+                - /bin/sh
+                - -ec
+              args:
+                - |
+                  set -eu
+                  call_api() {
+                    if [ -n "${APOLLO_TOKEN:-}" ]; then
+                      curl -fsS -H "Authorization: Bearer ${APOLLO_TOKEN}" "$1"
+                    else
+                      curl -fsS "$1"
+                    fi
+                  }
+                  post_api() {
+                    if [ -n "${APOLLO_TOKEN:-}" ]; then
+                      curl -fsS -X POST -H "Authorization: Bearer ${APOLLO_TOKEN}" "$1"
+                    else
+                      curl -fsS -X POST "$1"
+                    fi
+                  }
+                  readiness="$(call_api "${GATEWAY_URL}${READINESS_PATH}")"
+                  echo "Apollo readiness payload:"
+                  echo "${readiness}"
+                  echo "Apollo fleet inventory snapshot:"
+                  call_api "${GATEWAY_URL}${FLEETS_PATH}" || true
+                  if echo "${readiness}" | grep -q '"readiness":"ready"'; then
+                    echo "Upgrade readiness is green."
+                    if [ "${ACTION_MODE}" != "observe" ]; then
+                      for fleet_id in ${RECONCILE_FLEET_IDS}; do
+                        [ -n "${fleet_id}" ] || continue
+                        echo "Reconciling fleet ${fleet_id}"
+                        post_api "${GATEWAY_URL}/api/v1/marketplace/devops/fleets/${fleet_id}/sync"
+                      done
+                      if [ -n "${PROMOTE_WEBHOOK_PATH}" ]; then
+                        echo "Calling promote webhook ${PROMOTE_WEBHOOK_PATH}"
+                        post_api "${GATEWAY_URL}${PROMOTE_WEBHOOK_PATH}"
+                      fi
+                    fi
+                  else
+                    echo "Upgrade readiness is not green; Apollo will not promote."
+                  fi
+              env:
+                - name: GATEWAY_URL
+                  value: {{ include "open-foundry.apolloGatewayUrl" (dict "root" .) | quote }}
+                - name: READINESS_PATH
+                  value: {{ .Values.apollo.readinessPath | quote }}
+                - name: FLEETS_PATH
+                  value: {{ .Values.apollo.fleetsPath | quote }}
+                - name: ACTION_MODE
+                  value: {{ .Values.apollo.actionMode | quote }}
+                - name: RECONCILE_FLEET_IDS
+                  value: {{ join " " .Values.apollo.reconcileFleetIds | quote }}
+                - name: PROMOTE_WEBHOOK_PATH
+                  value: {{ .Values.apollo.promoteWebhookPath | quote }}
+{{- range $envKey, $envValue := .Values.apollo.env }}
+                - name: {{ $envKey }}
+                  value: {{ $envValue | quote }}
+{{- end }}
+{{- if .Values.apollo.tokenSecretName }}
+                - name: APOLLO_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.apollo.tokenSecretName }}
+                      key: {{ .Values.apollo.tokenSecretKey }}
+{{- end }}
+              securityContext:
+{{ toYaml .Values.global.containerSecurityContext | indent 16 }}
+              resources:
+{{ toYaml .Values.apollo.resources | indent 16 }}
+{{- end }}

@@ -1,0 +1,50 @@
+name: CI — SDK Smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "sdks/**"
+      - ".github/workflows/sdk-smoke.yml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "sdks/**"
+      - ".github/workflows/sdk-smoke.yml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+
+jobs:
+  typescript:
+    name: TypeScript SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Type-check SDK
+        run: apps/web/node_modules/.bin/tsc -p sdks/typescript/openfoundry-sdk/tsconfig.json --noEmit
+
+  python:
+    name: Python SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile SDK
+        run: python -m compileall sdks/python/openfoundry-sdk/openfoundry_sdk sdks/python/openfoundry-sdk/examples
+      - name: Import smoke
+        env:
+          PYTHONPATH: sdks/python/openfoundry-sdk
+        run: python sdks/python/openfoundry-sdk/examples/phase1_critical_path.py

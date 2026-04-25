@@ -43,7 +43,7 @@ async fn main() {
         .await
         .expect("failed to run migrations");
 
-    let jwt_config = JwtConfig::new(&cfg.jwt_secret);
+    let jwt_config = JwtConfig::new(&cfg.jwt_secret).with_env_defaults();
     let state = AppState {
         db: pool,
         jwt_config: jwt_config.clone(),
@@ -94,6 +94,14 @@ async fn main() {
         .route(
             "/api/v1/audit/governance/templates",
             get(handlers::policies::list_governance_templates),
+        )
+        .route(
+            "/api/v1/audit/governance/applications",
+            get(handlers::policies::list_governance_template_applications),
+        )
+        .route(
+            "/api/v1/audit/compliance/posture",
+            get(handlers::policies::get_compliance_posture),
         )
         .route(
             "/api/v1/audit/governance/templates/{slug}/apply",

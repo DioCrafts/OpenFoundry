@@ -31,6 +31,16 @@ export interface Experiment {
   name: string;
   description: string;
   objective: string;
+  objective_spec: {
+    status: string;
+    deployment_target: string;
+    stakeholders: string[];
+    success_criteria: string[];
+    linked_dataset_ids: string[];
+    linked_model_ids: string[];
+    documentation_uri: string;
+    collaboration_notes: string[];
+  };
   task_type: string;
   primary_metric: string;
   status: string;
@@ -228,6 +238,32 @@ export interface ListResponse<T> {
   data: T[];
 }
 
+export interface ExperimentAssetLineageResponse {
+  experiment_id: string;
+  objective_status: string;
+  nodes: Array<{
+    id: string;
+    kind: string;
+    label: string;
+    status: string;
+    metadata: Record<string, unknown>;
+  }>;
+  edges: Array<{
+    source: string;
+    target: string;
+    relation: string;
+  }>;
+  summary: {
+    dataset_count: number;
+    run_count: number;
+    training_job_count: number;
+    model_count: number;
+    version_count: number;
+    deployment_count: number;
+    frameworks: string[];
+  };
+}
+
 export function getOverview() {
   return api.get<MlStudioOverview>('/ml/overview');
 }
@@ -240,6 +276,16 @@ export function createExperiment(body: {
   name: string;
   description?: string;
   objective?: string;
+  objective_spec?: {
+    status: string;
+    deployment_target: string;
+    stakeholders: string[];
+    success_criteria: string[];
+    linked_dataset_ids: string[];
+    linked_model_ids: string[];
+    documentation_uri: string;
+    collaboration_notes: string[];
+  };
   task_type?: string;
   primary_metric?: string;
   tags?: string[];
@@ -251,12 +297,26 @@ export function updateExperiment(id: string, body: {
   name?: string;
   description?: string;
   objective?: string;
+  objective_spec?: {
+    status: string;
+    deployment_target: string;
+    stakeholders: string[];
+    success_criteria: string[];
+    linked_dataset_ids: string[];
+    linked_model_ids: string[];
+    documentation_uri: string;
+    collaboration_notes: string[];
+  };
   task_type?: string;
   primary_metric?: string;
   status?: string;
   tags?: string[];
 }) {
   return api.patch<Experiment>(`/ml/experiments/${id}`, body);
+}
+
+export function getExperimentAssetLineage(id: string) {
+  return api.get<ExperimentAssetLineageResponse>(`/ml/experiments/${id}/asset-lineage`);
 }
 
 export function listRuns(experimentId: string) {

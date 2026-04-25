@@ -1,6 +1,6 @@
 output "edge_profile" {
   value       = terraform_data.edge_cache_profile.output
-  description = "Computed global CDN profile for OpenFoundry edge delivery."
+  description = "Computed global CDN profile for OpenFoundry edge delivery, including geo-restriction and residency posture."
 }
 
 output "asset_route" {

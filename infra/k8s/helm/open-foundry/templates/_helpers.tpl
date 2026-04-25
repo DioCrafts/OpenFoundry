@@ -20,6 +20,16 @@ app.kubernetes.io/component: {{ .serviceName }}
 {{ include "open-foundry.selectorLabels" . }}
 app.kubernetes.io/managed-by: {{ .root.Release.Service }}
 helm.sh/chart: {{ printf "%s-%s" .root.Chart.Name .root.Chart.Version | replace "+" "_" }}
+openfoundry.io/cloud: {{ .root.Values.global.deploymentFabric.cloud | quote }}
+openfoundry.io/region: {{ .root.Values.global.deploymentFabric.region | quote }}
+openfoundry.io/cell: {{ .root.Values.global.deploymentFabric.cell | quote }}
+openfoundry.io/environment: {{ .root.Values.global.deploymentFabric.environment | quote }}
+{{- if .root.Values.global.deploymentFabric.geoRestrictions.enabled }}
+openfoundry.io/residency: {{ default "geo-restricted" .root.Values.global.deploymentFabric.geoRestrictions.residencyLabel | quote }}
+{{- end }}
+{{- if .root.Values.apollo.enabled }}
+openfoundry.io/apollo: "enabled"
+{{- end }}
 {{- range $labelKey, $labelValue := .root.Values.global.labels }}
 {{ $labelKey }}: {{ $labelValue | quote }}
 {{- end }}
@@ -39,4 +49,24 @@ helm.sh/chart: {{ printf "%s-%s" .root.Chart.Name .root.Chart.Version | replace 
 
 {{- define "open-foundry.serviceUrl" -}}
 {{- printf "http://%s:%v" (include "open-foundry.serviceHost" .) .port -}}
+{{- end -}}
+
+{{- define "open-foundry.platformProfileConfigMapName" -}}
+{{- printf "%s-platform-profile" (include "open-foundry.name" .root) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "open-foundry.image" -}}
+{{- if .root.Values.global.imageRegistry -}}
+{{- printf "%s/%s:%s" .root.Values.global.imageRegistry .repository .tag -}}
+{{- else -}}
+{{- printf "%s:%s" .repository .tag -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "open-foundry.apolloGatewayUrl" -}}
+{{- if .root.Values.apollo.gatewayUrl -}}
+{{- .root.Values.apollo.gatewayUrl -}}
+{{- else -}}
+{{- include "open-foundry.serviceUrl" (dict "root" .root "serviceName" "gateway" "port" (index .root.Values.services "gateway").port) -}}
+{{- end -}}
 {{- end -}}

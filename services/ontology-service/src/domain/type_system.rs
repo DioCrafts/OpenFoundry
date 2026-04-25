@@ -138,6 +138,9 @@ mod tests {
     #[test]
     fn accepts_media_reference_type_and_value() {
         assert!(validate_property_type("media_reference").is_ok());
-        assert!(validate_property_value("media_reference", &json!({ "uri": "s3://bucket/file.png" })).is_ok());
+        assert!(
+            validate_property_value("media_reference", &json!({ "uri": "s3://bucket/file.png" }))
+                .is_ok()
+        );
     }
 }

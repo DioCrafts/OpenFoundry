@@ -1,3 +1,4 @@
+pub mod asset_lineage;
 pub mod deployment;
 pub mod experiment;
 pub mod feature;

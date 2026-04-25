@@ -5,14 +5,18 @@ use sha2::{Digest, Sha256};
 
 use crate::models::registration::{DiscoveredSource, VirtualTableQueryResponse};
 
+pub mod bigquery;
+mod catalog_bridge;
 pub mod csv;
 pub mod http_runtime;
 pub mod iot;
 pub mod json;
+pub mod kafka;
 pub mod postgres;
 pub mod rest_api;
 pub mod salesforce;
 pub mod sap;
+pub mod snowflake;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ConnectionTestResult {

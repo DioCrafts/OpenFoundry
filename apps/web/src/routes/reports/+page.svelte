@@ -127,6 +127,13 @@
 					label: 'RevOps room',
 					config: { webhook: 'revops-webhook' },
 				},
+				{
+					id: 'exec-teams',
+					channel: 'teams',
+					target: 'Operations leadership',
+					label: 'Operations leadership',
+					config: { webhook: 'teams-webhook' },
+				},
 			]),
 		};
 	}
@@ -307,7 +314,7 @@
 				<p class="text-xs font-semibold uppercase tracking-[0.28em] text-amber-700">Milestone 4.3</p>
 				<h1 class="mt-3 text-4xl font-semibold tracking-tight text-stone-950">Reports control plane</h1>
 				<p class="mt-3 max-w-2xl text-base leading-7 text-stone-600">
-					Design definitions, preview generated artifacts, manage cadence, and simulate distribution into email, S3, Slack, and webhooks from a single workspace.
+					Design definitions, preview generated artifacts, manage cadence, and deliver reports into email, S3, Slack, Teams, and webhooks from a single workspace.
 				</p>
 			</div>
 			<div class="grid gap-4 sm:grid-cols-2">

@@ -49,7 +49,7 @@ async fn main() {
         .await
         .expect("failed to run migrations");
 
-    let jwt_config = JwtConfig::new(&cfg.jwt_secret);
+    let jwt_config = JwtConfig::new(&cfg.jwt_secret).with_env_defaults();
     let http_client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
@@ -107,6 +107,10 @@ async fn main() {
             "/api/v1/notifications/preferences",
             get(handlers::preferences::get_preferences)
                 .put(handlers::preferences::update_preferences),
+        )
+        .route(
+            "/api/v1/notifications/ws-ticket",
+            axum::routing::post(handlers::ws::issue_ws_ticket),
         )
         .layer(middleware::from_fn_with_state(
             jwt_config,

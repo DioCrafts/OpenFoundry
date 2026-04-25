@@ -10,10 +10,17 @@ use crate::{
     AppState,
     models::tool::{
         CreateToolRequest, ListToolsResponse, ToolDefinition, ToolRow, UpdateToolRequest,
+        supported_execution_modes,
     },
 };
 
 use super::{ServiceResult, bad_request, db_error, not_found};
+
+fn validate_execution_mode(mode: &str) -> bool {
+    supported_execution_modes()
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(mode))
+}
 
 async fn load_tool_row(db: &sqlx::PgPool, tool_id: Uuid) -> Result<Option<ToolRow>, sqlx::Error> {
     query_as::<_, ToolRow>(
@@ -75,6 +82,12 @@ pub async fn create_tool(
 ) -> ServiceResult<ToolDefinition> {
     if body.name.trim().is_empty() {
         return Err(bad_request("tool name is required"));
+    }
+    if !validate_execution_mode(&body.execution_mode) {
+        return Err(bad_request(format!(
+            "unsupported tool execution_mode '{}'",
+            body.execution_mode
+        )));
     }
 
     let row = query_as::<_, ToolRow>(
@@ -149,6 +162,14 @@ pub async fn update_tool(
     };
 
     let tool: ToolDefinition = current.into();
+    if let Some(execution_mode) = body.execution_mode.as_ref() {
+        if !validate_execution_mode(execution_mode) {
+            return Err(bad_request(format!(
+                "unsupported tool execution_mode '{}'",
+                execution_mode
+            )));
+        }
+    }
     let row = query_as::<_, ToolRow>(
         r#"
 		UPDATE ai_tools

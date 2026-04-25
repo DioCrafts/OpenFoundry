@@ -259,6 +259,57 @@ export interface DatasetQualityResponse {
   profiled_at: string | null;
 }
 
+export interface DatasetLintSummary {
+  resource_posture: string;
+  total_findings: number;
+  high_severity: number;
+  medium_severity: number;
+  low_severity: number;
+  tracked_versions: number;
+  branch_count: number;
+  stale_branch_count: number;
+  materialized_view_count: number;
+  auto_refresh_view_count: number;
+  transaction_count: number;
+  failed_transaction_count: number;
+  pending_transaction_count: number;
+  enabled_rule_count: number;
+  active_alert_count: number;
+  object_count: number;
+  small_file_count: number;
+  largest_object_bytes: number;
+  average_object_size_bytes: number;
+  quality_score: number | null;
+}
+
+export interface DatasetLintFinding {
+  code: string;
+  title: string;
+  severity: string;
+  category: string;
+  description: string;
+  evidence: string[];
+  impact: string;
+  recommendation: string;
+}
+
+export interface DatasetLintRecommendation {
+  code: string;
+  priority: string;
+  title: string;
+  rationale: string;
+  actions: string[];
+}
+
+export interface DatasetLintResponse {
+  dataset_id: string;
+  dataset_name: string;
+  analyzed_at: string;
+  summary: DatasetLintSummary;
+  findings: DatasetLintFinding[];
+  recommendations: DatasetLintRecommendation[];
+}
+
 export interface CreateDatasetQualityRuleParams {
   name: string;
   rule_type: string;
@@ -366,6 +417,10 @@ export function listDatasetFilesystem(datasetId: string, params?: { path?: strin
 
 export function getDatasetQuality(datasetId: string) {
   return api.get<DatasetQualityResponse>(`/datasets/${datasetId}/quality`);
+}
+
+export function getDatasetLint(datasetId: string) {
+  return api.get<DatasetLintResponse>(`/datasets/${datasetId}/lint`);
 }
 
 export function refreshDatasetQualityProfile(datasetId: string) {

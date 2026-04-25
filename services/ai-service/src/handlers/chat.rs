@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, time::Instant};
 
 use axum::{
     Json,
@@ -16,10 +16,12 @@ use crate::{
     models::{
         AiPlatformOverview,
         conversation::{
-            ChatCompletionRequest, ChatCompletionResponse, ChatMessage, Conversation,
-            ConversationRow, ConversationSummary, CopilotRequest, CopilotResponse,
-            EvaluateGuardrailsRequest, EvaluateGuardrailsResponse, GuardrailVerdict,
-            ListConversationsResponse, SemanticCacheMetadata,
+            ChatAttachment, ChatCompletionRequest, ChatCompletionResponse, ChatMessage,
+            ChatRoutingMetadata, Conversation, ConversationRow, ConversationSummary,
+            CopilotRequest, CopilotResponse, EvaluateGuardrailsRequest, EvaluateGuardrailsResponse,
+            GuardrailVerdict, ListConversationsResponse, LlmUsageSummary, ProviderBenchmarkRequest,
+            ProviderBenchmarkResponse, ProviderBenchmarkResult, ProviderBenchmarkScore,
+            SemanticCacheMetadata,
         },
         knowledge_base::{KnowledgeDocument, KnowledgeDocumentRow, KnowledgeSearchResult},
         prompt_template::{PromptTemplate, PromptTemplateRow},
@@ -336,6 +338,7 @@ async fn persist_conversation(
     db: &sqlx::PgPool,
     conversation_id: Option<Uuid>,
     user_message: &str,
+    user_attachments: &[ChatAttachment],
     reply: &str,
     provider_id: Uuid,
     citations: &[KnowledgeSearchResult],
@@ -349,6 +352,7 @@ async fn persist_conversation(
         provider_id: None,
         tool_name: None,
         citations: Vec::new(),
+        attachments: user_attachments.to_vec(),
         guardrail_verdict: Some(guardrail.clone()),
         created_at: now,
     };
@@ -358,6 +362,7 @@ async fn persist_conversation(
         provider_id: Some(provider_id),
         tool_name: None,
         citations: citations.to_vec(),
+        attachments: Vec::new(),
         guardrail_verdict: None,
         created_at: now,
     };
@@ -412,6 +417,16 @@ fn summarize_title(content: &str) -> String {
     }
 }
 
+fn preview_text(content: &str, limit: usize) -> String {
+    let mut chars = content.trim().chars();
+    let preview = chars.by_ref().take(limit).collect::<String>();
+    if chars.next().is_some() {
+        format!("{preview}...")
+    } else {
+        preview
+    }
+}
+
 fn conversation_summary(conversation: Conversation) -> ConversationSummary {
     let last_message_preview = conversation
         .messages
@@ -430,11 +445,186 @@ fn conversation_summary(conversation: Conversation) -> ConversationSummary {
     }
 }
 
+fn attachment_context(attachments: &[ChatAttachment]) -> String {
+    if attachments.is_empty() {
+        return "none".to_string();
+    }
+
+    attachments
+        .iter()
+        .map(|attachment| {
+            let label = attachment
+                .name
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("attachment");
+            match attachment.kind.as_str() {
+                "image_url" => format!(
+                    "- {label}: image url {}",
+                    attachment.url.as_deref().unwrap_or("missing-url")
+                ),
+                "image_base64" => format!(
+                    "- {label}: embedded {} image",
+                    attachment.mime_type.as_deref().unwrap_or("unknown")
+                ),
+                _ => format!(
+                    "- {label}: {}",
+                    attachment.text.as_deref().unwrap_or("text attachment")
+                ),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn required_modalities(attachments: &[ChatAttachment]) -> Vec<String> {
+    let mut modalities = vec!["text".to_string()];
+    if attachments
+        .iter()
+        .any(|attachment| attachment.kind.starts_with("image"))
+    {
+        modalities.push("image".to_string());
+    }
+    modalities
+}
+
+fn modality_label(required_modalities: &[String]) -> &'static str {
+    if required_modalities
+        .iter()
+        .any(|modality| modality.eq_ignore_ascii_case("image"))
+    {
+        "image+text"
+    } else {
+        "text"
+    }
+}
+
+fn privacy_reason(guardrail: &GuardrailVerdict, require_private_network: bool) -> Option<String> {
+    if require_private_network {
+        Some("private network explicitly requested".to_string())
+    } else if guardrail
+        .flags
+        .iter()
+        .any(|flag| flag.kind.starts_with("pii_"))
+    {
+        Some("PII detected in prompt, preferring private-network providers".to_string())
+    } else {
+        None
+    }
+}
+
+fn routing_metadata(
+    provider: &LlmProvider,
+    requested_private_network: bool,
+    privacy_reason: Option<String>,
+    candidates: &[LlmProvider],
+    required_modalities: &[String],
+) -> ChatRoutingMetadata {
+    ChatRoutingMetadata {
+        requested_private_network,
+        used_private_network: llm::gateway::provider_uses_private_network(provider),
+        privacy_reason,
+        candidate_provider_ids: candidates.iter().map(|candidate| candidate.id).collect(),
+        required_modalities: required_modalities.to_vec(),
+    }
+}
+
+fn usage_summary(
+    provider: &LlmProvider,
+    prompt_tokens: i32,
+    completion_tokens: i32,
+    latency_ms: i32,
+    cache_hit: bool,
+) -> LlmUsageSummary {
+    let total_tokens = prompt_tokens.max(0) + completion_tokens.max(0);
+
+    LlmUsageSummary {
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        estimated_cost_usd: evaluation::estimated_cost_usd(
+            provider,
+            prompt_tokens,
+            completion_tokens,
+            cache_hit,
+        ),
+        latency_ms,
+        network_scope: provider.route_rules.network_scope.clone(),
+        cache_hit,
+    }
+}
+
+async fn record_usage_event(
+    db: &sqlx::PgPool,
+    provider_id: Uuid,
+    conversation_id: Option<Uuid>,
+    request_kind: &str,
+    use_case: &str,
+    modality: &str,
+    usage: &LlmUsageSummary,
+    benchmark_group_id: Option<Uuid>,
+    metadata: Value,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO ai_llm_usage_events (
+            id,
+            provider_id,
+            conversation_id,
+            request_kind,
+            use_case,
+            network_scope,
+            modality,
+            cache_hit,
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            estimated_cost_usd,
+            latency_ms,
+            benchmark_group_id,
+            metadata
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        "#,
+    )
+    .bind(Uuid::now_v7())
+    .bind(provider_id)
+    .bind(conversation_id)
+    .bind(request_kind)
+    .bind(use_case)
+    .bind(&usage.network_scope)
+    .bind(modality)
+    .bind(usage.cache_hit)
+    .bind(usage.prompt_tokens)
+    .bind(usage.completion_tokens)
+    .bind(usage.total_tokens)
+    .bind(usage.estimated_cost_usd as f64)
+    .bind(usage.latency_ms)
+    .bind(benchmark_group_id)
+    .bind(SqlJson(metadata))
+    .execute(db)
+    .await?;
+
+    Ok(())
+}
+
 pub async fn get_overview(State(state): State<AppState>) -> ServiceResult<AiPlatformOverview> {
     let provider_count = query_scalar::<_, i64>("SELECT COUNT(*) FROM ai_providers")
         .fetch_one(&state.db)
         .await
         .map_err(|cause| db_error(&cause))?;
+    let private_provider_count = query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM ai_providers WHERE COALESCE(route_rules->>'network_scope', 'public') IN ('private', 'hybrid', 'local')",
+    )
+    .fetch_one(&state.db)
+    .await
+    .map_err(|cause| db_error(&cause))?;
+    let multimodal_provider_count = query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM ai_providers WHERE COALESCE(route_rules->'supported_modalities', '[]'::jsonb) ? 'image'",
+    )
+    .fetch_one(&state.db)
+    .await
+    .map_err(|cause| db_error(&cause))?;
     let prompt_count =
         query_scalar::<_, i64>("SELECT COUNT(*) FROM ai_prompt_templates WHERE status = 'active'")
             .fetch_one(&state.db)
@@ -477,9 +667,34 @@ pub async fn get_overview(State(state): State<AppState>) -> ServiceResult<AiPlat
     .fetch_one(&state.db)
     .await
     .map_err(|cause| db_error(&cause))?;
+    let llm_prompt_tokens =
+        query_scalar::<_, i64>("SELECT COALESCE(SUM(prompt_tokens), 0) FROM ai_llm_usage_events")
+            .fetch_one(&state.db)
+            .await
+            .map_err(|cause| db_error(&cause))?;
+    let llm_completion_tokens = query_scalar::<_, i64>(
+        "SELECT COALESCE(SUM(completion_tokens), 0) FROM ai_llm_usage_events",
+    )
+    .fetch_one(&state.db)
+    .await
+    .map_err(|cause| db_error(&cause))?;
+    let estimated_llm_cost_usd = query_scalar::<_, f64>(
+        "SELECT COALESCE(SUM(estimated_cost_usd), 0) FROM ai_llm_usage_events",
+    )
+    .fetch_one(&state.db)
+    .await
+    .map_err(|cause| db_error(&cause))?;
+    let benchmark_run_count = query_scalar::<_, i64>(
+        "SELECT COUNT(DISTINCT benchmark_group_id) FROM ai_llm_usage_events WHERE benchmark_group_id IS NOT NULL",
+    )
+    .fetch_one(&state.db)
+    .await
+    .map_err(|cause| db_error(&cause))?;
 
     Ok(Json(AiPlatformOverview {
         provider_count,
+        private_provider_count,
+        multimodal_provider_count,
         prompt_count,
         knowledge_base_count,
         indexed_document_count,
@@ -489,6 +704,10 @@ pub async fn get_overview(State(state): State<AppState>) -> ServiceResult<AiPlat
         cache_entry_count,
         cache_hit_rate: evaluation::cache_hit_rate(cache_entry_count, total_cache_hits),
         blocked_guardrail_events,
+        llm_prompt_tokens,
+        llm_completion_tokens,
+        estimated_llm_cost_usd,
+        benchmark_run_count,
     }))
 }
 
@@ -750,6 +969,9 @@ pub async fn create_chat_completion(
     };
 
     let guardrail = llm::guardrails::evaluate_text(&body.user_message);
+    let required_modalities = required_modalities(&body.attachments);
+    let privacy_reason = privacy_reason(&guardrail, body.require_private_network);
+    let prefer_private_network = privacy_reason.is_some();
     let knowledge_hits = if let Some(knowledge_base_id) = body.knowledge_base_id {
         let documents = load_documents_for_bases(&state.db, &[knowledge_base_id])
             .await
@@ -760,8 +982,9 @@ pub async fn create_chat_completion(
     };
 
     let prompt_used = format!(
-        "{base_prompt}\n\nUser request: {}\n\nRetrieved context count: {}\n\nRetrieved context:\n{}",
+        "{base_prompt}\n\nUser request: {}\n\nAttachments:\n{}\n\nRetrieved context count: {}\n\nRetrieved context:\n{}",
         guardrail.redacted_text,
+        attachment_context(&body.attachments),
         knowledge_hits.len(),
         knowledge_hits
             .iter()
@@ -770,70 +993,187 @@ pub async fn create_chat_completion(
             .join("\n")
     );
 
-    let routed = llm::gateway::route_providers(&providers, body.preferred_provider_id, "chat");
+    let routed = llm::gateway::route_providers(
+        &providers,
+        body.preferred_provider_id,
+        "chat",
+        &required_modalities,
+        body.require_private_network,
+        prefer_private_network,
+    );
+    if body.require_private_network && routed.is_empty() {
+        return Err(bad_request(
+            "no private-network AI provider is configured for this request",
+        ));
+    }
     let provider = llm::gateway::select_provider(&routed, body.fallback_enabled)
         .ok_or_else(|| not_found("no AI provider available"))?;
+    let routing = routing_metadata(
+        &provider,
+        body.require_private_network,
+        privacy_reason.clone(),
+        &routed,
+        &required_modalities,
+    );
+    let modality = modality_label(&required_modalities);
 
     if let Some((payload, cache, cached_provider_id)) =
         find_cached_response::<CachedChatPayload>(&state.db, "chat", &prompt_used)
             .await
             .map_err(|cause| db_error(&cause))?
     {
-        let provider_id = cached_provider_id.unwrap_or(provider.id);
-        let conversation_id = persist_conversation(
-            &state.db,
-            body.conversation_id,
-            &body.user_message,
-            &payload.reply,
-            provider_id,
-            &payload.citations,
-            &guardrail,
-            true,
-        )
-        .await
-        .map_err(|cause| db_error(&cause))?;
+        let cached_provider = cached_provider_id
+            .and_then(|provider_id| {
+                providers
+                    .iter()
+                    .find(|candidate| candidate.id == provider_id)
+            })
+            .cloned()
+            .unwrap_or_else(|| provider.clone());
+        let can_use_cached_provider = if body.require_private_network || privacy_reason.is_some() {
+            llm::gateway::provider_uses_private_network(&cached_provider)
+        } else {
+            true
+        };
+        if !can_use_cached_provider {
+            tracing::info!(
+                provider = %cached_provider.name,
+                "skipping cached chat response because request requires private-network routing"
+            );
+        } else {
+            let provider_id = cached_provider.id;
+            let conversation_id = persist_conversation(
+                &state.db,
+                body.conversation_id,
+                &body.user_message,
+                &body.attachments,
+                &payload.reply,
+                provider_id,
+                &payload.citations,
+                &guardrail,
+                true,
+            )
+            .await
+            .map_err(|cause| db_error(&cause))?;
 
-        let provider_name = providers
-            .iter()
-            .find(|candidate| candidate.id == provider_id)
-            .map(|candidate| candidate.name.clone())
-            .unwrap_or_else(|| provider.name.clone());
+            let provider_name = providers
+                .iter()
+                .find(|candidate| candidate.id == provider_id)
+                .map(|candidate| candidate.name.clone())
+                .unwrap_or_else(|| cached_provider.name.clone());
+            let usage = usage_summary(
+                &cached_provider,
+                llm::gateway::estimate_tokens(&prompt_used),
+                payload.completion_tokens,
+                0,
+                true,
+            );
+            record_usage_event(
+                &state.db,
+                provider_id,
+                Some(conversation_id),
+                "chat",
+                "chat",
+                modality,
+                &usage,
+                None,
+                json!({
+                    "cache_key": cache.cache_key,
+                    "cache_hit": true,
+                    "required_modalities": required_modalities,
+                }),
+            )
+            .await
+            .map_err(|cause| db_error(&cause))?;
 
-        return Ok(Json(ChatCompletionResponse {
-            conversation_id,
-            provider_id,
-            provider_name,
-            reply: payload.reply,
-            citations: payload.citations,
-            guardrail,
-            cache,
-            prompt_used,
-            completion_tokens: payload.completion_tokens,
-            created_at: Utc::now(),
-        }));
+            return Ok(Json(ChatCompletionResponse {
+                conversation_id,
+                provider_id,
+                provider_name,
+                reply: payload.reply,
+                citations: payload.citations,
+                guardrail,
+                cache,
+                prompt_used,
+                completion_tokens: payload.completion_tokens,
+                usage,
+                routing: routing_metadata(
+                    &cached_provider,
+                    body.require_private_network,
+                    privacy_reason,
+                    &routed,
+                    &required_modalities,
+                ),
+                created_at: Utc::now(),
+            }));
+        }
     }
 
-    let reply = if guardrail.blocked {
+    let started_at = Instant::now();
+    let completion = if guardrail.blocked {
+        None
+    } else {
+        Some(
+            llm::runtime::complete_text(
+                &state.http_client,
+                &provider,
+                &base_prompt,
+                &prompt_used,
+                &body.attachments,
+                body.temperature,
+                body.max_tokens,
+            )
+            .await
+            .map_err(internal_error)?,
+        )
+    };
+    let latency_ms = started_at.elapsed().as_millis().min(i32::MAX as u128) as i32;
+    let reply = if let Some(completion) = completion.as_ref() {
+        completion.text.clone()
+    } else {
         "Guardrails blocked this request. Remove prompt-injection or toxic content and retry."
             .to_string()
-    } else {
-        llm::runtime::complete_text(
-            &state.http_client,
-            &provider,
-            &base_prompt,
-            &prompt_used,
-            body.temperature,
-            body.max_tokens,
-        )
-        .await
-        .map_err(internal_error)?
-        .text
     };
-    let completion_tokens = llm::gateway::estimate_tokens(&reply).min(body.max_tokens);
+    let prompt_tokens = completion
+        .as_ref()
+        .map(|result| result.prompt_tokens)
+        .filter(|tokens| *tokens > 0)
+        .unwrap_or_else(|| llm::gateway::estimate_tokens(&prompt_used));
+    let completion_tokens = completion
+        .as_ref()
+        .map(|result| result.completion_tokens)
+        .filter(|tokens| *tokens > 0)
+        .unwrap_or_else(|| llm::gateway::estimate_tokens(&reply).min(body.max_tokens));
+    let total_tokens = completion
+        .as_ref()
+        .map(|result| result.total_tokens)
+        .filter(|tokens| *tokens > 0)
+        .unwrap_or(prompt_tokens + completion_tokens);
+    let usage = if guardrail.blocked {
+        LlmUsageSummary {
+            prompt_tokens,
+            completion_tokens: 0,
+            total_tokens: prompt_tokens,
+            estimated_cost_usd: 0.0,
+            latency_ms: 0,
+            network_scope: provider.route_rules.network_scope.clone(),
+            cache_hit: false,
+        }
+    } else {
+        let mut usage = usage_summary(
+            &provider,
+            prompt_tokens,
+            completion_tokens,
+            latency_ms,
+            false,
+        );
+        usage.total_tokens = total_tokens;
+        usage
+    };
     let payload = CachedChatPayload {
         reply: reply.clone(),
         citations: knowledge_hits.clone(),
-        completion_tokens,
+        completion_tokens: usage.completion_tokens,
     };
     let cache =
         upsert_cached_response(&state.db, "chat", &prompt_used, Some(provider.id), &payload)
@@ -843,11 +1183,30 @@ pub async fn create_chat_completion(
         &state.db,
         body.conversation_id,
         &body.user_message,
+        &body.attachments,
         &reply,
         provider.id,
         &knowledge_hits,
         &guardrail,
         false,
+    )
+    .await
+    .map_err(|cause| db_error(&cause))?;
+    record_usage_event(
+        &state.db,
+        provider.id,
+        Some(conversation_id),
+        "chat",
+        "chat",
+        modality,
+        &usage,
+        None,
+        json!({
+            "cache_key": cache.cache_key,
+            "cache_hit": false,
+            "knowledge_hit_count": knowledge_hits.len(),
+            "required_modalities": required_modalities,
+        }),
     )
     .await
     .map_err(|cause| db_error(&cause))?;
@@ -861,7 +1220,9 @@ pub async fn create_chat_completion(
         guardrail,
         cache,
         prompt_used,
-        completion_tokens,
+        completion_tokens: usage.completion_tokens,
+        usage,
+        routing,
         created_at: Utc::now(),
     }))
 }
@@ -888,35 +1249,90 @@ pub async fn ask_copilot(
         "question={} datasets={:?} ontology={:?} knowledge_bases={:?}",
         body.question, body.dataset_ids, body.ontology_type_ids, body.knowledge_base_ids
     );
+    let guardrail = llm::guardrails::evaluate_text(&body.question);
+    let privacy_reason = privacy_reason(&guardrail, false);
+    let required_modalities = vec!["text".to_string()];
 
     if let Some((payload, cache, cached_provider_id)) =
         find_cached_response::<CachedCopilotPayload>(&state.db, "copilot", &prompt_used)
             .await
             .map_err(|cause| db_error(&cause))?
     {
-        let provider_name = cached_provider_id
+        let cached_provider = cached_provider_id
             .and_then(|provider_id| {
                 providers
                     .iter()
                     .find(|candidate| candidate.id == provider_id)
-                    .map(|candidate| candidate.name.clone())
             })
-            .unwrap_or_else(|| providers[0].name.clone());
+            .cloned()
+            .unwrap_or_else(|| providers[0].clone());
+        let can_use_cached_provider = if privacy_reason.is_some() {
+            llm::gateway::provider_uses_private_network(&cached_provider)
+        } else {
+            true
+        };
+        if !can_use_cached_provider {
+            tracing::info!(
+                provider = %cached_provider.name,
+                "skipping cached copilot response because request prefers private-network routing"
+            );
+        } else {
+            let provider_name = cached_provider_id
+                .and_then(|provider_id| {
+                    providers
+                        .iter()
+                        .find(|candidate| candidate.id == provider_id)
+                        .map(|candidate| candidate.name.clone())
+                })
+                .unwrap_or_else(|| cached_provider.name.clone());
+            let usage = usage_summary(
+                &cached_provider,
+                llm::gateway::estimate_tokens(&prompt_used),
+                llm::gateway::estimate_tokens(&payload.answer),
+                0,
+                true,
+            );
+            record_usage_event(
+                &state.db,
+                cached_provider.id,
+                None,
+                "copilot",
+                "copilot",
+                "text",
+                &usage,
+                None,
+                json!({
+                    "cache_key": cache.cache_key,
+                    "cache_hit": true,
+                    "knowledge_base_count": body.knowledge_base_ids.len(),
+                }),
+            )
+            .await
+            .map_err(|cause| db_error(&cause))?;
 
-        return Ok(Json(CopilotResponse {
-            answer: payload.answer,
-            suggested_sql: payload.suggested_sql,
-            pipeline_suggestions: payload.pipeline_suggestions,
-            ontology_hints: payload.ontology_hints,
-            cited_knowledge: payload.cited_knowledge,
-            provider_name,
-            cache,
-            created_at: Utc::now(),
-        }));
+            return Ok(Json(CopilotResponse {
+                answer: payload.answer,
+                suggested_sql: payload.suggested_sql,
+                pipeline_suggestions: payload.pipeline_suggestions,
+                ontology_hints: payload.ontology_hints,
+                cited_knowledge: payload.cited_knowledge,
+                provider_name,
+                cache,
+                usage,
+                created_at: Utc::now(),
+            }));
+        }
     }
 
     let provider = llm::gateway::select_provider(
-        &llm::gateway::route_providers(&providers, body.preferred_provider_id, "copilot"),
+        &llm::gateway::route_providers(
+            &providers,
+            body.preferred_provider_id,
+            "copilot",
+            &required_modalities,
+            false,
+            privacy_reason.is_some(),
+        ),
         true,
     )
     .ok_or_else(|| not_found("no AI provider available"))?;
@@ -925,7 +1341,6 @@ pub async fn ask_copilot(
         .await
         .map_err(|cause| db_error(&cause))?;
     let cited_knowledge = rag::retriever::search(&body.question, &documents, 6, 0.55);
-    let guardrail = llm::guardrails::evaluate_text(&body.question);
 
     let draft = copilot::assist(
         &body.question,
@@ -936,33 +1351,77 @@ pub async fn ask_copilot(
         body.include_pipeline_plan,
     );
 
-    let provider_answer = if guardrail.blocked {
-        "Guardrails blocked this copilot request. Remove unsafe instructions and retry."
-            .to_string()
+    let started_at = Instant::now();
+    let completion = if guardrail.blocked {
+        None
     } else {
-        llm::runtime::complete_text(
-            &state.http_client,
-            &provider,
-            "You are OpenFoundry Copilot. Ground answers in retrieval context and suggested platform actions.",
-            &format!(
-                "Question: {}\nDraft answer: {}\nSuggested SQL: {:?}\nPipeline suggestions: {:?}\nOntology hints: {:?}\nKnowledge context:\n{}",
-                body.question,
-                draft.answer,
-                draft.suggested_sql,
-                draft.pipeline_suggestions,
-                draft.ontology_hints,
-                cited_knowledge
-                    .iter()
-                    .map(|hit| format!("- {}: {}", hit.document_title, hit.excerpt))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            ),
-            0.2,
-            provider.max_output_tokens.min(512),
+        Some(
+            llm::runtime::complete_text(
+                &state.http_client,
+                &provider,
+                "You are OpenFoundry Copilot. Ground answers in retrieval context and suggested platform actions.",
+                &format!(
+                    "Question: {}\nDraft answer: {}\nSuggested SQL: {:?}\nPipeline suggestions: {:?}\nOntology hints: {:?}\nKnowledge context:\n{}",
+                    body.question,
+                    draft.answer,
+                    draft.suggested_sql,
+                    draft.pipeline_suggestions,
+                    draft.ontology_hints,
+                    cited_knowledge
+                        .iter()
+                        .map(|hit| format!("- {}: {}", hit.document_title, hit.excerpt))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                ),
+                &[],
+                0.2,
+                provider.max_output_tokens.min(512),
+            )
+            .await
+            .map_err(internal_error)?,
         )
-        .await
-        .map_err(internal_error)?
-        .text
+    };
+    let provider_answer = if let Some(completion) = completion.as_ref() {
+        completion.text.clone()
+    } else {
+        "Guardrails blocked this copilot request. Remove unsafe instructions and retry.".to_string()
+    };
+    let latency_ms = started_at.elapsed().as_millis().min(i32::MAX as u128) as i32;
+    let prompt_tokens = completion
+        .as_ref()
+        .map(|result| result.prompt_tokens)
+        .filter(|tokens| *tokens > 0)
+        .unwrap_or_else(|| llm::gateway::estimate_tokens(&prompt_used));
+    let completion_tokens = completion
+        .as_ref()
+        .map(|result| result.completion_tokens)
+        .filter(|tokens| *tokens > 0)
+        .unwrap_or_else(|| llm::gateway::estimate_tokens(&provider_answer));
+    let total_tokens = completion
+        .as_ref()
+        .map(|result| result.total_tokens)
+        .filter(|tokens| *tokens > 0)
+        .unwrap_or(prompt_tokens + completion_tokens);
+    let usage = if guardrail.blocked {
+        LlmUsageSummary {
+            prompt_tokens,
+            completion_tokens: 0,
+            total_tokens: prompt_tokens,
+            estimated_cost_usd: 0.0,
+            latency_ms: 0,
+            network_scope: provider.route_rules.network_scope.clone(),
+            cache_hit: false,
+        }
+    } else {
+        let mut usage = usage_summary(
+            &provider,
+            prompt_tokens,
+            completion_tokens,
+            latency_ms,
+            false,
+        );
+        usage.total_tokens = total_tokens;
+        usage
     };
 
     let payload = CachedCopilotPayload {
@@ -994,6 +1453,23 @@ pub async fn ask_copilot(
     )
     .await
     .map_err(|cause| db_error(&cause))?;
+    record_usage_event(
+        &state.db,
+        provider.id,
+        None,
+        "copilot",
+        "copilot",
+        "text",
+        &usage,
+        None,
+        json!({
+            "cache_key": cache.cache_key,
+            "cache_hit": false,
+            "knowledge_hit_count": cited_knowledge.len(),
+        }),
+    )
+    .await
+    .map_err(|cause| db_error(&cause))?;
 
     Ok(Json(CopilotResponse {
         answer: payload.answer,
@@ -1003,6 +1479,236 @@ pub async fn ask_copilot(
         cited_knowledge: payload.cited_knowledge,
         provider_name: provider.name,
         cache,
+        usage,
+        created_at: Utc::now(),
+    }))
+}
+
+pub async fn benchmark_providers(
+    State(state): State<AppState>,
+    Json(body): Json<ProviderBenchmarkRequest>,
+) -> ServiceResult<ProviderBenchmarkResponse> {
+    if body.prompt.trim().is_empty() {
+        return Err(bad_request("benchmark prompt is required"));
+    }
+
+    let prompt_guardrail = llm::guardrails::evaluate_text(&body.prompt);
+    if prompt_guardrail.blocked {
+        return Err(bad_request(
+            "benchmark prompt is blocked by guardrails; sanitize it before benchmarking",
+        ));
+    }
+
+    let providers = load_provider_rows(&state.db)
+        .await
+        .map_err(|cause| db_error(&cause))?
+        .into_iter()
+        .map(Into::into)
+        .collect::<Vec<LlmProvider>>();
+    if providers.is_empty() {
+        return Err(not_found("no AI providers configured"));
+    }
+
+    let candidate_providers = if body.provider_ids.is_empty() {
+        providers.clone()
+    } else {
+        providers
+            .iter()
+            .filter(|provider| body.provider_ids.contains(&provider.id))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    if candidate_providers.is_empty() {
+        return Err(not_found(
+            "no benchmark providers matched the requested ids",
+        ));
+    }
+
+    let required_modalities = required_modalities(&body.attachments);
+    let privacy_reason = privacy_reason(&prompt_guardrail, body.require_private_network);
+    let routed = llm::gateway::route_providers(
+        &candidate_providers,
+        None,
+        &body.use_case,
+        &required_modalities,
+        body.require_private_network,
+        privacy_reason.is_some(),
+    );
+    if body.require_private_network && routed.is_empty() {
+        return Err(bad_request(
+            "no private-network AI provider is configured for this benchmark",
+        ));
+    }
+    if routed.is_empty() {
+        return Err(not_found("no eligible providers support this benchmark"));
+    }
+
+    let benchmark_group_id = Uuid::now_v7();
+    let system_prompt = body.system_prompt.unwrap_or_else(|| {
+        "You are an enterprise AI benchmark harness. Answer the user prompt clearly and concretely."
+            .to_string()
+    });
+    let prompt_used = format!(
+        "{}\n\nUser request: {}\n\nAttachments:\n{}",
+        system_prompt,
+        prompt_guardrail.redacted_text,
+        attachment_context(&body.attachments)
+    );
+    let mut results = Vec::new();
+
+    for provider in routed {
+        let started_at = Instant::now();
+        let completion = llm::runtime::complete_text(
+            &state.http_client,
+            &provider,
+            &system_prompt,
+            &body.prompt,
+            &body.attachments,
+            0.2,
+            body.max_tokens,
+        )
+        .await;
+        let latency_ms = started_at.elapsed().as_millis().min(i32::MAX as u128) as i32;
+
+        match completion {
+            Ok(completion) => {
+                let prompt_tokens = completion
+                    .prompt_tokens
+                    .max(llm::gateway::estimate_tokens(&prompt_used));
+                let completion_tokens = completion
+                    .completion_tokens
+                    .max(llm::gateway::estimate_tokens(&completion.text));
+                let mut usage = usage_summary(
+                    &provider,
+                    prompt_tokens,
+                    completion_tokens,
+                    latency_ms,
+                    false,
+                );
+                usage.total_tokens = completion
+                    .total_tokens
+                    .max(prompt_tokens + completion_tokens);
+                let reply_guardrail = llm::guardrails::evaluate_text(&completion.text);
+                record_usage_event(
+                    &state.db,
+                    provider.id,
+                    None,
+                    "benchmark",
+                    &body.use_case,
+                    modality_label(&required_modalities),
+                    &usage,
+                    Some(benchmark_group_id),
+                    json!({
+                        "rubric_keywords": body.rubric_keywords,
+                        "provider_name": provider.name,
+                    }),
+                )
+                .await
+                .map_err(|cause| db_error(&cause))?;
+
+                results.push(ProviderBenchmarkResult {
+                    provider_id: provider.id,
+                    provider_name: provider.name,
+                    network_scope: usage.network_scope.clone(),
+                    reply_preview: preview_text(&completion.text, 280),
+                    prompt_tokens: usage.prompt_tokens,
+                    completion_tokens: usage.completion_tokens,
+                    total_tokens: usage.total_tokens,
+                    estimated_cost_usd: usage.estimated_cost_usd,
+                    latency_ms: usage.latency_ms,
+                    cache_hit: false,
+                    guardrail: reply_guardrail,
+                    score: ProviderBenchmarkScore {
+                        quality: 0.0,
+                        latency: 0.0,
+                        cost: 0.0,
+                        safety: 0.0,
+                        overall: 0.0,
+                    },
+                    error: None,
+                });
+            }
+            Err(error) => {
+                results.push(ProviderBenchmarkResult {
+                    provider_id: provider.id,
+                    provider_name: provider.name,
+                    network_scope: provider.route_rules.network_scope.clone(),
+                    reply_preview: String::new(),
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_tokens: 0,
+                    estimated_cost_usd: 0.0,
+                    latency_ms,
+                    cache_hit: false,
+                    guardrail: GuardrailVerdict::default(),
+                    score: ProviderBenchmarkScore {
+                        quality: 0.0,
+                        latency: 0.0,
+                        cost: 0.0,
+                        safety: 0.0,
+                        overall: 0.0,
+                    },
+                    error: Some(error),
+                });
+            }
+        }
+    }
+
+    let successful = results
+        .iter()
+        .filter(|result| result.error.is_none())
+        .collect::<Vec<_>>();
+    let min_latency = successful
+        .iter()
+        .map(|result| result.latency_ms as f32)
+        .fold(f32::INFINITY, f32::min);
+    let max_latency = successful
+        .iter()
+        .map(|result| result.latency_ms as f32)
+        .fold(0.0, f32::max);
+    let min_cost = successful
+        .iter()
+        .map(|result| result.estimated_cost_usd)
+        .fold(f32::INFINITY, f32::min);
+    let max_cost = successful
+        .iter()
+        .map(|result| result.estimated_cost_usd)
+        .fold(0.0, f32::max);
+
+    for result in &mut results {
+        if result.error.is_some() {
+            continue;
+        }
+
+        let quality = evaluation::quality_score(&result.reply_preview, &body.rubric_keywords);
+        let safety = evaluation::safety_score(&result.guardrail);
+        let latency =
+            evaluation::normalized_score(result.latency_ms as f32, min_latency, max_latency, true);
+        let cost =
+            evaluation::normalized_score(result.estimated_cost_usd, min_cost, max_cost, true);
+        result.score = ProviderBenchmarkScore {
+            quality,
+            latency,
+            cost,
+            safety,
+            overall: evaluation::overall_benchmark_score(quality, safety, latency, cost),
+        };
+    }
+
+    results.sort_by(|left, right| right.score.overall.total_cmp(&left.score.overall));
+    let recommended_provider_id = results
+        .iter()
+        .find(|result| result.error.is_none())
+        .map(|result| result.provider_id);
+
+    Ok(Json(ProviderBenchmarkResponse {
+        benchmark_group_id,
+        use_case: body.use_case,
+        prompt_excerpt: summarize_title(&body.prompt),
+        required_modalities,
+        requested_private_network: body.require_private_network,
+        recommended_provider_id,
+        results,
         created_at: Utc::now(),
     }))
 }

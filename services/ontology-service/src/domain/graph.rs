@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 use auth_middleware::claims::Claims;
 use serde_json::json;
@@ -12,7 +12,7 @@ use crate::{
         objects::{ObjectInstance, load_object_instance},
     },
     models::{
-        graph::{GraphEdge, GraphNode, GraphQuery, GraphResponse},
+        graph::{GraphEdge, GraphNode, GraphQuery, GraphResponse, GraphSummary},
         interface::{ObjectTypeInterfaceBinding, OntologyInterface},
         link_type::LinkType,
         object_type::ObjectType,
@@ -51,6 +51,119 @@ fn object_label(object_type: &ObjectType, object: &ObjectInstance) -> String {
     }
 }
 
+fn increment_count(map: &mut BTreeMap<String, usize>, key: impl Into<String>) {
+    *map.entry(key.into()).or_default() += 1;
+}
+
+fn classify_scope(
+    mode: &str,
+    root_neighbor_count: usize,
+    sensitive_objects: usize,
+    boundary_crossings: usize,
+) -> String {
+    if mode == "schema" {
+        "schema".to_string()
+    } else if sensitive_objects > 0 {
+        "sensitive_connected".to_string()
+    } else if boundary_crossings > 0 {
+        "cross_boundary".to_string()
+    } else if root_neighbor_count > 0 {
+        "connected".to_string()
+    } else {
+        "local".to_string()
+    }
+}
+
+fn summarize_graph(mode: &str, nodes: &[GraphNode], edges: &[GraphEdge]) -> GraphSummary {
+    let mut node_kinds = BTreeMap::new();
+    let mut edge_kinds = BTreeMap::new();
+    let mut object_types = BTreeMap::new();
+    let mut markings = BTreeMap::new();
+    let mut sensitive_markings = BTreeSet::new();
+    let mut max_hops_reached = 0usize;
+    let mut root_neighbor_count = 0usize;
+    let mut sensitive_objects = 0usize;
+
+    let node_metadata = nodes
+        .iter()
+        .map(|node| (node.id.as_str(), &node.metadata))
+        .collect::<HashMap<_, _>>();
+
+    for node in nodes {
+        increment_count(&mut node_kinds, node.kind.clone());
+
+        match node.kind.as_str() {
+            "object_type" => increment_count(&mut object_types, node.label.clone()),
+            "object_instance" => {
+                if let Some(type_label) = node.secondary_label.as_deref() {
+                    increment_count(&mut object_types, type_label.to_string());
+                }
+            }
+            _ => {}
+        }
+
+        if let Some(marking) = node
+            .metadata
+            .get("marking")
+            .and_then(|value| value.as_str())
+        {
+            increment_count(&mut markings, marking.to_string());
+            if marking != "public" {
+                sensitive_objects += 1;
+                sensitive_markings.insert(marking.to_string());
+            }
+        }
+
+        if let Some(distance) = node
+            .metadata
+            .get("distance_from_root")
+            .and_then(|value| value.as_u64())
+            .map(|value| value as usize)
+        {
+            max_hops_reached = max_hops_reached.max(distance);
+            if distance == 1 {
+                root_neighbor_count += 1;
+            }
+        }
+    }
+
+    let mut boundary_crossings = 0usize;
+    for edge in edges {
+        increment_count(&mut edge_kinds, edge.kind.clone());
+
+        let source_org = node_metadata
+            .get(edge.source.as_str())
+            .and_then(|metadata| metadata.get("organization_id"))
+            .and_then(|value| value.as_str());
+        let target_org = node_metadata
+            .get(edge.target.as_str())
+            .and_then(|metadata| metadata.get("organization_id"))
+            .and_then(|value| value.as_str());
+
+        if source_org != target_org && (source_org.is_some() || target_org.is_some()) {
+            boundary_crossings += 1;
+        }
+    }
+
+    GraphSummary {
+        scope: classify_scope(
+            mode,
+            root_neighbor_count,
+            sensitive_objects,
+            boundary_crossings,
+        ),
+        node_kinds,
+        edge_kinds,
+        object_types,
+        markings,
+        root_neighbor_count,
+        max_hops_reached,
+        boundary_crossings,
+        sensitive_objects,
+        sensitive_markings: sensitive_markings.into_iter().collect(),
+    }
+}
+
 pub async fn build_graph(
     state: &AppState,
     claims: &Claims,
@@ -67,10 +180,11 @@ async fn build_schema_graph(
     state: &AppState,
     root_type_id: Option<Uuid>,
 ) -> Result<GraphResponse, String> {
-    let object_types = sqlx::query_as::<_, ObjectType>("SELECT * FROM object_types ORDER BY created_at DESC")
-        .fetch_all(&state.db)
-        .await
-        .map_err(|error| format!("failed to load object types: {error}"))?;
+    let object_types =
+        sqlx::query_as::<_, ObjectType>("SELECT * FROM object_types ORDER BY created_at DESC")
+            .fetch_all(&state.db)
+            .await
+            .map_err(|error| format!("failed to load object types: {error}"))?;
     let interfaces = sqlx::query_as::<_, OntologyInterface>(
         "SELECT * FROM ontology_interfaces ORDER BY created_at DESC",
     )
@@ -83,10 +197,11 @@ async fn build_schema_graph(
     .fetch_all(&state.db)
     .await
     .map_err(|error| format!("failed to load interface bindings: {error}"))?;
-    let link_types = sqlx::query_as::<_, LinkType>("SELECT * FROM link_types ORDER BY created_at DESC")
-        .fetch_all(&state.db)
-        .await
-        .map_err(|error| format!("failed to load link types: {error}"))?;
+    let link_types =
+        sqlx::query_as::<_, LinkType>("SELECT * FROM link_types ORDER BY created_at DESC")
+            .fetch_all(&state.db)
+            .await
+            .map_err(|error| format!("failed to load link types: {error}"))?;
 
     let mut allowed_types = object_types
         .iter()
@@ -95,7 +210,8 @@ async fn build_schema_graph(
     if let Some(root_type_id) = root_type_id {
         let mut focused = HashSet::from([root_type_id]);
         for link_type in &link_types {
-            if link_type.source_type_id == root_type_id || link_type.target_type_id == root_type_id {
+            if link_type.source_type_id == root_type_id || link_type.target_type_id == root_type_id
+            {
                 focused.insert(link_type.source_type_id);
                 focused.insert(link_type.target_type_id);
             }
@@ -171,7 +287,10 @@ async fn build_schema_graph(
             continue;
         }
         edges.push(GraphEdge {
-            id: format!("interface_binding:{}:{}", binding.object_type_id, binding.interface_id),
+            id: format!(
+                "interface_binding:{}:{}",
+                binding.object_type_id, binding.interface_id
+            ),
             kind: "interface_binding".to_string(),
             source: type_node_id(binding.object_type_id),
             target: interface_node_id(binding.interface_id),
@@ -180,6 +299,8 @@ async fn build_schema_graph(
         });
     }
 
+    let summary = summarize_graph("schema", &nodes, &edges);
+
     Ok(GraphResponse {
         mode: "schema".to_string(),
         root_object_id: None,
@@ -187,6 +308,7 @@ async fn build_schema_graph(
         depth: 1,
         total_nodes: nodes.len(),
         total_edges: edges.len(),
+        summary,
         nodes,
         edges,
     })
@@ -225,6 +347,7 @@ async fn build_object_graph(
         .collect::<HashMap<_, _>>();
 
     let mut visited_objects = HashSet::from([root_object_id]);
+    let mut distance_from_root = HashMap::from([(root_object_id, 0usize)]);
     let mut seen_edges = HashSet::new();
     let mut queue = VecDeque::from([(root_object_id, 0usize)]);
     let mut link_instances = Vec::new();
@@ -262,6 +385,7 @@ async fn build_object_graph(
                 continue;
             }
             if visited_objects.insert(neighbor_id) {
+                distance_from_root.insert(neighbor_id, level + 1);
                 queue.push_back((neighbor_id, level + 1));
             }
         }
@@ -282,6 +406,15 @@ async fn build_object_graph(
         allowed_object_ids.insert(object.id);
         objects.push(object);
     }
+    objects.sort_by_key(|object| {
+        (
+            distance_from_root
+                .get(&object.id)
+                .copied()
+                .unwrap_or(depth.saturating_add(1)),
+            object.id.to_string(),
+        )
+    });
 
     let nodes = objects
         .iter()
@@ -295,6 +428,13 @@ async fn build_object_graph(
                 route: Some(object_route(object.object_type_id, object.id)),
                 metadata: json!({
                     "object_type_id": object.object_type_id,
+                    "distance_from_root": distance_from_root.get(&object.id).copied().unwrap_or(depth),
+                    "role": match distance_from_root.get(&object.id).copied().unwrap_or(depth) {
+                        0 => "root",
+                        1 => "neighbor",
+                        _ => "extended",
+                    },
+                    "organization_id": object.organization_id,
                     "marking": object.marking,
                     "properties": object.properties,
                 }),
@@ -302,32 +442,60 @@ async fn build_object_graph(
         })
         .collect::<Vec<_>>();
 
-    let edges = link_instances
+    let mut edges = link_instances
         .into_iter()
         .filter(|link_instance| {
             allowed_object_ids.contains(&link_instance.source_object_id)
                 && allowed_object_ids.contains(&link_instance.target_object_id)
         })
         .filter_map(|link_instance| {
-            link_type_map.get(&link_instance.link_type_id).map(|link_type| GraphEdge {
-                id: format!("link_instance:{}", link_instance.id),
-                kind: "link_instance".to_string(),
-                source: object_node_id(link_instance.source_object_id),
-                target: object_node_id(link_instance.target_object_id),
-                label: link_type.display_name.clone(),
-                metadata: json!({
-                    "link_type_id": link_type.id,
-                    "cardinality": link_type.cardinality,
-                    "properties": link_instance.properties,
-                }),
-            })
+            link_type_map
+                .get(&link_instance.link_type_id)
+                .map(|link_type| GraphEdge {
+                    id: format!("link_instance:{}", link_instance.id),
+                    kind: "link_instance".to_string(),
+                    source: object_node_id(link_instance.source_object_id),
+                    target: object_node_id(link_instance.target_object_id),
+                    label: link_type.display_name.clone(),
+                    metadata: json!({
+                        "link_type_id": link_type.id,
+                        "cardinality": link_type.cardinality,
+                        "crosses_organization_boundary": false,
+                        "properties": link_instance.properties,
+                    }),
+                })
         })
         .collect::<Vec<_>>();
+    edges.sort_by(|left, right| left.id.cmp(&right.id));
 
     let root_type_id = objects
         .iter()
         .find(|object| object.id == root_object_id)
         .map(|object| object.object_type_id);
+
+    let summary = summarize_graph("object", &nodes, &edges);
+    for edge in &mut edges {
+        let source_org = nodes
+            .iter()
+            .find(|node| node.id == edge.source)
+            .and_then(|node| node.metadata.get("organization_id"))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let target_org = nodes
+            .iter()
+            .find(|node| node.id == edge.target)
+            .and_then(|node| node.metadata.get("organization_id"))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let crosses_boundary =
+            source_org != target_org && (!source_org.is_null() || !target_org.is_null());
+        if let Some(metadata) = edge.metadata.as_object_mut() {
+            metadata.insert(
+                "crosses_organization_boundary".to_string(),
+                json!(crosses_boundary),
+            );
+        }
+    }
 
     Ok(GraphResponse {
         mode: "object".to_string(),
@@ -336,7 +504,88 @@ async fn build_object_graph(
         depth,
         total_nodes: nodes.len(),
         total_edges: edges.len(),
+        summary,
         nodes,
         edges,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::summarize_graph;
+    use crate::models::graph::{GraphEdge, GraphNode};
+
+    #[test]
+    fn object_graph_summary_captures_sensitive_cross_boundary_scope() {
+        let nodes = vec![
+            GraphNode {
+                id: "object:root".to_string(),
+                kind: "object_instance".to_string(),
+                label: "Root".to_string(),
+                secondary_label: Some("Case".to_string()),
+                color: None,
+                route: None,
+                metadata: json!({
+                    "distance_from_root": 0,
+                    "organization_id": "org-a",
+                    "marking": "public",
+                }),
+            },
+            GraphNode {
+                id: "object:neighbor".to_string(),
+                kind: "object_instance".to_string(),
+                label: "Neighbor".to_string(),
+                secondary_label: Some("Customer".to_string()),
+                color: None,
+                route: None,
+                metadata: json!({
+                    "distance_from_root": 1,
+                    "organization_id": "org-b",
+                    "marking": "pii",
+                }),
+            },
+        ];
+        let edges = vec![GraphEdge {
+            id: "link:1".to_string(),
+            kind: "link_instance".to_string(),
+            source: "object:root".to_string(),
+            target: "object:neighbor".to_string(),
+            label: "linked".to_string(),
+            metadata: json!({}),
+        }];
+
+        let summary = summarize_graph("object", &nodes, &edges);
+
+        assert_eq!(summary.scope, "sensitive_connected");
+        assert_eq!(summary.root_neighbor_count, 1);
+        assert_eq!(summary.max_hops_reached, 1);
+        assert_eq!(summary.boundary_crossings, 1);
+        assert_eq!(summary.sensitive_objects, 1);
+        assert_eq!(summary.object_types.get("Case"), Some(&1));
+        assert_eq!(summary.object_types.get("Customer"), Some(&1));
+        assert_eq!(summary.markings.get("pii"), Some(&1));
+    }
+
+    #[test]
+    fn schema_graph_summary_stays_in_schema_scope() {
+        let nodes = vec![GraphNode {
+            id: "type:1".to_string(),
+            kind: "object_type".to_string(),
+            label: "Case".to_string(),
+            secondary_label: Some("case".to_string()),
+            color: None,
+            route: None,
+            metadata: json!({}),
+        }];
+        let edges = vec![];
+
+        let summary = summarize_graph("schema", &nodes, &edges);
+
+        assert_eq!(summary.scope, "schema");
+        assert_eq!(summary.object_types.get("Case"), Some(&1));
+        assert_eq!(summary.root_neighbor_count, 0);
+        assert_eq!(summary.sensitive_objects, 0);
+    }
 }

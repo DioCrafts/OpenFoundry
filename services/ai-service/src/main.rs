@@ -45,7 +45,7 @@ async fn main() {
         .await
         .expect("failed to run migrations");
 
-    let jwt_config = JwtConfig::new(&cfg.jwt_secret);
+    let jwt_config = JwtConfig::new(&cfg.jwt_secret).with_env_defaults();
     let http_client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
@@ -133,6 +133,10 @@ async fn main() {
         .route(
             "/api/v1/ai/guardrails/evaluate",
             post(handlers::chat::evaluate_guardrails),
+        )
+        .route(
+            "/api/v1/ai/evaluations/benchmarks",
+            post(handlers::chat::benchmark_providers),
         )
         .layer(middleware::from_fn_with_state(
             jwt_config,

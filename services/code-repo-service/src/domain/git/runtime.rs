@@ -23,8 +23,12 @@ pub struct GitBranchMetadata {
 }
 
 pub fn ensure_storage_root(root: &Path) -> Result<()> {
-    fs::create_dir_all(root)
-        .with_context(|| format!("failed to create repository storage root {}", root.display()))
+    fs::create_dir_all(root).with_context(|| {
+        format!(
+            "failed to create repository storage root {}",
+            root.display()
+        )
+    })
 }
 
 pub fn repository_path(root: &Path, repository_id: uuid::Uuid) -> PathBuf {
@@ -38,12 +42,23 @@ pub fn initialize_repository(
     ensure_storage_root(root)?;
     let repo_dir = repository_path(root, repository.id);
     if repo_dir.exists() {
-        bail!("repository storage already exists at {}", repo_dir.display());
+        bail!(
+            "repository storage already exists at {}",
+            repo_dir.display()
+        );
     }
 
-    fs::create_dir_all(&repo_dir)
-        .with_context(|| format!("failed to create repository directory {}", repo_dir.display()))?;
-    run_command(Some(&repo_dir), "git", &["init", "-b", &repository.default_branch])?;
+    fs::create_dir_all(&repo_dir).with_context(|| {
+        format!(
+            "failed to create repository directory {}",
+            repo_dir.display()
+        )
+    })?;
+    run_command(
+        Some(&repo_dir),
+        "git",
+        &["init", "-b", &repository.default_branch],
+    )?;
 
     let author_email = author_email(&repository.owner);
 
@@ -51,7 +66,10 @@ pub fn initialize_repository(
         let file_path = repo_dir.join(&path);
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent).with_context(|| {
-                format!("failed to create scaffold parent directory {}", parent.display())
+                format!(
+                    "failed to create scaffold parent directory {}",
+                    parent.display()
+                )
             })?;
         }
         fs::write(&file_path, content)
@@ -114,7 +132,10 @@ pub fn list_branches(
                     .and_then(|entry| entry.base_branch.clone())
                     .or_else(|| Some(repository.default_branch.clone()))
             };
-            let protected = metadata.get(&name).map(|entry| entry.protected).unwrap_or(is_default);
+            let protected = metadata
+                .get(&name)
+                .map(|entry| entry.protected)
+                .unwrap_or(is_default);
             let ahead_by = if let Some(base_branch) = base_branch.as_deref() {
                 count_ahead_by(&repo_dir, base_branch, &name)?
             } else {
@@ -149,21 +170,25 @@ pub fn list_branches(
     Ok(branches)
 }
 
-pub fn create_branch(root: &Path, repository_id: uuid::Uuid, name: &str, base_branch: &str) -> Result<()> {
+pub fn create_branch(
+    root: &Path,
+    repository_id: uuid::Uuid,
+    name: &str,
+    base_branch: &str,
+) -> Result<()> {
     let repo_dir = repo_dir(root, repository_id)?;
     git(&repo_dir, &["branch", name, base_branch])?;
     Ok(())
 }
 
-pub fn list_commits(root: &Path, repository: &RepositoryDefinition) -> Result<Vec<CommitDefinition>> {
+pub fn list_commits(
+    root: &Path,
+    repository: &RepositoryDefinition,
+) -> Result<Vec<CommitDefinition>> {
     let repo_dir = repo_dir(root, repository.id)?;
     let branch_names = git(
         &repo_dir,
-        &[
-            "for-each-ref",
-            "--format=%(refname:short)",
-            "refs/heads",
-        ],
+        &["for-each-ref", "--format=%(refname:short)", "refs/heads"],
     )?;
 
     let mut commits_by_sha = BTreeMap::new();
@@ -326,10 +351,7 @@ pub fn list_files(
     branch_name: &str,
 ) -> Result<Vec<RepositoryFile>> {
     let repo_dir = repo_dir(root, repository_id)?;
-    let paths = git(
-        &repo_dir,
-        &["ls-tree", "-r", "--name-only", branch_name],
-    )?;
+    let paths = git(&repo_dir, &["ls-tree", "-r", "--name-only", branch_name])?;
 
     let mut files = Vec::new();
     for path in paths.lines().filter(|line| !line.trim().is_empty()) {
@@ -361,32 +383,38 @@ pub fn repository_diff(
 ) -> Result<String> {
     let repo_dir = repo_dir(root, repository_id)?;
     if branch_name == default_branch {
-        let has_parent = git(
-            &repo_dir,
-            &["rev-list", "--count", branch_name],
-        )?
-        .trim()
-        .parse::<usize>()
-        .unwrap_or_default()
+        let has_parent = git(&repo_dir, &["rev-list", "--count", branch_name])?
+            .trim()
+            .parse::<usize>()
+            .unwrap_or_default()
             > 1;
 
         if has_parent {
-            return git(&repo_dir, &["diff", &format!("{branch_name}~1"), branch_name]);
+            return git(
+                &repo_dir,
+                &["diff", &format!("{branch_name}~1"), branch_name],
+            );
         }
         return git(&repo_dir, &["show", "--format=", branch_name]);
     }
 
     let merge_base = git(&repo_dir, &["merge-base", default_branch, branch_name])?;
-    git(
-        &repo_dir,
-        &["diff", merge_base.trim(), branch_name],
-    )
+    git(&repo_dir, &["diff", merge_base.trim(), branch_name])
 }
 
 pub fn run_ci_for_repository(
     root: &Path,
     repository: &RepositoryDefinition,
     branch_name: &str,
+) -> Result<CiRun> {
+    run_ci_for_repository_with_trigger(root, repository, branch_name, "manual")
+}
+
+pub fn run_ci_for_repository_with_trigger(
+    root: &Path,
+    repository: &RepositoryDefinition,
+    branch_name: &str,
+    trigger: &str,
 ) -> Result<CiRun> {
     let repo_dir = repo_dir(root, repository.id)?;
     git(&repo_dir, &["checkout", branch_name])?;
@@ -418,17 +446,71 @@ pub fn run_ci_for_repository(
         commit_sha: commit_sha.trim().to_string(),
         pipeline_name: "package-validation".to_string(),
         status,
-        trigger: "manual".to_string(),
+        trigger: trigger.to_string(),
         started_at,
         completed_at: Some(Utc::now()),
         checks,
     })
 }
 
+pub fn branch_head_sha(
+    root: &Path,
+    repository_id: uuid::Uuid,
+    branch_name: &str,
+) -> Result<String> {
+    let repo_dir = repo_dir(root, repository_id)?;
+    ensure_branch_exists(&repo_dir, branch_name)?;
+    let sha = git(
+        &repo_dir,
+        &["rev-parse", &format!("refs/heads/{branch_name}")],
+    )?;
+    Ok(sha.trim().to_string())
+}
+
+pub fn merge_branches(
+    root: &Path,
+    repository: &RepositoryDefinition,
+    source_branch: &str,
+    target_branch: &str,
+    author_name: &str,
+) -> Result<String> {
+    if source_branch == target_branch {
+        bail!("source and target branches must be different");
+    }
+
+    let repo_dir = repo_dir(root, repository.id)?;
+    ensure_branch_exists(&repo_dir, source_branch)?;
+    ensure_branch_exists(&repo_dir, target_branch)?;
+
+    let ahead_by = count_ahead_by(&repo_dir, target_branch, source_branch)?;
+    if ahead_by <= 0 {
+        bail!("branch {source_branch} has no new commits to merge into {target_branch}");
+    }
+
+    git(&repo_dir, &["checkout", target_branch])?;
+    let author_email = author_email(author_name);
+    git_with_env(
+        &repo_dir,
+        &[
+            ("GIT_AUTHOR_NAME", author_name),
+            ("GIT_AUTHOR_EMAIL", author_email.as_str()),
+            ("GIT_COMMITTER_NAME", author_name),
+            ("GIT_COMMITTER_EMAIL", author_email.as_str()),
+        ],
+        &["merge", "--no-ff", "--no-edit", source_branch],
+    )?;
+
+    let sha = git(&repo_dir, &["rev-parse", "HEAD"])?;
+    Ok(sha.trim().to_string())
+}
+
 fn repo_dir(root: &Path, repository_id: uuid::Uuid) -> Result<PathBuf> {
     let repo_dir = repository_path(root, repository_id);
     if !repo_dir.join(".git").exists() {
-        bail!("repository does not exist on disk at {}", repo_dir.display());
+        bail!(
+            "repository does not exist on disk at {}",
+            repo_dir.display()
+        );
     }
     Ok(repo_dir)
 }
@@ -574,7 +656,8 @@ export default function App() {{\n\
             repository.description.clone()
         }
     );
-    let env_example = "VITE_OPENFOUNDRY_BASE_URL=http://127.0.0.1:8080\nVITE_OPENFOUNDRY_TOKEN=\n".to_string();
+    let env_example =
+        "VITE_OPENFOUNDRY_BASE_URL=http://127.0.0.1:8080\nVITE_OPENFOUNDRY_TOKEN=\n".to_string();
 
     vec![
         ("package.json".to_string(), package_json),
@@ -586,7 +669,10 @@ export default function App() {{\n\
         ("src/App.tsx".to_string(), app_tsx),
         ("src/platform.tsx".to_string(), platform_tsx),
         ("src/main.tsx".to_string(), main_tsx),
-        ("src/workspaces/OperationsConsole.tsx".to_string(), workspace_tsx),
+        (
+            "src/workspaces/OperationsConsole.tsx".to_string(),
+            workspace_tsx,
+        ),
     ]
 }
 
@@ -636,7 +722,8 @@ fn scaffold_python_files(repository: &RepositoryDefinition) -> Vec<(String, Stri
         },
         module_name
     );
-    let env_example = "OPENFOUNDRY_BASE_URL=http://127.0.0.1:8080\nOPENFOUNDRY_TOKEN=\n".to_string();
+    let env_example =
+        "OPENFOUNDRY_BASE_URL=http://127.0.0.1:8080\nOPENFOUNDRY_TOKEN=\n".to_string();
 
     vec![
         ("pyproject.toml".to_string(), pyproject),
@@ -664,9 +751,25 @@ fn repository_runtime(repository: &RepositoryDefinition) -> &str {
 fn count_ahead_by(repo_dir: &Path, base_branch: &str, branch_name: &str) -> Result<i32> {
     let output = git(
         repo_dir,
-        &["rev-list", "--count", &format!("{base_branch}..{branch_name}")],
+        &[
+            "rev-list",
+            "--count",
+            &format!("{base_branch}..{branch_name}"),
+        ],
     )?;
     Ok(output.trim().parse::<i32>().unwrap_or_default())
+}
+
+fn ensure_branch_exists(repo_dir: &Path, branch_name: &str) -> Result<()> {
+    git(
+        repo_dir,
+        &[
+            "rev-parse",
+            "--verify",
+            &format!("refs/heads/{branch_name}"),
+        ],
+    )?;
+    Ok(())
 }
 
 fn parse_git_timestamp(raw: &str) -> Result<DateTime<Utc>> {
@@ -746,9 +849,9 @@ fn run_command_with_env(
         command.env(name, value);
     }
 
-    let output = command.output().with_context(|| {
-        format!("failed to run command `{program} {}`", args.join(" "))
-    })?;
+    let output = command
+        .output()
+        .with_context(|| format!("failed to run command `{program} {}`", args.join(" ")))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -838,7 +941,8 @@ mod tests {
     use serde_json::json;
 
     fn temp_root() -> PathBuf {
-        let root = std::env::temp_dir().join(format!("of-code-repo-tests-{}", uuid::Uuid::now_v7()));
+        let root =
+            std::env::temp_dir().join(format!("of-code-repo-tests-{}", uuid::Uuid::now_v7()));
         fs::create_dir_all(&root).expect("temp root");
         root
     }
@@ -861,7 +965,10 @@ mod tests {
         }
     }
 
-    fn sample_repository_with_runtime(runtime: &str, package_kind: PackageKind) -> RepositoryDefinition {
+    fn sample_repository_with_runtime(
+        runtime: &str,
+        package_kind: PackageKind,
+    ) -> RepositoryDefinition {
         RepositoryDefinition {
             package_kind,
             settings: json!({ "runtime": runtime }),
@@ -929,6 +1036,52 @@ mod tests {
     }
 
     #[test]
+    fn merges_feature_branch_back_into_target_branch() {
+        let root = temp_root();
+        let repository = sample_repository();
+        initialize_repository(&root, &repository).expect("init repo");
+        create_branch(&root, repository.id, "feature/runtime", "main").expect("create branch");
+        apply_commit(
+            &root,
+            &repository,
+            &CreateCommitRequest {
+                branch_name: "feature/runtime".to_string(),
+                title: "Add runtime helper".to_string(),
+                description: "Adds a real file change".to_string(),
+                author_name: "Platform UI".to_string(),
+                additions: 8,
+                deletions: 0,
+                files: vec![CommitFileChange {
+                    path: "src/runtime.rs".to_string(),
+                    content: "pub fn runtime_ready() -> bool {\n    true\n}\n".to_string(),
+                    delete: false,
+                }],
+            },
+        )
+        .expect("commit");
+
+        let merge_sha =
+            merge_branches(&root, &repository, "feature/runtime", "main", "Platform UI")
+                .expect("merge");
+        let files = list_files(&root, repository.id, "main").expect("files");
+
+        assert!(!merge_sha.is_empty());
+        assert!(files.iter().any(|file| file.path == "src/runtime.rs"));
+    }
+
+    #[test]
+    fn ci_trigger_can_be_overridden_for_push_and_merge_flows() {
+        let root = temp_root();
+        let repository = sample_repository();
+        initialize_repository(&root, &repository).expect("init repo");
+
+        let run =
+            run_ci_for_repository_with_trigger(&root, &repository, "main", "push").expect("ci run");
+
+        assert_eq!(run.trigger, "push");
+    }
+
+    #[test]
     fn scaffolds_typescript_react_when_requested() {
         let root = temp_root();
         let repository = sample_repository_with_runtime("typescript-react", PackageKind::Widget);
@@ -938,9 +1091,11 @@ mod tests {
         assert!(files.iter().any(|file| file.path == "package.json"));
         assert!(files.iter().any(|file| file.path == "src/App.tsx"));
         assert!(files.iter().any(|file| file.path == "src/platform.tsx"));
-        assert!(files
-            .iter()
-            .any(|file| file.path == "src/workspaces/OperationsConsole.tsx"));
+        assert!(
+            files
+                .iter()
+                .any(|file| file.path == "src/workspaces/OperationsConsole.tsx")
+        );
         assert!(files.iter().any(|file| file.path == "index.html"));
     }
 

@@ -8,12 +8,8 @@ use axum::{Json, http::StatusCode};
 use serde::Serialize;
 
 use crate::models::{
-    access_grant::AccessGrantRow,
-    contract::ContractRow,
-    peer::PeerRow,
-    share::SharedDatasetRow,
-    space::SpaceRow,
-    sync_status::SyncStatusRow,
+    access_grant::AccessGrantRow, contract::ContractRow, peer::PeerRow, share::SharedDatasetRow,
+    space::SpaceRow, sync_status::SyncStatusRow,
 };
 
 #[derive(Debug, Serialize)]

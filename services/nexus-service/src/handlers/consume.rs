@@ -68,8 +68,8 @@ pub async fn run_federated_query(
     )
     .map_err(bad_request)?;
 
-    let result = federation::execute_query(&request, &share, &grant, &peer_index)
-        .map_err(bad_request)?;
+    let result =
+        federation::execute_query(&request, &share, &grant, &peer_index).map_err(bad_request)?;
     Ok(Json(result))
 }
 

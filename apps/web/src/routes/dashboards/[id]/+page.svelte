@@ -6,14 +6,22 @@
   import DashboardGrid from '$components/dashboard/DashboardGrid.svelte';
   import FilterBar from '$components/dashboard/FilterBar.svelte';
   import WidgetConfig from '$components/dashboard/WidgetConfig.svelte';
+  import { executeQuery } from '$lib/api/queries';
   import { dashboards } from '$lib/stores/dashboards';
   import {
+    buildTableLines,
+    downloadStructuredPdf,
+    type PdfSection,
+  } from '$lib/utils/pdf';
+  import {
+    applyDashboardQueryTemplate,
     cloneDashboard,
     createDefaultFilters,
     createWidget,
     deserializeDashboardSnapshot,
     duplicateDashboardDefinition,
     formatDashboardTimestamp,
+    resolveDateRange,
     serializeDashboardSnapshot,
     type DashboardDefinition,
     type DashboardFilterState,
@@ -31,6 +39,8 @@
   let widgetEditorOpen = $state(false);
   let editorWidget = $state<DashboardWidget | null>(null);
   let feedback = $state('');
+  let feedbackTone = $state<'success' | 'error'>('success');
+  let exportingPdf = $state(false);
 
   const activeDashboard = $derived(dashboard ?? sharedDashboard);
   const readOnlySnapshot = $derived(sharedDashboard !== null && dashboard === null);
@@ -190,9 +200,85 @@
 
     try {
       await navigator.clipboard.writeText(shareUrl);
+      feedbackTone = 'success';
       feedback = 'Share link copied to clipboard.';
     } catch {
+      feedbackTone = 'success';
       feedback = shareUrl;
+    }
+  }
+
+  async function exportDashboardPdf() {
+    if (!activeDashboard) {
+      return;
+    }
+
+    exportingPdf = true;
+    feedback = '';
+
+    try {
+      const resolvedRange = resolveDateRange(filters.dateRange);
+      const widgetSections = await Promise.all(
+        activeDashboard.widgets.map(async (widget, index) => {
+          const renderedSql = applyDashboardQueryTemplate(widget.query.sql, filters);
+
+          try {
+            const result = await executeQuery(renderedSql, Math.min(widget.query.limit, 16));
+            return {
+              heading: `${index + 1}. ${widget.title}`,
+              lines: [
+                { text: `${widget.type.toUpperCase()} widget`, style: 'muted' },
+                widget.description || 'No widget description provided.',
+                `Rows: ${result.total_rows} total, ${result.rows.length} previewed.`,
+                `Execution time: ${result.execution_time_ms} ms`,
+                ...buildTableLines(result.columns.map((column) => column.name), result.rows, 8, 6),
+              ],
+            } satisfies PdfSection;
+          } catch (cause) {
+            return {
+              heading: `${index + 1}. ${widget.title}`,
+              lines: [
+                { text: `${widget.type.toUpperCase()} widget`, style: 'muted' },
+                widget.description || 'No widget description provided.',
+                `Query execution failed: ${cause instanceof Error ? cause.message : 'Unknown error'}`,
+              ],
+            } satisfies PdfSection;
+          }
+        }),
+      );
+
+      downloadStructuredPdf({
+        fileName: `${activeDashboard.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-dashboard.pdf`,
+        title: activeDashboard.name,
+        subtitle: activeDashboard.description || 'OpenFoundry dashboard PDF snapshot',
+        metadata: [
+          `Generated at ${new Date().toISOString()}`,
+          `Filters: search="${filters.search || 'none'}", range=${resolvedRange.label}`,
+          `Widgets: ${activeDashboard.widgets.length}`,
+          `Mode: ${readOnlySnapshot ? 'shared snapshot' : 'editable dashboard'}`,
+          typeof window === 'undefined' ? '' : `URL: ${window.location.href}`,
+        ].filter(Boolean),
+        sections: [
+          {
+            heading: 'Dashboard context',
+            lines: [
+              `Widget count: ${activeDashboard.widgets.length}`,
+              `Search filter: ${filters.search || 'None'}`,
+              `Date window: ${resolvedRange.label}`,
+              `Updated at: ${formatDashboardTimestamp(activeDashboard.updatedAt)}`,
+            ],
+          },
+          ...widgetSections,
+        ],
+      });
+
+      feedbackTone = 'success';
+      feedback = 'PDF snapshot downloaded.';
+    } catch (cause) {
+      feedbackTone = 'error';
+      feedback = cause instanceof Error ? cause.message : 'Unable to export dashboard PDF';
+    } finally {
+      exportingPdf = false;
     }
   }
 
@@ -278,6 +364,9 @@
           {/if}
 
           <button class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium dark:border-slate-700" onclick={duplicateDashboard}>Duplicate</button>
+          <button class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium disabled:opacity-60 dark:border-slate-700" onclick={exportDashboardPdf} disabled={exportingPdf}>
+            {exportingPdf ? 'Exporting PDF...' : 'Export PDF'}
+          </button>
           <button class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium dark:border-slate-700" onclick={shareDashboard}>Share</button>
         </div>
       </div>
@@ -289,7 +378,11 @@
       {/if}
 
       {#if feedback}
-        <div class="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
+        <div class={`mt-5 rounded-2xl px-4 py-3 text-sm ${
+          feedbackTone === 'error'
+            ? 'border border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300'
+            : 'border border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300'
+        }`}>
           {feedback}
         </div>
       {/if}

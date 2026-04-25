@@ -9,12 +9,13 @@ use uuid::Uuid;
 
 use crate::{
     AppState,
+    domain::backpressure,
     models::{
         sink::{
             BackpressureSnapshot, CepMatch, LiveTailEvent, StateStoreSnapshot, WindowAggregate,
         },
         stream::{ConnectorBinding, StreamDefinition},
-        topology::{TopologyDefinition, TopologyRunMetrics},
+        topology::{TopologyDefinition, TopologyRunMetrics, TopologyRuntimePreview},
         window::WindowDefinition,
     },
 };
@@ -28,6 +29,14 @@ pub struct TopologyExecution {
     pub backpressure_snapshot: BackpressureSnapshot,
     pub started_at: chrono::DateTime<Utc>,
     pub completed_at: chrono::DateTime<Utc>,
+}
+
+pub struct TopologyRuntimeAnalysis {
+    pub preview: TopologyRuntimePreview,
+    pub latest_events: Vec<LiveTailEvent>,
+    pub latest_matches: Vec<CepMatch>,
+    pub source_backlog: HashMap<Uuid, i32>,
+    pub source_throughput_per_second: HashMap<Uuid, f32>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -46,6 +55,7 @@ struct StreamEventRow {
 struct StreamingCheckpointRow {
     stream_id: Uuid,
     last_sequence_no: i64,
+    updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
@@ -72,35 +82,14 @@ pub async fn run_topology(
         .iter()
         .map(|stream| (stream.id, stream))
         .collect::<HashMap<_, _>>();
-
-    let mut source_events = Vec::new();
-    for stream_id in &topology.source_stream_ids {
-        let Some(stream) = stream_lookup.get(stream_id).copied() else {
-            continue;
-        };
-        let last_sequence_no = checkpoint_map
-            .get(stream_id)
-            .map(|checkpoint| checkpoint.last_sequence_no)
-            .unwrap_or(0);
-        let rows = sqlx::query_as::<_, StreamEventRow>(
-            r#"SELECT id, stream_id, sequence_no, payload, event_time, processed_at, archived_at, archive_path
-               FROM streaming_events
-               WHERE stream_id = $1
-                 AND sequence_no > $2
-               ORDER BY sequence_no ASC"#,
-        )
-        .bind(stream_id)
-        .bind(last_sequence_no)
-        .fetch_all(&state.db)
-        .await
-        .map_err(|error| error.to_string())?;
-
-        for row in rows {
-            source_events.push(to_processed_event(stream, row, started_at));
-        }
-    }
-
-    source_events.sort_by_key(|event| event.sequence_no);
+    let source_events = load_source_events_since_checkpoint(
+        &state.db,
+        topology,
+        &stream_lookup,
+        &checkpoint_map,
+        started_at,
+    )
+    .await?;
     let live_tail = source_events
         .iter()
         .rev()
@@ -117,6 +106,13 @@ pub async fn run_topology(
     };
     let aggregate_windows = build_window_aggregates(topology, windows, &materialization_events);
     let cep_matches = detect_cep_matches(topology, &materialization_events);
+    let source_backlog = group_event_count_by_stream(&source_events);
+    let backpressure_snapshot = backpressure::derive_backpressure_snapshot(
+        &topology.backpressure_policy,
+        source_events.len() as i32,
+        source_backlog.values().copied().max().unwrap_or(0),
+        topology.source_stream_ids.len(),
+    );
 
     materialize_sinks(
         state,
@@ -131,66 +127,24 @@ pub async fn run_topology(
     archive_processed_events(state, streams, &source_events).await?;
 
     let completed_at = Utc::now();
-    let input_events = source_events.len() as i32;
-    let output_events = effective_output_count(&materialization_events, &aggregate_windows) as i32;
-    let total_latency_ms = source_events
-        .iter()
-        .map(|event| (completed_at - event.event_time).num_milliseconds().max(0))
-        .sum::<i64>();
-    let avg_latency_ms = if input_events == 0 {
-        0
-    } else {
-        (total_latency_ms / input_events as i64) as i32
-    };
-    let p95_latency_ms = source_events
-        .iter()
-        .map(|event| (completed_at - event.event_time).num_milliseconds().max(0) as i32)
-        .max()
-        .unwrap_or(0);
-    let elapsed_secs = (completed_at - started_at)
-        .to_std()
-        .map(|duration| duration.as_secs_f32().max(0.001))
-        .unwrap_or(0.001);
-    let throughput_per_second = if input_events == 0 {
-        0.0
-    } else {
-        input_events as f32 / elapsed_secs
-    };
-    let backpressure_snapshot = build_backpressure_snapshot(
-        &topology.backpressure_policy,
-        input_events,
-        output_events,
+    let mut metrics = build_run_metrics(
+        &source_events,
+        &materialization_events,
+        &aggregate_windows,
+        &cep_matches,
+        completed_at,
     );
-    let state_snapshot = StateStoreSnapshot {
-        backend: topology.state_backend.clone(),
-        namespace: topology.name.to_lowercase().replace(' ', "-"),
-        key_count: aggregate_windows.len() as i32 + cep_matches.len() as i32 + input_events,
-        disk_usage_mb: (aggregate_windows.len() as i32 * 2 + input_events.max(1)).max(1),
-        checkpoint_count: topology.source_stream_ids.len() as i32,
-        last_checkpoint_at: completed_at,
-    };
+    let state_snapshot = build_state_snapshot(
+        topology,
+        aggregate_windows.len() as i32 + cep_matches.len() as i32 + metrics.input_events,
+        topology.source_stream_ids.len() as i32,
+        completed_at,
+    );
+    metrics.backpressure_ratio = backpressure_ratio(&backpressure_snapshot);
+    metrics.state_entries = state_snapshot.key_count;
 
     Ok(TopologyExecution {
-        metrics: TopologyRunMetrics {
-            input_events,
-            output_events,
-            avg_latency_ms,
-            p95_latency_ms,
-            throughput_per_second,
-            dropped_events: 0,
-            backpressure_ratio: if backpressure_snapshot.queue_capacity <= 0 {
-                0.0
-            } else {
-                backpressure_snapshot.queue_depth as f32
-                    / backpressure_snapshot.queue_capacity as f32
-            },
-            join_output_rows: materialization_events
-                .iter()
-                .filter(|event| event.payload.get("_join").is_some())
-                .count() as i32,
-            cep_match_count: cep_matches.len() as i32,
-            state_entries: state_snapshot.key_count,
-        },
+        metrics,
         live_tail,
         cep_matches,
         aggregate_windows,
@@ -201,12 +155,100 @@ pub async fn run_topology(
     })
 }
 
+pub async fn preview_topology_runtime(
+    state: &AppState,
+    topology: &TopologyDefinition,
+    streams: &[StreamDefinition],
+    windows: &[WindowDefinition],
+) -> Result<TopologyRuntimeAnalysis, String> {
+    let generated_at = Utc::now();
+    let checkpoint_map = load_checkpoints(&state.db, topology.id).await?;
+    let stream_lookup = streams
+        .iter()
+        .map(|stream| (stream.id, stream))
+        .collect::<HashMap<_, _>>();
+
+    let pending_events = load_source_events_since_checkpoint(
+        &state.db,
+        topology,
+        &stream_lookup,
+        &checkpoint_map,
+        generated_at,
+    )
+    .await?;
+    let recent_events =
+        load_recent_source_events(&state.db, topology, &stream_lookup, generated_at, 12).await?;
+    let analysis_events = if pending_events.is_empty() {
+        recent_events.clone()
+    } else {
+        pending_events.clone()
+    };
+    let joined_events = build_joined_events(topology, &analysis_events);
+    let materialization_events = if joined_events.is_empty() {
+        analysis_events.clone()
+    } else {
+        joined_events
+    };
+    let aggregate_windows = build_window_aggregates(topology, windows, &materialization_events);
+    let latest_matches = detect_cep_matches(topology, &materialization_events);
+    let latest_events = recent_events
+        .iter()
+        .rev()
+        .take(24)
+        .cloned()
+        .map(to_live_tail_event(topology.id))
+        .collect::<Vec<_>>();
+    let source_backlog = group_event_count_by_stream(&pending_events);
+    let source_throughput_per_second = group_throughput_by_stream(&recent_events);
+    let backpressure_snapshot = backpressure::derive_backpressure_snapshot(
+        &topology.backpressure_policy,
+        pending_events.len() as i32,
+        source_backlog.values().copied().max().unwrap_or(0),
+        topology.source_stream_ids.len(),
+    );
+    let mut metrics = build_preview_metrics(
+        &pending_events,
+        &materialization_events,
+        &aggregate_windows,
+        &latest_matches,
+        &recent_events,
+        &backpressure_snapshot,
+    );
+    let last_checkpoint_at = checkpoint_map
+        .values()
+        .map(|checkpoint| checkpoint.updated_at)
+        .max()
+        .unwrap_or(generated_at);
+    let state_snapshot = build_state_snapshot(
+        topology,
+        aggregate_windows.len() as i32 + latest_matches.len() as i32 + pending_events.len() as i32,
+        checkpoint_map.len() as i32,
+        last_checkpoint_at,
+    );
+    metrics.state_entries = state_snapshot.key_count;
+
+    Ok(TopologyRuntimeAnalysis {
+        preview: TopologyRuntimePreview {
+            metrics,
+            aggregate_windows,
+            backpressure_snapshot,
+            state_snapshot,
+            backlog_events: pending_events.len() as i32,
+            generated_at,
+        },
+        latest_events,
+        latest_matches,
+        source_backlog,
+        source_throughput_per_second,
+    })
+}
+
 async fn load_checkpoints(
     db: &sqlx::PgPool,
     topology_id: Uuid,
 ) -> Result<HashMap<Uuid, StreamingCheckpointRow>, String> {
     let rows = sqlx::query_as::<_, StreamingCheckpointRow>(
-        r#"SELECT stream_id, last_sequence_no
+        r#"SELECT stream_id, last_sequence_no, updated_at
            FROM streaming_checkpoints
            WHERE topology_id = $1"#,
     )
@@ -218,12 +260,86 @@ async fn load_checkpoints(
     Ok(rows.into_iter().map(|row| (row.stream_id, row)).collect())
 }
 
+async fn load_source_events_since_checkpoint(
+    db: &sqlx::PgPool,
+    topology: &TopologyDefinition,
+    stream_lookup: &HashMap<Uuid, &StreamDefinition>,
+    checkpoint_map: &HashMap<Uuid, StreamingCheckpointRow>,
+    processing_time: DateTime<Utc>,
+) -> Result<Vec<ProcessedEvent>, String> {
+    let mut source_events = Vec::new();
+    for stream_id in &topology.source_stream_ids {
+        let Some(stream) = stream_lookup.get(stream_id).copied() else {
+            continue;
+        };
+        let last_sequence_no = checkpoint_map
+            .get(stream_id)
+            .map(|checkpoint| checkpoint.last_sequence_no)
+            .unwrap_or(0);
+        let rows = sqlx::query_as::<_, StreamEventRow>(
+            r#"SELECT id, stream_id, sequence_no, payload, event_time, processed_at, archived_at, archive_path
+               FROM streaming_events
+               WHERE stream_id = $1
+                 AND sequence_no > $2
+                 AND archived_at IS NULL
+               ORDER BY sequence_no ASC"#,
+        )
+        .bind(stream_id)
+        .bind(last_sequence_no)
+        .fetch_all(db)
+        .await
+        .map_err(|error| error.to_string())?;
+
+        for row in rows {
+            source_events.push(to_processed_event(stream, row, processing_time));
+        }
+    }
+
+    source_events.sort_by_key(|event| event.sequence_no);
+    Ok(source_events)
+}
+
+async fn load_recent_source_events(
+    db: &sqlx::PgPool,
+    topology: &TopologyDefinition,
+    stream_lookup: &HashMap<Uuid, &StreamDefinition>,
+    processing_time: DateTime<Utc>,
+    limit_per_stream: i64,
+) -> Result<Vec<ProcessedEvent>, String> {
+    let mut source_events = Vec::new();
+    for stream_id in &topology.source_stream_ids {
+        let Some(stream) = stream_lookup.get(stream_id).copied() else {
+            continue;
+        };
+        let rows = sqlx::query_as::<_, StreamEventRow>(
+            r#"SELECT id, stream_id, sequence_no, payload, event_time, processed_at, archived_at, archive_path
+               FROM streaming_events
+               WHERE stream_id = $1
+                 AND archived_at IS NULL
+               ORDER BY event_time DESC, sequence_no DESC
+               LIMIT $2"#,
+        )
+        .bind(stream_id)
+        .bind(limit_per_stream)
+        .fetch_all(db)
+        .await
+        .map_err(|error| error.to_string())?;
+
+        for row in rows {
+            source_events.push(to_processed_event(stream, row, processing_time));
+        }
+    }
+
+    source_events.sort_by_key(|event| (event.event_time, event.sequence_no));
+    Ok(source_events)
+}
+
 fn to_processed_event(
     stream: &StreamDefinition,
     row: StreamEventRow,
-    processing_time: DateTime<Utc>,
+    default_processing_time: DateTime<Utc>,
 ) -> ProcessedEvent {
-    let _ = row.processed_at;
+    let processing_time = row.processed_at.unwrap_or(default_processing_time);
     let _ = row.archived_at;
     let _ = row.archive_path;
     ProcessedEvent {
@@ -240,7 +356,11 @@ fn to_processed_event(
 
 fn to_live_tail_event(topology_id: Uuid) -> impl Fn(ProcessedEvent) -> LiveTailEvent {
     move |event| LiveTailEvent {
-        id: format!("{}-{}", event.stream_name.to_lowercase().replace(' ', "-"), event.sequence_no),
+        id: format!(
+            "{}-{}",
+            event.stream_name.to_lowercase().replace(' ', "-"),
+            event.sequence_no
+        ),
         topology_id,
         stream_name: event.stream_name,
         connector_type: event.connector_type,
@@ -279,7 +399,9 @@ fn build_joined_events(
                 continue;
             }
 
-            let delta = (left.event_time - right.event_time).num_seconds().unsigned_abs() as i32;
+            let delta = (left.event_time - right.event_time)
+                .num_seconds()
+                .unsigned_abs() as i32;
             if delta > join_definition.window_seconds {
                 continue;
             }
@@ -324,7 +446,8 @@ fn build_window_aggregates(
 
         let mut grouped: HashMap<(DateTime<Utc>, String, String), f64> = HashMap::new();
         for event in events {
-            let bucket_start = bucket_start(event.event_time, window.duration_seconds.max(1) as i64);
+            let bucket_start =
+                bucket_start(event.event_time, window.duration_seconds.max(1) as i64);
             let group_key = if window.aggregation_keys.is_empty() {
                 "all".to_string()
             } else {
@@ -347,7 +470,11 @@ fn build_window_aggregates(
                     .map(|field| {
                         (
                             field.clone(),
-                            event.payload.get(field).and_then(Value::as_f64).unwrap_or(0.0),
+                            event
+                                .payload
+                                .get(field)
+                                .and_then(Value::as_f64)
+                                .unwrap_or(0.0),
                         )
                     })
                     .collect::<Vec<_>>()
@@ -644,7 +771,9 @@ async fn upload_dataset_rows(
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
     if !status.is_success() {
-        return Err(format!("dataset sink upload failed with HTTP {status}: {body}"));
+        return Err(format!(
+            "dataset sink upload failed with HTTP {status}: {body}"
+        ));
     }
 
     Ok(())
@@ -679,37 +808,6 @@ fn dataset_id_from_binding(binding: &ConnectorBinding) -> Option<Uuid> {
         })
 }
 
-fn build_backpressure_snapshot(
-    policy: &crate::models::topology::BackpressurePolicy,
-    input_events: i32,
-    output_events: i32,
-) -> BackpressureSnapshot {
-    let queue_capacity = policy.queue_capacity.max(1);
-    let queue_depth = input_events.min(queue_capacity).max(0);
-    let ratio = queue_depth as f32 / queue_capacity as f32;
-    let status = if ratio >= 0.8 {
-        "throttling"
-    } else if ratio >= 0.5 {
-        "elevated"
-    } else {
-        "healthy"
-    };
-
-    BackpressureSnapshot {
-        queue_depth,
-        queue_capacity,
-        lag_ms: if input_events == 0 { 0 } else { (input_events - output_events).max(0) * 10 },
-        throttle_factor: if status == "throttling" {
-            0.7
-        } else if status == "elevated" {
-            0.9
-        } else {
-            1.0
-        },
-        status: status.to_string(),
-    }
-}
-
 fn effective_output_count(events: &[ProcessedEvent], aggregates: &[WindowAggregate]) -> usize {
     if !aggregates.is_empty() {
         aggregates.len()
@@ -718,8 +816,146 @@ fn effective_output_count(events: &[ProcessedEvent], aggregates: &[WindowAggrega
     }
 }
 
+fn build_run_metrics(
+    source_events: &[ProcessedEvent],
+    materialization_events: &[ProcessedEvent],
+    aggregate_windows: &[WindowAggregate],
+    cep_matches: &[CepMatch],
+    completed_at: DateTime<Utc>,
+) -> TopologyRunMetrics {
+    let input_events = source_events.len() as i32;
+    let output_events = effective_output_count(materialization_events, aggregate_windows) as i32;
+    let total_latency_ms = source_events
+        .iter()
+        .map(|event| (completed_at - event.event_time).num_milliseconds().max(0))
+        .sum::<i64>();
+    let avg_latency_ms = if input_events == 0 {
+        0
+    } else {
+        (total_latency_ms / input_events as i64) as i32
+    };
+    let p95_latency_ms = source_events
+        .iter()
+        .map(|event| (completed_at - event.event_time).num_milliseconds().max(0) as i32)
+        .max()
+        .unwrap_or(0);
+    let throughput_per_second = calculate_throughput_per_second(source_events);
+
+    TopologyRunMetrics {
+        input_events,
+        output_events,
+        avg_latency_ms,
+        p95_latency_ms,
+        throughput_per_second,
+        dropped_events: 0,
+        backpressure_ratio: 0.0,
+        join_output_rows: materialization_events
+            .iter()
+            .filter(|event| event.payload.get("_join").is_some())
+            .count() as i32,
+        cep_match_count: cep_matches.len() as i32,
+        state_entries: 0,
+    }
+}
+
+fn build_preview_metrics(
+    pending_events: &[ProcessedEvent],
+    materialization_events: &[ProcessedEvent],
+    aggregate_windows: &[WindowAggregate],
+    cep_matches: &[CepMatch],
+    recent_events: &[ProcessedEvent],
+    backpressure_snapshot: &BackpressureSnapshot,
+) -> TopologyRunMetrics {
+    let latest_timestamp = pending_events
+        .iter()
+        .map(|event| event.processing_time)
+        .max()
+        .unwrap_or_else(Utc::now);
+    let mut metrics = build_run_metrics(
+        pending_events,
+        materialization_events,
+        aggregate_windows,
+        cep_matches,
+        latest_timestamp,
+    );
+    metrics.throughput_per_second = calculate_throughput_per_second(recent_events);
+    metrics.backpressure_ratio = backpressure_ratio(backpressure_snapshot);
+    metrics
+}
+
+fn build_state_snapshot(
+    topology: &TopologyDefinition,
+    key_count: i32,
+    checkpoint_count: i32,
+    last_checkpoint_at: DateTime<Utc>,
+) -> StateStoreSnapshot {
+    StateStoreSnapshot {
+        backend: topology.state_backend.clone(),
+        namespace: topology.name.to_lowercase().replace(' ', "-"),
+        key_count,
+        disk_usage_mb: (key_count.max(1) + checkpoint_count.max(1) * 2).max(1),
+        checkpoint_count,
+        last_checkpoint_at,
+    }
+}
+
+fn group_event_count_by_stream(events: &[ProcessedEvent]) -> HashMap<Uuid, i32> {
+    let mut counts = HashMap::new();
+    for event in events {
+        *counts.entry(event.stream_id).or_insert(0) += 1;
+    }
+    counts
+}
+
+fn group_throughput_by_stream(events: &[ProcessedEvent]) -> HashMap<Uuid, f32> {
+    let mut grouped = HashMap::<Uuid, Vec<ProcessedEvent>>::new();
+    for event in events {
+        grouped
+            .entry(event.stream_id)
+            .or_default()
+            .push(event.clone());
+    }
+
+    grouped
+        .into_iter()
+        .map(|(stream_id, items)| (stream_id, calculate_throughput_per_second(&items)))
+        .collect()
+}
+
+fn calculate_throughput_per_second(events: &[ProcessedEvent]) -> f32 {
+    if events.is_empty() {
+        return 0.0;
+    }
+    if events.len() == 1 {
+        return 1.0;
+    }
+
+    let mut ordered = events.iter().collect::<Vec<_>>();
+    ordered.sort_by_key(|event| event.event_time);
+    let first = ordered.first().copied().map(|event| event.event_time);
+    let last = ordered.last().copied().map(|event| event.event_time);
+    let elapsed_secs = match (first, last) {
+        (Some(start), Some(end)) if end > start => (end - start)
+            .to_std()
+            .map(|duration| duration.as_secs_f32().max(1.0))
+            .unwrap_or(1.0),
+        _ => 60.0,
+    };
+
+    events.len() as f32 / elapsed_secs
+}
+
+fn backpressure_ratio(snapshot: &BackpressureSnapshot) -> f32 {
+    if snapshot.queue_capacity <= 0 {
+        0.0
+    } else {
+        snapshot.queue_depth as f32 / snapshot.queue_capacity as f32
+    }
+}
+
 fn event_label(event: &ProcessedEvent) -> String {
-    event.payload
+    event
+        .payload
         .get("status")
         .or_else(|| event.payload.get("event_type"))
         .or_else(|| event.payload.get("state"))

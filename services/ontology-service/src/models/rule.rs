@@ -25,6 +25,16 @@ pub struct RuleTriggerSpec {
 pub struct RuleScheduleSpec {
     pub property_name: String,
     pub offset_hours: i64,
+    #[serde(default)]
+    pub priority_score: Option<i32>,
+    #[serde(default)]
+    pub estimated_duration_minutes: Option<i32>,
+    #[serde(default)]
+    pub required_capability: Option<String>,
+    #[serde(default)]
+    pub constraint_tags: Vec<String>,
+    #[serde(default)]
+    pub hard_deadline_hours: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,6 +202,9 @@ pub struct MachineryInsight {
     pub matched_runs: usize,
     pub total_runs: usize,
     pub pending_schedules: usize,
+    pub overdue_schedules: usize,
+    pub avg_schedule_lead_hours: Option<f64>,
+    pub dynamic_pressure: String,
     pub last_matched_at: Option<DateTime<Utc>>,
     pub last_object_id: Option<Uuid>,
 }
@@ -200,4 +213,57 @@ pub struct MachineryInsight {
 pub struct MachineryInsightsResponse {
     pub object_type_id: Option<Uuid>,
     pub data: Vec<MachineryInsight>,
+}
+
+#[derive(Debug, Clone, FromRow, Serialize)]
+pub struct MachineryQueueItem {
+    pub id: Uuid,
+    pub rule_id: Uuid,
+    pub rule_run_id: Uuid,
+    pub object_id: Uuid,
+    pub rule_name: String,
+    pub rule_display_name: String,
+    pub object_type_id: Uuid,
+    pub status: String,
+    pub scheduled_for: DateTime<Utc>,
+    pub priority_score: i32,
+    pub estimated_duration_minutes: i32,
+    pub required_capability: Option<String>,
+    pub constraint_snapshot: Value,
+    pub created_by: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MachineryCapabilityLoad {
+    pub capability: String,
+    pub pending_count: usize,
+    pub total_estimated_minutes: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MachineryQueueRecommendation {
+    pub generated_at: DateTime<Utc>,
+    pub strategy: String,
+    pub queue_depth: usize,
+    pub overdue_count: usize,
+    pub total_estimated_minutes: usize,
+    pub next_due_at: Option<DateTime<Utc>>,
+    pub recommended_order: Vec<Uuid>,
+    pub capability_load: Vec<MachineryCapabilityLoad>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MachineryQueueResponse {
+    pub object_type_id: Option<Uuid>,
+    pub data: Vec<MachineryQueueItem>,
+    pub recommendation: MachineryQueueRecommendation,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpdateMachineryQueueItemRequest {
+    pub status: String,
 }

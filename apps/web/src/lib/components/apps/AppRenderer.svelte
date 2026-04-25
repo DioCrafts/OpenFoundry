@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { executeQuery } from '$lib/api/queries';
-	import type { AppDefinition, AppPage, WidgetEvent } from '$lib/api/apps';
+	import type { AppDefinition, AppPage, WidgetEvent, WorkshopScenarioPreset } from '$lib/api/apps';
 
 	import AppWidgetRenderer from './AppWidgetRenderer.svelte';
 
@@ -16,8 +16,11 @@
 	let runtimeFilter = $state('');
 	let banner = $state('');
 	let runtimeParameters = $state<Record<string, string>>({});
+	let interactivePromptSeed = $state('');
+	let activePresetId = $state('');
 
 	const visiblePages = $derived(app.pages.filter((page) => page.visible));
+	const interactiveWorkshop = $derived(app.settings.interactive_workshop);
 	const activePage = $derived(
 		visiblePages.find((page) => page.id === activePageId)
 			?? visiblePages[0]
@@ -34,6 +37,16 @@
 	const portalSubtitle = $derived(
 		app.settings.consumer_mode.portal_subtitle
 			|| 'Published experience for operators, partners, or external consumers.',
+	);
+	const interactiveTitle = $derived(interactiveWorkshop.title || 'Interactive Workshop');
+	const interactiveSubtitle = $derived(
+		interactiveWorkshop.subtitle
+			|| 'Coordinate scenarios, decisions, and copilot prompts from a single app runtime.',
+	);
+	const interactiveBriefing = $derived(
+		interactiveWorkshop.briefing_template
+			? interpolateTemplate(interactiveWorkshop.briefing_template, runtimeParameters)
+			: '',
 	);
 
 	const themeStyle = $derived([
@@ -57,6 +70,8 @@
 	$effect(() => {
 		app.id;
 		runtimeParameters = {};
+		interactivePromptSeed = '';
+		activePresetId = '';
 	});
 
 	async function handleAction(action: WidgetEvent, payload?: Record<string, unknown>) {
@@ -129,6 +144,7 @@
 				}
 			}
 			runtimeParameters = nextParameters;
+			activePresetId = '';
 			const nextKeys = Object.keys(nextParameters);
 			banner = nextKeys.length
 				? `Scenario applied: ${nextKeys.join(', ')}`
@@ -138,8 +154,39 @@
 
 		if (action.action === 'clear_parameters') {
 			runtimeParameters = {};
+			activePresetId = '';
+			interactivePromptSeed = '';
 			banner = 'Scenario parameters cleared';
 		}
+	}
+
+	function interpolateTemplate(template: string, parameters: Record<string, string>) {
+		return template.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_, key: string) => {
+			const value = parameters[key];
+			return value === undefined ? '' : value;
+		});
+	}
+
+	function applyInteractivePreset(preset: WorkshopScenarioPreset) {
+		runtimeParameters = { ...preset.parameters };
+		activePresetId = preset.id;
+		const nextPrompt = preset.prompt_template
+			? interpolateTemplate(preset.prompt_template, preset.parameters)
+			: '';
+		interactivePromptSeed = nextPrompt;
+		banner = `Scenario preset applied: ${preset.label}`;
+	}
+
+	function clearInteractivePreset() {
+		runtimeParameters = {};
+		activePresetId = '';
+		interactivePromptSeed = '';
+		banner = 'Scenario parameters cleared';
+	}
+
+	function seedInteractivePrompt(question: string) {
+		interactivePromptSeed = interpolateTemplate(question, runtimeParameters);
+		banner = 'Copilot prompt seeded from Workshop guide';
 	}
 
 	function canvasStyle(page: AppPage | null) {
@@ -155,6 +202,85 @@
 
 <div class="min-h-[320px] rounded-[calc(var(--app-radius)_+_8px)] border border-slate-200 bg-[var(--app-background)] p-5 shadow-sm" style={themeStyle}>
 	<div class="rounded-[var(--app-radius)] bg-[var(--app-surface)] p-5 text-[var(--app-text)] shadow-sm">
+		{#if interactiveWorkshop.enabled}
+			<section class="mb-5 overflow-hidden rounded-[calc(var(--app-radius)_+_4px)] border border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(249,115,22,0.16),_transparent_24%),linear-gradient(135deg,_#fff7ed,_#ffffff_52%,_#ecfeff)] p-5">
+				<div class="flex flex-wrap items-start justify-between gap-4">
+					<div class="max-w-3xl">
+						<div class="text-xs uppercase tracking-[0.28em] text-slate-400">Workshop interactive</div>
+						<h2 class="mt-2 text-3xl font-semibold" style={`font-family:${app.theme.heading_font}, sans-serif;`}>{interactiveTitle}</h2>
+						<p class="mt-3 text-sm leading-7 text-slate-600">{interactiveSubtitle}</p>
+					</div>
+					<div class="flex flex-wrap gap-2 text-xs">
+						{#if Object.keys(runtimeParameters).length > 0}
+							<span class="rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-orange-700">{Object.keys(runtimeParameters).length} active scenario signal(s)</span>
+						{/if}
+						{#if interactiveWorkshop.primary_agent_widget_id}
+							<span class="rounded-full border border-slate-200 bg-white px-3 py-1 text-slate-600">Copilot linked</span>
+						{/if}
+					</div>
+				</div>
+
+				{#if interactiveWorkshop.scenario_presets.length > 0}
+					<div class="mt-5">
+						<div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Scenario presets</div>
+						<div class="mt-3 flex flex-wrap gap-2">
+							{#each interactiveWorkshop.scenario_presets as preset (preset.id)}
+								<button
+									type="button"
+									onclick={() => applyInteractivePreset(preset)}
+									class={`rounded-full px-4 py-2 text-sm transition ${activePresetId === preset.id ? 'bg-[var(--app-primary)] text-white' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
+								>
+									{preset.label}
+								</button>
+							{/each}
+							<button type="button" onclick={clearInteractivePreset} class="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">
+								Reset
+							</button>
+						</div>
+					</div>
+				{/if}
+
+				<div class="mt-5 grid gap-4 lg:grid-cols-[1.1fr,0.9fr]">
+					<div class="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm">
+						<div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Decision brief</div>
+						{#if interactiveBriefing.trim()}
+							<p class="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">{interactiveBriefing}</p>
+						{:else}
+							<p class="mt-3 text-sm text-slate-500">Add a briefing template in Workshop settings to summarize the current runtime assumptions.</p>
+						{/if}
+					</div>
+
+					<div class="space-y-4">
+						<div class="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm">
+							<div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Active scenario context</div>
+							{#if Object.keys(runtimeParameters).length > 0}
+								<div class="mt-3 flex flex-wrap gap-2">
+									{#each Object.entries(runtimeParameters) as [key, value]}
+										<span class="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600">{key}: {value}</span>
+									{/each}
+								</div>
+							{:else}
+								<p class="mt-3 text-sm text-slate-500">Apply a scenario preset or use a scenario widget to populate runtime assumptions.</p>
+							{/if}
+						</div>
+
+						{#if interactiveWorkshop.suggested_questions.length > 0}
+							<div class="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm">
+								<div class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Copilot starters</div>
+								<div class="mt-3 flex flex-wrap gap-2">
+									{#each interactiveWorkshop.suggested_questions as question}
+										<button type="button" onclick={() => seedInteractivePrompt(question)} class="rounded-full border border-slate-200 bg-white px-3 py-2 text-left text-xs text-slate-600 hover:bg-slate-50">
+											{interpolateTemplate(question, runtimeParameters)}
+										</button>
+									{/each}
+								</div>
+							</div>
+						{/if}
+					</div>
+				</div>
+			</section>
+		{/if}
+
 		{#if app.settings.consumer_mode.enabled && mode === 'published'}
 			<section class="mb-5 overflow-hidden rounded-[calc(var(--app-radius)_+_4px)] border border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(15,118,110,0.16),_transparent_28%),linear-gradient(135deg,_#ffffff,_#f8fafc_55%,_#e0f2fe)] p-5">
 				<div class="flex flex-wrap items-start justify-between gap-4">
@@ -233,7 +359,7 @@
 							<div class="grid" style={canvasStyle(activePage)}>
 								{#each activePage.widgets as widget (widget.id)}
 									<div style={`grid-column:${Math.max(1, widget.position.x + 1)} / span ${Math.max(1, widget.position.width)}; grid-row:${Math.max(1, widget.position.y + 1)} / span ${Math.max(1, widget.position.height)};`}>
-										<AppWidgetRenderer widget={widget} globalFilter={runtimeFilter} runtimeParameters={runtimeParameters} onAction={handleAction} />
+										<AppWidgetRenderer widget={widget} globalFilter={runtimeFilter} runtimeParameters={runtimeParameters} interactivePromptSeed={interactivePromptSeed} primaryInteractiveAgentWidgetId={interactiveWorkshop.primary_agent_widget_id} onAction={handleAction} />
 									</div>
 								{/each}
 							</div>
@@ -258,7 +384,7 @@
 						<div class="grid" style={canvasStyle(activePage)}>
 							{#each activePage.widgets as widget (widget.id)}
 								<div style={`grid-column:${Math.max(1, widget.position.x + 1)} / span ${Math.max(1, widget.position.width)}; grid-row:${Math.max(1, widget.position.y + 1)} / span ${Math.max(1, widget.position.height)};`}>
-									<AppWidgetRenderer widget={widget} globalFilter={runtimeFilter} runtimeParameters={runtimeParameters} onAction={handleAction} />
+									<AppWidgetRenderer widget={widget} globalFilter={runtimeFilter} runtimeParameters={runtimeParameters} interactivePromptSeed={interactivePromptSeed} primaryInteractiveAgentWidgetId={interactiveWorkshop.primary_agent_widget_id} onAction={handleAction} />
 								</div>
 							{/each}
 						</div>
@@ -269,7 +395,7 @@
 			<div class="mt-5 grid" style={canvasStyle(activePage)}>
 				{#each activePage.widgets as widget (widget.id)}
 					<div style={`grid-column:${Math.max(1, widget.position.x + 1)} / span ${Math.max(1, widget.position.width)}; grid-row:${Math.max(1, widget.position.y + 1)} / span ${Math.max(1, widget.position.height)};`}>
-						<AppWidgetRenderer widget={widget} globalFilter={runtimeFilter} runtimeParameters={runtimeParameters} onAction={handleAction} />
+						<AppWidgetRenderer widget={widget} globalFilter={runtimeFilter} runtimeParameters={runtimeParameters} interactivePromptSeed={interactivePromptSeed} primaryInteractiveAgentWidgetId={interactiveWorkshop.primary_agent_widget_id} onAction={handleAction} />
 					</div>
 				{/each}
 			</div>

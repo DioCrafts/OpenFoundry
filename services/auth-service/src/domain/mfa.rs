@@ -72,6 +72,8 @@ pub fn issue_challenge(
         sub: user.id,
         iat: Utc::now().timestamp(),
         exp: Utc::now().timestamp() + 300,
+        iss: config.issuer().map(str::to_string),
+        aud: config.audience().map(str::to_string),
         jti: uuid::Uuid::now_v7(),
         email: user.email.clone(),
         name: user.name.clone(),

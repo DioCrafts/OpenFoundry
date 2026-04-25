@@ -1,8 +1,8 @@
+use auth_middleware::layer::AuthUser;
 use axum::{
     Json,
     extract::{Path, Query, State},
 };
-use auth_middleware::layer::AuthUser;
 use chrono::{Duration, Utc};
 use serde::Deserialize;
 
@@ -34,8 +34,8 @@ pub async fn get_overview(
 ) -> ServiceResult<AuditOverview> {
     let events = security::filter_events_for_claims(
         load_events(&state.db)
-        .await
-        .map_err(|cause| db_error(&cause))?,
+            .await
+            .map_err(|cause| db_error(&cause))?,
         &claims,
     );
     let policies = load_policies(&state.db)
@@ -68,8 +68,8 @@ pub async fn list_events(
 ) -> ServiceResult<EventListResponse> {
     let events = security::filter_events_for_claims(
         load_events(&state.db)
-        .await
-        .map_err(|cause| db_error(&cause))?,
+            .await
+            .map_err(|cause| db_error(&cause))?,
         &claims,
     );
     let items = events
@@ -98,14 +98,12 @@ pub async fn list_events(
         .collect::<Vec<_>>();
     Ok(Json(EventListResponse {
         items,
-        anomalies: alerting::detect_anomalies(
-            &security::filter_events_for_claims(
-                load_events(&state.db)
+        anomalies: alerting::detect_anomalies(&security::filter_events_for_claims(
+            load_events(&state.db)
                 .await
                 .map_err(|cause| db_error(&cause))?,
-                &claims,
-            ),
-        ),
+            &claims,
+        )),
     }))
 }
 

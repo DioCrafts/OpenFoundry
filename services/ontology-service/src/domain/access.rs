@@ -45,7 +45,7 @@ pub fn clearance_rank(claims: &Claims) -> u8 {
         .unwrap_or(0)
 }
 
-fn marking_rank(marking: &str) -> Option<u8> {
+pub fn marking_rank(marking: &str) -> Option<u8> {
     match marking {
         "public" => Some(0),
         "confidential" => Some(1),

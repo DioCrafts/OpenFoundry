@@ -192,6 +192,127 @@ impl TryFrom<RepositoryRow> for RepositoryDefinition {
     }
 }
 
+impl RepositoryDefinition {
+    pub fn ci_required(&self) -> bool {
+        self.settings
+            .get("ci_required")
+            .and_then(Value::as_bool)
+            .unwrap_or(true)
+    }
+
+    pub fn allow_direct_commits_on_protected(&self) -> bool {
+        self.settings
+            .get("allow_direct_commits_on_protected")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+
+    pub fn required_checks_for_branch(&self, branch_name: &str) -> Vec<String> {
+        let mut checks = self
+            .settings
+            .get("required_checks")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+
+        if let Some(rules) = self
+            .settings
+            .get("required_checks_by_branch")
+            .and_then(Value::as_object)
+        {
+            for (pattern, values) in rules {
+                if !branch_rule_matches(pattern, branch_name) {
+                    continue;
+                }
+                let branch_checks = values
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>();
+                if !branch_checks.is_empty() {
+                    checks = branch_checks;
+                }
+            }
+        }
+
+        checks.sort();
+        checks.dedup();
+        checks
+    }
+}
+
+fn branch_rule_matches(pattern: &str, branch_name: &str) -> bool {
+    if pattern == branch_name {
+        return true;
+    }
+    if let Some(prefix) = pattern.strip_suffix('*') {
+        return branch_name.starts_with(prefix);
+    }
+    false
+}
+
 fn default_branch() -> String {
     "main".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{PackageKind, RepositoryDefinition, RepositoryVisibility};
+
+    fn repository_with_settings(settings: serde_json::Value) -> RepositoryDefinition {
+        RepositoryDefinition {
+            id: uuid::Uuid::nil(),
+            name: "Repo".to_string(),
+            slug: "repo".to_string(),
+            description: String::new(),
+            owner: "owner".to_string(),
+            default_branch: "main".to_string(),
+            visibility: RepositoryVisibility::Private,
+            object_store_backend: "s3".to_string(),
+            package_kind: PackageKind::Transform,
+            tags: Vec::new(),
+            settings,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn branch_specific_checks_override_global_defaults() {
+        let repository = repository_with_settings(json!({
+            "required_checks": ["package-validation"],
+            "required_checks_by_branch": {
+                "main": ["package-validation", "policy"],
+                "release/*": ["package-validation", "policy", "security"]
+            }
+        }));
+
+        assert_eq!(
+            repository.required_checks_for_branch("main"),
+            vec!["package-validation".to_string(), "policy".to_string()]
+        );
+        assert_eq!(
+            repository.required_checks_for_branch("release/2026.04"),
+            vec![
+                "package-validation".to_string(),
+                "policy".to_string(),
+                "security".to_string()
+            ]
+        );
+        assert_eq!(
+            repository.required_checks_for_branch("feature/demo"),
+            vec!["package-validation".to_string()]
+        );
+    }
 }

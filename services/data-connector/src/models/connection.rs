@@ -33,12 +33,15 @@ pub struct ListConnectionsQuery {
 pub const VALID_TYPES: &[&str] = &[
     "postgresql",
     "mysql",
+    "bigquery",
     "csv",
+    "kafka",
     "parquet",
     "json",
     "s3",
     "rest_api",
     "salesforce",
     "sap",
+    "snowflake",
     "iot",
 ];

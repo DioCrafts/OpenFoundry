@@ -129,13 +129,18 @@ pub async fn update_contract(
         .allowed_purposes
         .clone()
         .unwrap_or_else(|| current.allowed_purposes.clone());
-    let proposed_max_rows = request.max_rows_per_query.unwrap_or(current.max_rows_per_query);
+    let proposed_max_rows = request
+        .max_rows_per_query
+        .unwrap_or(current.max_rows_per_query);
     let proposed_replication_mode = request
         .replication_mode
         .clone()
         .unwrap_or_else(|| current.replication_mode.clone());
     let proposed_retention_days = request.retention_days.unwrap_or(current.retention_days);
-    let proposed_status = request.status.clone().unwrap_or_else(|| current.status.clone());
+    let proposed_status = request
+        .status
+        .clone()
+        .unwrap_or_else(|| current.status.clone());
     let proposed_expires_at = request.expires_at.unwrap_or(current.expires_at);
     governance::validate_contract(
         &peer,

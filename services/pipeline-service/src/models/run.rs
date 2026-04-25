@@ -4,6 +4,10 @@ use serde_json::Value;
 use sqlx::FromRow;
 use uuid::Uuid;
 
+fn default_skip_unchanged() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct PipelineRun {
     pub id: Uuid,
@@ -31,9 +35,13 @@ pub struct ListRunsQuery {
 pub struct TriggerPipelineRequest {
     pub from_node_id: Option<String>,
     pub context: Option<Value>,
+    #[serde(default = "default_skip_unchanged")]
+    pub skip_unchanged: bool,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct RetryPipelineRunRequest {
     pub from_node_id: Option<String>,
+    #[serde(default = "default_skip_unchanged")]
+    pub skip_unchanged: bool,
 }

@@ -214,11 +214,7 @@ pub async fn create_batch_prediction(
             let split = predictions::route_variant(&splits, index)?;
             let runtime = version_map.get(&split.model_version_id)?;
             Some(predictions::predict_record(
-                input,
-                &split,
-                runtime,
-                true,
-                index,
+                input, &split, runtime, true, index,
             ))
         })
         .collect::<Vec<_>>();

@@ -13,6 +13,7 @@ use crate::{
         interface::{ObjectTypeInterfaceBinding, OntologyInterface},
         link_type::LinkType,
         object_type::ObjectType,
+        shared_property::SharedPropertyType,
     },
 };
 
@@ -83,11 +84,10 @@ pub async fn build_search_documents(
     object_type_filter: Option<Uuid>,
     kind_filter: Option<&str>,
 ) -> Result<Vec<SearchDocument>, sqlx::Error> {
-    let object_types = sqlx::query_as::<_, ObjectType>(
-        "SELECT * FROM object_types ORDER BY created_at DESC",
-    )
-    .fetch_all(&state.db)
-    .await?;
+    let object_types =
+        sqlx::query_as::<_, ObjectType>("SELECT * FROM object_types ORDER BY created_at DESC")
+            .fetch_all(&state.db)
+            .await?;
     let object_type_map = object_types
         .iter()
         .cloned()
@@ -168,6 +168,76 @@ pub async fn build_search_documents(
         }
     }
 
+    if kind_matches(kind_filter, "shared_property_type") {
+        let shared_property_types = if let Some(object_type_id) = object_type_filter {
+            sqlx::query_as::<_, SharedPropertyType>(
+                r#"SELECT spt.id, spt.name, spt.display_name, spt.description, spt.property_type,
+                          spt.required, spt.unique_constraint, spt.time_dependent, spt.default_value,
+                          spt.validation_rules, spt.owner_id, spt.created_at, spt.updated_at
+                   FROM shared_property_types spt
+                   INNER JOIN object_type_shared_property_types otsp
+                        ON otsp.shared_property_type_id = spt.id
+                   WHERE otsp.object_type_id = $1
+                   ORDER BY otsp.created_at ASC, spt.created_at DESC"#,
+            )
+            .bind(object_type_id)
+            .fetch_all(&state.db)
+            .await?
+        } else {
+            sqlx::query_as::<_, SharedPropertyType>(
+                r#"SELECT id, name, display_name, description, property_type, required,
+                          unique_constraint, time_dependent, default_value, validation_rules,
+                          owner_id, created_at, updated_at
+                   FROM shared_property_types
+                   ORDER BY created_at DESC"#,
+            )
+            .fetch_all(&state.db)
+            .await?
+        };
+
+        for shared_property_type in shared_property_types {
+            documents.push(SearchDocument {
+                kind: "shared_property_type".to_string(),
+                id: shared_property_type.id,
+                object_type_id: object_type_filter,
+                title: shared_property_type.display_name.clone(),
+                subtitle: Some(shared_property_type.name.clone()),
+                snippet: if shared_property_type.description.is_empty() {
+                    format!("Reusable {} property", shared_property_type.property_type)
+                } else {
+                    shared_property_type.description.clone()
+                },
+                body: format!(
+                    "{} {} {} {} {} {}",
+                    shared_property_type.name,
+                    shared_property_type.display_name,
+                    shared_property_type.description,
+                    shared_property_type.property_type,
+                    if shared_property_type.required {
+                        "required"
+                    } else {
+                        "optional"
+                    },
+                    if shared_property_type.time_dependent {
+                        "time-dependent"
+                    } else {
+                        ""
+                    }
+                ),
+                route: object_type_filter
+                    .map(|object_type_id| format!("/ontology/{object_type_id}"))
+                    .unwrap_or_else(|| "/ontology/graph".to_string()),
+                metadata: json!({
+                    "name": shared_property_type.name,
+                    "property_type": shared_property_type.property_type,
+                    "required": shared_property_type.required,
+                    "unique_constraint": shared_property_type.unique_constraint,
+                    "time_dependent": shared_property_type.time_dependent,
+                }),
+            });
+        }
+    }
+
     if kind_matches(kind_filter, "link_type") {
         let link_types = if let Some(object_type_id) = object_type_filter {
             sqlx::query_as::<_, LinkType>(
@@ -226,7 +296,8 @@ pub async fn build_search_documents(
         let action_rows = if let Some(object_type_id) = object_type_filter {
             sqlx::query_as::<_, ActionTypeRow>(
                 r#"SELECT id, name, display_name, description, object_type_id, operation_kind, input_schema,
-                          config, confirmation_required, permission_key, owner_id, created_at, updated_at
+                          config, confirmation_required, permission_key, authorization_policy,
+                          owner_id, created_at, updated_at
                    FROM action_types
                    WHERE object_type_id = $1
                    ORDER BY created_at DESC"#,
@@ -237,7 +308,8 @@ pub async fn build_search_documents(
         } else {
             sqlx::query_as::<_, ActionTypeRow>(
                 r#"SELECT id, name, display_name, description, object_type_id, operation_kind, input_schema,
-                          config, confirmation_required, permission_key, owner_id, created_at, updated_at
+                          config, confirmation_required, permission_key, authorization_policy,
+                          owner_id, created_at, updated_at
                    FROM action_types
                    ORDER BY created_at DESC"#,
             )
@@ -246,6 +318,7 @@ pub async fn build_search_documents(
         };
 
         for action in action_rows {
+            let permission_key = action.permission_key.clone().unwrap_or_default();
             documents.push(SearchDocument {
                 kind: "action_type".to_string(),
                 id: action.id,
@@ -259,12 +332,14 @@ pub async fn build_search_documents(
                     action.display_name,
                     action.description,
                     action.operation_kind,
-                    action.permission_key.unwrap_or_default()
+                    permission_key
                 ),
                 route: format!("/ontology/{}", action.object_type_id),
                 metadata: json!({
                     "operation_kind": action.operation_kind,
                     "confirmation_required": action.confirmation_required,
+                    "permission_key": action.permission_key,
+                    "authorization_policy": action.authorization_policy,
                 }),
             });
         }

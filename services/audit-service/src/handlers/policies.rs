@@ -7,14 +7,15 @@ use chrono::Utc;
 
 use crate::{
     AppState,
-    domain::templates,
+    domain::{governance, templates},
     handlers::{
-        ServiceResult, bad_request, db_error, forbidden, internal_error, load_policies,
-        load_policy_row,
+        ServiceResult, bad_request, db_error, forbidden, internal_error,
+        load_governance_template_applications, load_policies, load_policy_row, load_reports,
     },
     models::{
         ListResponse,
         data_classification::{ClassificationCatalogEntry, ClassificationLevel},
+        governance_posture::{CompliancePostureOverview, GovernanceTemplateApplication},
         governance_template::{ApplyGovernanceTemplateRequest, GovernanceTemplate},
         policy::{AuditPolicy, CreatePolicyRequest, UpdatePolicyRequest},
     },
@@ -50,6 +51,37 @@ pub async fn list_governance_templates() -> ServiceResult<Vec<GovernanceTemplate
     Ok(Json(templates::governance_template_catalog()))
 }
 
+pub async fn list_governance_template_applications(
+    State(state): State<AppState>,
+) -> ServiceResult<ListResponse<GovernanceTemplateApplication>> {
+    let items = load_governance_template_applications(&state.db)
+        .await
+        .map_err(|cause| db_error(&cause))?;
+    Ok(Json(ListResponse { items }))
+}
+
+pub async fn get_compliance_posture(
+    State(state): State<AppState>,
+) -> ServiceResult<CompliancePostureOverview> {
+    let templates = templates::governance_template_catalog();
+    let applications = load_governance_template_applications(&state.db)
+        .await
+        .map_err(|cause| db_error(&cause))?;
+    let policies = load_policies(&state.db)
+        .await
+        .map_err(|cause| db_error(&cause))?;
+    let reports = load_reports(&state.db)
+        .await
+        .map_err(|cause| db_error(&cause))?;
+
+    Ok(Json(governance::build_compliance_posture(
+        &templates,
+        &applications,
+        &policies,
+        &reports,
+    )))
+}
+
 pub async fn apply_governance_template(
     Path(slug): Path<String>,
     State(state): State<AppState>,
@@ -57,9 +89,7 @@ pub async fn apply_governance_template(
     Json(request): Json<ApplyGovernanceTemplateRequest>,
 ) -> ServiceResult<ListResponse<AuditPolicy>> {
     if !claims.has_role("admin") && !claims.has_permission("policies", "write") {
-        return Err(forbidden(
-            "missing permission policies:write",
-        ));
+        return Err(forbidden("missing permission policies:write"));
     }
     if request.updated_by.trim().is_empty() {
         return Err(bad_request("updated_by is required"));
@@ -67,11 +97,20 @@ pub async fn apply_governance_template(
 
     let template = templates::find_governance_template(&slug)
         .ok_or_else(|| crate::handlers::not_found("governance template not found"))?;
-    let scope_override = request.scope.as_deref().map(str::trim).filter(|value| !value.is_empty());
+    let scope_override = request
+        .scope
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
 
     let mut applied_ids = Vec::new();
     let now = Utc::now();
-    for policy in template.policies {
+    let policy_names = template
+        .policies
+        .iter()
+        .map(|policy| policy.name.clone())
+        .collect::<Vec<_>>();
+    for policy in &template.policies {
         let effective_scope = scope_override.unwrap_or(policy.scope.as_str()).to_string();
         let rules = serde_json::to_value(&policy.rules)
             .map_err(|cause| internal_error(cause.to_string()))?;
@@ -131,15 +170,56 @@ pub async fn apply_governance_template(
         applied_ids.push(id);
     }
 
+    let application_scope = request
+        .scope
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("template:{}", template.slug));
+    sqlx::query(
+        "INSERT INTO governance_template_applications (id, template_slug, template_name, scope, standards, policy_names, checkpoint_prompts, sds_remediations, default_report_standard, applied_by, applied_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10, $11, $12)
+         ON CONFLICT (template_slug, scope)
+         DO UPDATE SET template_name = EXCLUDED.template_name,
+                       standards = EXCLUDED.standards,
+                       policy_names = EXCLUDED.policy_names,
+                       checkpoint_prompts = EXCLUDED.checkpoint_prompts,
+                       sds_remediations = EXCLUDED.sds_remediations,
+                       default_report_standard = EXCLUDED.default_report_standard,
+                       applied_by = EXCLUDED.applied_by,
+                       updated_at = EXCLUDED.updated_at",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(&template.slug)
+    .bind(&template.name)
+    .bind(&application_scope)
+    .bind(serde_json::to_value(&template.standards).map_err(|cause| internal_error(cause.to_string()))?)
+    .bind(serde_json::to_value(&policy_names).map_err(|cause| internal_error(cause.to_string()))?)
+    .bind(
+        serde_json::to_value(&template.checkpoint_prompts)
+            .map_err(|cause| internal_error(cause.to_string()))?,
+    )
+    .bind(
+        serde_json::to_value(&template.sds_remediations)
+            .map_err(|cause| internal_error(cause.to_string()))?,
+    )
+    .bind(template.default_report_standard.as_str())
+    .bind(&request.updated_by)
+    .bind(now)
+    .bind(now)
+    .execute(&state.db)
+    .await
+    .map_err(|cause| db_error(&cause))?;
+
     let mut applied = Vec::with_capacity(applied_ids.len());
     for id in applied_ids {
         let row = load_policy_row(&state.db, id)
             .await
             .map_err(|cause| db_error(&cause))?
             .ok_or_else(|| internal_error("applied policy could not be reloaded"))?;
-        applied.push(
-            AuditPolicy::try_from(row).map_err(|cause| internal_error(cause.to_string()))?,
-        );
+        applied
+            .push(AuditPolicy::try_from(row).map_err(|cause| internal_error(cause.to_string()))?);
     }
 
     Ok(Json(ListResponse { items: applied }))

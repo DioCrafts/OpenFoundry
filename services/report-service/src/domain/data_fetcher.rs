@@ -222,7 +222,11 @@ async fn load_dataset_source(
             .into_iter()
             .filter_map(|row| row.as_object().cloned())
             .collect(),
-        columns: preview.columns.into_iter().map(|column| column.name).collect(),
+        columns: preview
+            .columns
+            .into_iter()
+            .map(|column| column.name)
+            .collect(),
         warnings: preview.warnings,
         errors: preview.errors,
     })
@@ -237,9 +241,7 @@ async fn load_map_points(
     if let Some(points) = load_layer_map_points(state, report, headers).await {
         return points;
     }
-    dataset
-        .map(extract_dataset_map_points)
-        .unwrap_or_default()
+    dataset.map(extract_dataset_map_points).unwrap_or_default()
 }
 
 async fn load_layer_map_points(
@@ -391,7 +393,10 @@ fn build_kpi_section(
             };
             let values = collect_numeric_field(&dataset.rows, &field);
             let avg = average(&values).unwrap_or(0.0);
-            (json!(round2(avg)), format!("AVG of {field} across {} rows", values.len()))
+            (
+                json!(round2(avg)),
+                format!("AVG of {field} across {} rows", values.len()),
+            )
         }
         "sum" => {
             let Some(field) = numeric_field.clone() else {
@@ -399,7 +404,10 @@ fn build_kpi_section(
             };
             let values = collect_numeric_field(&dataset.rows, &field);
             let sum = values.iter().sum::<f64>();
-            (json!(round2(sum)), format!("SUM of {field} across {} rows", values.len()))
+            (
+                json!(round2(sum)),
+                format!("SUM of {field} across {} rows", values.len()),
+            )
         }
         "max" => {
             let Some(field) = numeric_field.clone() else {
@@ -425,7 +433,10 @@ fn build_kpi_section(
                 .unwrap_or(0.0);
             (json!(min), format!("MIN of {field}"))
         }
-        _ => (json!(dataset.total_rows), "Count of rows in the live dataset preview".to_string()),
+        _ => (
+            json!(dataset.total_rows),
+            "Count of rows in the live dataset preview".to_string(),
+        ),
     };
 
     let summary = format!(
@@ -579,12 +590,7 @@ fn build_narrative_section(
         match top_dimension {
             Some((field, value)) => format!(
                 "{} is grounded on dataset '{}' ({} rows). Dominant {}: {}. {} fetch warning(s).",
-                section.title,
-                report.dataset_name,
-                dataset.total_rows,
-                field,
-                value,
-                warning_count
+                section.title, report.dataset_name, dataset.total_rows, field, value, warning_count
             ),
             None => format!(
                 "{} is grounded on dataset '{}' ({} rows). {} fetch warning(s).",
@@ -623,7 +629,10 @@ fn build_map_section(
                 ),
             )
         } else {
-            empty_section(section, "No map layer or coordinate-bearing dataset rows were available.")
+            empty_section(
+                section,
+                "No map layer or coordinate-bearing dataset rows were available.",
+            )
         };
     }
 
@@ -697,10 +706,12 @@ fn extract_dataset_map_points(dataset: &DatasetSource) -> Vec<MapPoint> {
 
 fn geometry_centroid(geometry: &FeatureGeometry) -> Option<(f64, f64)> {
     match geometry.geometry_type.as_str() {
-        "point" => geometry
-            .coordinates
-            .as_object()
-            .and_then(|object| Some((numeric_value(object.get("lat")?)?, numeric_value(object.get("lon")?)?))),
+        "point" => geometry.coordinates.as_object().and_then(|object| {
+            Some((
+                numeric_value(object.get("lat")?)?,
+                numeric_value(object.get("lon")?)?,
+            ))
+        }),
         "line_string" | "polygon" => {
             let points = geometry.coordinates.as_array()?;
             let mut lat_sum = 0.0;
@@ -783,7 +794,10 @@ fn dominant_dimension(rows: &[Map<String, Value>], field: &str) -> Option<String
             .unwrap_or_else(|| "unknown".to_string());
         *counts.entry(key).or_insert(0) += 1;
     }
-    counts.into_iter().max_by_key(|(_, count)| *count).map(|(key, _)| key)
+    counts
+        .into_iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(key, _)| key)
 }
 
 fn preferred_numeric(value: &Value, keys: &[&str]) -> Option<f64> {
@@ -899,7 +913,10 @@ mod tests {
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
             },
-            &section(SectionKind::Kpi, json!({"aggregation": "sum", "field": "value"})),
+            &section(
+                SectionKind::Kpi,
+                json!({"aggregation": "sum", "field": "value"}),
+            ),
             Some(&source),
         );
 
@@ -937,7 +954,10 @@ mod tests {
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
             },
-            &section(SectionKind::Chart, json!({"group_by": "region", "aggregation": "count"})),
+            &section(
+                SectionKind::Chart,
+                json!({"group_by": "region", "aggregation": "count"}),
+            ),
             Some(&source),
         );
 

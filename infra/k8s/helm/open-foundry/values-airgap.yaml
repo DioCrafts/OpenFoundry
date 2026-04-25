@@ -1,0 +1,28 @@
+global:
+  imageRegistry: registry.airgap.local/openfoundry-mirror
+  imagePullSecrets:
+    - open-foundry-airgap-registry
+  existingSecret: open-foundry-airgap-env
+  ingress:
+    enabled: false
+  deploymentFabric:
+    cloud: onprem
+    environment: sovereign
+    cell: madrid-dc-1
+    region: es-central-1
+    airGap:
+      enabled: true
+      privateRegistry: registry.airgap.local/openfoundry-mirror
+      releaseBundle: openfoundry-2026.04.25-offline
+      disablePublicEgress: true
+      mirrorRegistries:
+        - registry.airgap.local/dockerhub
+        - registry.airgap.local/ghcr
+        - registry.airgap.local/quay
+      allowedEgressCidrs:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+
+apollo:
+  enabled: false

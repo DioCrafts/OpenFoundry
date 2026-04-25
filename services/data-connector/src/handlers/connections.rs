@@ -28,12 +28,15 @@ pub async fn create_connection(
 
     // Validate config per connector type
     let validation = match body.connector_type.as_str() {
+        "bigquery" => connectors::bigquery::validate_config(&body.config),
+        "kafka" => connectors::kafka::validate_config(&body.config),
         "postgresql" => connectors::postgres::validate_config(&body.config),
         "csv" => connectors::csv::validate_config(&body.config),
         "json" => connectors::json::validate_config(&body.config),
         "rest_api" => connectors::rest_api::validate_config(&body.config),
         "salesforce" => connectors::salesforce::validate_config(&body.config),
         "sap" => connectors::sap::validate_config(&body.config),
+        "snowflake" => connectors::snowflake::validate_config(&body.config),
         "iot" => connectors::iot::validate_config(&body.config),
         _ => Ok(()),
     };
@@ -160,6 +163,12 @@ pub async fn test_connection(
             }
         };
     let test_result = match conn.connector_type.as_str() {
+        "bigquery" => {
+            connectors::bigquery::test_connection(&state, &conn.config, agent_url.as_deref()).await
+        }
+        "kafka" => {
+            connectors::kafka::test_connection(&state, &conn.config, agent_url.as_deref()).await
+        }
         "postgresql" => connectors::postgres::test_connection(&conn.config).await,
         "csv" => connectors::csv::test_connection(&state, &conn.config).await,
         "json" => connectors::json::test_connection(&state, &conn.config).await,
@@ -171,6 +180,9 @@ pub async fn test_connection(
                 .await
         }
         "sap" => connectors::sap::test_connection(&state, &conn.config, agent_url.as_deref()).await,
+        "snowflake" => {
+            connectors::snowflake::test_connection(&state, &conn.config, agent_url.as_deref()).await
+        }
         "iot" => connectors::iot::test_connection(&state, &conn.config, agent_url.as_deref()).await,
         other => Err(format!("unsupported connector type: {other}")),
     };

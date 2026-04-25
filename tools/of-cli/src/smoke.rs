@@ -448,7 +448,10 @@ async fn execute_step_once(
                 };
                 (
                     report,
-                    format!("step '{}' failed to build authorization header: {error}", step.name),
+                    format!(
+                        "step '{}' failed to build authorization header: {error}",
+                        step.name
+                    ),
                 )
             })?;
         if let Some(auth_header) = auth_header.as_deref() {

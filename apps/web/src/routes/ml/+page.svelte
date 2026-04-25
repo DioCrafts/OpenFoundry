@@ -13,6 +13,7 @@
     createRun,
     createTrainingJob,
     generateDriftReport,
+    getExperimentAssetLineage,
     getOnlineFeatureSnapshot,
     getOverview,
     listBatchPredictions,
@@ -34,6 +35,7 @@
     type BatchPredictionJob,
     type CompareRunsResponse,
     type Experiment,
+    type ExperimentAssetLineageResponse,
     type ExperimentRun,
     type FeatureDefinition,
     type FeatureSample,
@@ -54,6 +56,14 @@
     name: string;
     description: string;
     objective: string;
+    objective_status: string;
+    deployment_target: string;
+    stakeholders_text: string;
+    success_criteria_text: string;
+    linked_dataset_ids_text: string;
+    linked_model_ids_text: string;
+    documentation_uri: string;
+    collaboration_notes_text: string;
     task_type: string;
     primary_metric: string;
     status: string;
@@ -130,6 +140,7 @@
 
   let overview = $state<MlStudioOverview | null>(null);
   let experiments = $state<Experiment[]>([]);
+  let experimentAssetLineage = $state<ExperimentAssetLineageResponse | null>(null);
   let runs = $state<ExperimentRun[]>([]);
   let comparedRuns = $state<CompareRunsResponse | null>(null);
   let models = $state<RegisteredModel[]>([]);
@@ -172,6 +183,14 @@
       name: 'New experiment',
       description: '',
       objective: '',
+      objective_status: 'draft',
+      deployment_target: '',
+      stakeholders_text: '',
+      success_criteria_text: '',
+      linked_dataset_ids_text: '',
+      linked_model_ids_text: '',
+      documentation_uri: '',
+      collaboration_notes_text: '',
       task_type: 'classification',
       primary_metric: 'accuracy',
       status: 'active',
@@ -318,6 +337,14 @@
           name: experiment.name,
           description: experiment.description,
           objective: experiment.objective,
+          objective_status: experiment.objective_spec.status,
+          deployment_target: experiment.objective_spec.deployment_target,
+          stakeholders_text: experiment.objective_spec.stakeholders.join(', '),
+          success_criteria_text: experiment.objective_spec.success_criteria.join('\n'),
+          linked_dataset_ids_text: experiment.objective_spec.linked_dataset_ids.join(', '),
+          linked_model_ids_text: experiment.objective_spec.linked_model_ids.join(', '),
+          documentation_uri: experiment.objective_spec.documentation_uri,
+          collaboration_notes_text: experiment.objective_spec.collaboration_notes.join('\n'),
           task_type: experiment.task_type,
           primary_metric: experiment.primary_metric,
           status: experiment.status,
@@ -393,6 +420,19 @@
     comparedRuns = null;
   }
 
+  async function loadExperimentAssetLineageForSelection() {
+    if (!selectedExperimentId) {
+      experimentAssetLineage = null;
+      return;
+    }
+
+    try {
+      experimentAssetLineage = await getExperimentAssetLineage(selectedExperimentId);
+    } catch {
+      experimentAssetLineage = null;
+    }
+  }
+
   async function loadVersionsForSelection() {
     modelVersions = selectedModelId ? (await listModelVersions(selectedModelId)).data : [];
   }
@@ -455,6 +495,7 @@
 
       await Promise.all([
         loadRunsForSelection(),
+        loadExperimentAssetLineageForSelection(),
         loadVersionsForSelection(),
         loadOnlineFeatureForSelection(),
       ]);
@@ -477,7 +518,7 @@
   async function selectExperiment(id: string) {
     selectedExperimentId = id;
     syncExperimentDraft();
-    await loadRunsForSelection();
+    await Promise.all([loadRunsForSelection(), loadExperimentAssetLineageForSelection()]);
   }
 
   async function selectModel(id: string) {
@@ -502,6 +543,7 @@
   function newExperiment() {
     selectedExperimentId = '';
     experimentDraft = createEmptyExperimentDraft();
+    experimentAssetLineage = null;
     runs = [];
     comparedRuns = null;
     compareRunIds = [];
@@ -534,6 +576,22 @@
         name: experimentDraft.name,
         description: experimentDraft.description,
         objective: experimentDraft.objective,
+        objective_spec: {
+          status: experimentDraft.objective_status,
+          deployment_target: experimentDraft.deployment_target,
+          stakeholders: parseTags(experimentDraft.stakeholders_text),
+          success_criteria: experimentDraft.success_criteria_text
+            .split('\n')
+            .map((value) => value.trim())
+            .filter(Boolean),
+          linked_dataset_ids: parseIdList(experimentDraft.linked_dataset_ids_text),
+          linked_model_ids: parseIdList(experimentDraft.linked_model_ids_text),
+          documentation_uri: experimentDraft.documentation_uri,
+          collaboration_notes: experimentDraft.collaboration_notes_text
+            .split('\n')
+            .map((value) => value.trim())
+            .filter(Boolean),
+        },
         task_type: experimentDraft.task_type,
         primary_metric: experimentDraft.primary_metric,
         status: experimentDraft.status,
@@ -965,6 +1023,7 @@
                 </div>
                 <div class="mt-3 flex flex-wrap gap-2 text-xs text-slate-400">
                   <span>{experiment.run_count} run(s)</span>
+                  <span>objective: {experiment.objective_spec.status}</span>
                   {#if experiment.best_metric}
                     <span>{experiment.best_metric.name}: {experiment.best_metric.value}</span>
                   {/if}
@@ -993,6 +1052,44 @@
               <textarea rows="3" bind:value={experimentDraft.description} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"></textarea>
             </label>
             <label class="space-y-1 text-sm">
+              <span class="font-medium text-slate-600 dark:text-slate-300">Objective status</span>
+              <select bind:value={experimentDraft.objective_status} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+                <option value="draft">Draft</option>
+                <option value="active">Active</option>
+                <option value="validated">Validated</option>
+                <option value="production">Production</option>
+                <option value="retired">Retired</option>
+              </select>
+            </label>
+            <label class="space-y-1 text-sm">
+              <span class="font-medium text-slate-600 dark:text-slate-300">Deployment target</span>
+              <input bind:value={experimentDraft.deployment_target} placeholder="renewal-risk-service" class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900" />
+            </label>
+            <label class="space-y-1 text-sm md:col-span-2">
+              <span class="font-medium text-slate-600 dark:text-slate-300">Stakeholders</span>
+              <input bind:value={experimentDraft.stakeholders_text} placeholder="ops, data-science, revops" class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900" />
+            </label>
+            <label class="space-y-1 text-sm md:col-span-2">
+              <span class="font-medium text-slate-600 dark:text-slate-300">Success criteria</span>
+              <textarea rows="3" bind:value={experimentDraft.success_criteria_text} placeholder="Improve F1 above 0.84&#10;Reduce false negatives in enterprise accounts" class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"></textarea>
+            </label>
+            <label class="space-y-1 text-sm">
+              <span class="font-medium text-slate-600 dark:text-slate-300">Linked dataset ids</span>
+              <input bind:value={experimentDraft.linked_dataset_ids_text} placeholder="uuid-1, uuid-2" class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900" />
+            </label>
+            <label class="space-y-1 text-sm">
+              <span class="font-medium text-slate-600 dark:text-slate-300">Linked model ids</span>
+              <input bind:value={experimentDraft.linked_model_ids_text} placeholder="uuid-1, uuid-2" class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900" />
+            </label>
+            <label class="space-y-1 text-sm md:col-span-2">
+              <span class="font-medium text-slate-600 dark:text-slate-300">Documentation URI</span>
+              <input bind:value={experimentDraft.documentation_uri} placeholder="https://docs.internal/ml/churn-playbook" class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900" />
+            </label>
+            <label class="space-y-1 text-sm md:col-span-2">
+              <span class="font-medium text-slate-600 dark:text-slate-300">Collaboration notes</span>
+              <textarea rows="3" bind:value={experimentDraft.collaboration_notes_text} placeholder="Ops requested explainability on top three drivers&#10;Legal approved feature list for EMEA rollout" class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"></textarea>
+            </label>
+            <label class="space-y-1 text-sm">
               <span class="font-medium text-slate-600 dark:text-slate-300">Task type</span>
               <select bind:value={experimentDraft.task_type} class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
                 <option value="classification">Classification</option>
@@ -1017,6 +1114,71 @@
             <button type="button" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white" onclick={() => void saveExperiment()} disabled={busy}>
               {experimentDraft.id ? 'Save experiment' : 'Create experiment'}
             </button>
+          </div>
+
+          <div class="rounded-[1.5rem] border border-slate-200 p-4 dark:border-slate-800">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Modeling Objective</div>
+                <div class="mt-1 text-sm text-slate-500">Governed objective state and asset lineage across runs, training, models, versions, and deployments.</div>
+              </div>
+              {#if experimentAssetLineage}
+                <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                  {experimentAssetLineage.objective_status}
+                </span>
+              {/if}
+            </div>
+
+            {#if experimentAssetLineage}
+              <div class="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+                <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                  <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Datasets</div>
+                  <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">{experimentAssetLineage.summary.dataset_count}</div>
+                </div>
+                <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                  <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Runs</div>
+                  <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">{experimentAssetLineage.summary.run_count}</div>
+                </div>
+                <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                  <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Training jobs</div>
+                  <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">{experimentAssetLineage.summary.training_job_count}</div>
+                </div>
+                <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                  <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Models</div>
+                  <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">{experimentAssetLineage.summary.model_count}</div>
+                </div>
+                <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                  <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Versions</div>
+                  <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">{experimentAssetLineage.summary.version_count}</div>
+                </div>
+                <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                  <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Deployments</div>
+                  <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">{experimentAssetLineage.summary.deployment_count}</div>
+                </div>
+              </div>
+
+              {#if experimentAssetLineage.summary.frameworks.length > 0}
+                <div class="mt-4">
+                  <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Frameworks in scope</div>
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    {#each experimentAssetLineage.summary.frameworks as framework}
+                      <span class="rounded-full bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700 dark:bg-sky-950/40 dark:text-sky-300">
+                        {framework}
+                      </span>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+
+              <details class="mt-4 rounded-2xl border border-slate-200 px-4 py-3 dark:border-slate-800">
+                <summary class="cursor-pointer font-medium text-slate-900 dark:text-slate-100">Asset lineage graph payload</summary>
+                <pre class="mt-3 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">{formatJson(experimentAssetLineage)}</pre>
+              </details>
+            {:else}
+              <div class="mt-4 rounded-2xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700">
+                Select or create an experiment to inspect its governed objective and asset lineage.
+              </div>
+            {/if}
           </div>
 
           <div class="rounded-[1.5rem] border border-slate-200 p-4 dark:border-slate-800">

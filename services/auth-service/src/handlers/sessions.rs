@@ -9,11 +9,13 @@ use uuid::Uuid;
 
 use crate::{
     AppState,
-    domain::sessions::{self, ScopedSessionError},
+    domain::{
+        access,
+        sessions::{self, ScopedSessionError},
+    },
     models::{
-        session::{
-            CreateGuestSessionRequest, CreateScopedSessionRequest, ScopedSessionKind,
-        },
+        restricted_view::{RestrictedView, RestrictedViewRow},
+        session::{CreateGuestSessionRequest, CreateScopedSessionRequest, ScopedSessionKind},
         user::User,
     },
 };
@@ -25,10 +27,7 @@ pub async fn list_scoped_sessions(
     AuthUser(claims): AuthUser,
 ) -> impl IntoResponse {
     if !claims.has_permission("sessions", "self") && !claims.has_permission("sessions", "write") {
-        return json_error(
-            StatusCode::FORBIDDEN,
-            "missing permission sessions:self",
-        );
+        return json_error(StatusCode::FORBIDDEN, "missing permission sessions:self");
     }
 
     match sessions::list_scoped_sessions(&state.db, claims.sub).await {
@@ -46,10 +45,7 @@ pub async fn create_scoped_session(
     Json(body): Json<CreateScopedSessionRequest>,
 ) -> impl IntoResponse {
     if !claims.has_permission("sessions", "self") && !claims.has_permission("sessions", "write") {
-        return json_error(
-            StatusCode::FORBIDDEN,
-            "missing permission sessions:self",
-        );
+        return json_error(StatusCode::FORBIDDEN, "missing permission sessions:self");
     }
 
     if body.label.trim().is_empty() {
@@ -58,7 +54,29 @@ pub async fn create_scoped_session(
     if let Err(message) = validate_requested_permissions(&claims, &body.permissions) {
         return json_error(StatusCode::FORBIDDEN, message);
     }
-    if let Err(message) = validate_requested_clearance(&claims, body.classification_clearance.as_deref()) {
+    if let Err(message) =
+        validate_requested_clearance(&claims, body.classification_clearance.as_deref())
+    {
+        return json_error(StatusCode::FORBIDDEN, message);
+    }
+    if let Err(message) = validate_requested_markings(
+        &claims,
+        &body.allowed_markings,
+        body.classification_clearance.as_deref(),
+    ) {
+        return json_error(StatusCode::FORBIDDEN, message);
+    }
+    if let Err(message) = validate_requested_org_scope(&claims, &body.allowed_org_ids) {
+        return json_error(StatusCode::FORBIDDEN, message);
+    }
+    if let Err(message) = validate_requested_restricted_views(
+        &state.db,
+        &claims,
+        &body.restricted_view_ids,
+        ScopedSessionKind::Scoped,
+    )
+    .await
+    {
         return json_error(StatusCode::FORBIDDEN, message);
     }
 
@@ -78,6 +96,9 @@ pub async fn create_scoped_session(
         allowed_org_ids: body.allowed_org_ids,
         workspace: body.workspace,
         classification_clearance: body.classification_clearance,
+        allowed_markings: body.allowed_markings,
+        restricted_view_ids: body.restricted_view_ids,
+        consumer_mode: body.consumer_mode,
         guest_email: None,
         guest_display_name: None,
     };
@@ -126,11 +147,11 @@ pub async fn create_guest_session(
     if body.guest_email.trim().is_empty() {
         return json_error(StatusCode::BAD_REQUEST, "guest_email is required");
     }
-    if let Err(message) = validate_requested_permissions(&claims, &body.permissions) {
+    let requested_permissions = resolve_guest_permissions(&claims, &body.permissions);
+    if let Err(message) = validate_requested_permissions(&claims, &requested_permissions) {
         return json_error(StatusCode::FORBIDDEN, message);
     }
-    if body
-        .permissions
+    if requested_permissions
         .iter()
         .any(|permission| !permission_is_guest_safe(permission))
     {
@@ -141,6 +162,26 @@ pub async fn create_guest_session(
     }
     if let Err(message) =
         validate_requested_clearance(&claims, body.classification_clearance.as_deref())
+    {
+        return json_error(StatusCode::FORBIDDEN, message);
+    }
+    if let Err(message) = validate_requested_markings(
+        &claims,
+        &body.allowed_markings,
+        body.classification_clearance.as_deref(),
+    ) {
+        return json_error(StatusCode::FORBIDDEN, message);
+    }
+    if let Err(message) = validate_requested_org_scope(&claims, &body.allowed_org_ids) {
+        return json_error(StatusCode::FORBIDDEN, message);
+    }
+    if let Err(message) = validate_requested_restricted_views(
+        &state.db,
+        &claims,
+        &body.restricted_view_ids,
+        ScopedSessionKind::Guest,
+    )
+    .await
     {
         return json_error(StatusCode::FORBIDDEN, message);
     }
@@ -161,6 +202,9 @@ pub async fn create_guest_session(
         allowed_org_ids: body.allowed_org_ids,
         workspace: body.workspace,
         classification_clearance: body.classification_clearance,
+        allowed_markings: body.allowed_markings,
+        restricted_view_ids: body.restricted_view_ids,
+        consumer_mode: body.consumer_mode,
         guest_email: Some(body.guest_email.clone()),
         guest_display_name: body.guest_name.clone(),
     };
@@ -171,7 +215,7 @@ pub async fn create_guest_session(
         &user,
         body.label.trim(),
         ScopedSessionKind::Guest,
-        body.permissions,
+        requested_permissions,
         scope,
         body.expires_at,
         Some(body.guest_email),
@@ -200,10 +244,7 @@ pub async fn revoke_scoped_session(
     Path(session_id): Path<Uuid>,
 ) -> impl IntoResponse {
     if !claims.has_permission("sessions", "self") && !claims.has_permission("sessions", "write") {
-        return json_error(
-            StatusCode::FORBIDDEN,
-            "missing permission sessions:self",
-        );
+        return json_error(StatusCode::FORBIDDEN, "missing permission sessions:self");
     }
 
     match sessions::revoke_scoped_session(
@@ -248,18 +289,12 @@ fn validate_requested_clearance(
     let Some(requested_clearance) = requested_clearance else {
         return Ok(());
     };
-    let requested_rank = clearance_rank(requested_clearance)
+    let requested_rank = access::marking_rank(requested_clearance)
         .ok_or_else(|| "unsupported classification_clearance".to_string())?;
     let caller_rank = claims
         .classification_clearance()
-        .and_then(clearance_rank)
-        .unwrap_or_else(|| {
-            if claims.has_role("admin") {
-                2
-            } else {
-                0
-            }
-        });
+        .and_then(access::marking_rank)
+        .unwrap_or_else(|| if claims.has_role("admin") { 2 } else { 0 });
 
     if claims.has_role("admin") || requested_rank <= caller_rank {
         Ok(())
@@ -268,12 +303,53 @@ fn validate_requested_clearance(
     }
 }
 
-fn clearance_rank(value: &str) -> Option<u8> {
-    match value {
-        "public" => Some(0),
-        "confidential" => Some(1),
-        "pii" => Some(2),
-        _ => None,
+fn validate_requested_markings(
+    claims: &auth_middleware::Claims,
+    requested_markings: &[String],
+    requested_clearance: Option<&str>,
+) -> Result<(), String> {
+    let normalized = access::normalize_markings(requested_markings)?;
+    if normalized.is_empty() {
+        return Ok(());
+    }
+
+    if let Some(clearance) = requested_clearance {
+        let requested_rank = access::marking_rank(clearance)
+            .ok_or_else(|| "unsupported classification_clearance".to_string())?;
+        if normalized
+            .iter()
+            .any(|marking| access::marking_rank(marking).unwrap_or(0) > requested_rank)
+        {
+            return Err(
+                "requested allowed_markings exceed requested classification_clearance".to_string(),
+            );
+        }
+    }
+
+    if claims.has_role("admin")
+        || normalized
+            .iter()
+            .all(|marking| claims.allows_marking(marking))
+    {
+        Ok(())
+    } else {
+        Err("requested allowed_markings exceed caller clearance".to_string())
+    }
+}
+
+fn validate_requested_org_scope(
+    claims: &auth_middleware::Claims,
+    requested_org_ids: &[Uuid],
+) -> Result<(), String> {
+    if claims.has_role("admin")
+        || requested_org_ids.is_empty()
+        || requested_org_ids
+            .iter()
+            .all(|org_id| claims.allows_org_id(Some(*org_id)))
+    {
+        Ok(())
+    } else {
+        Err("requested organization scope exceeds caller isolation boundary".to_string())
     }
 }
 
@@ -281,7 +357,107 @@ fn permission_is_guest_safe(permission: &str) -> bool {
     permission.ends_with(":read") || permission.ends_with(":self") || permission == "*:read"
 }
 
-async fn load_current_user(pool: &sqlx::PgPool, user_id: Uuid) -> Result<Option<User>, sqlx::Error> {
+fn resolve_guest_permissions(
+    claims: &auth_middleware::Claims,
+    requested_permissions: &[String],
+) -> Vec<String> {
+    let mut permissions = if requested_permissions.is_empty() {
+        claims
+            .permissions
+            .iter()
+            .filter(|permission| permission_is_guest_safe(permission))
+            .cloned()
+            .collect::<Vec<_>>()
+    } else {
+        requested_permissions.to_vec()
+    };
+
+    permissions.sort();
+    permissions.dedup();
+    permissions
+}
+
+async fn validate_requested_restricted_views(
+    pool: &sqlx::PgPool,
+    claims: &auth_middleware::Claims,
+    restricted_view_ids: &[Uuid],
+    session_kind: ScopedSessionKind,
+) -> Result<(), String> {
+    if restricted_view_ids.is_empty() {
+        return Ok(());
+    }
+
+    let caller_restricted_views = claims.restricted_view_ids();
+    if !claims.has_role("admin")
+        && !caller_restricted_views.is_empty()
+        && !restricted_view_ids
+            .iter()
+            .all(|view_id| caller_restricted_views.contains(view_id))
+    {
+        return Err("requested restricted views exceed caller session restrictions".to_string());
+    }
+
+    let rows = sqlx::query_as::<_, RestrictedViewRow>(
+        r#"SELECT id, name, description, resource, action, conditions, row_filter, hidden_columns,
+		          allowed_org_ids, allowed_markings, consumer_mode_enabled, allow_guest_access,
+		          enabled, created_by, created_at, updated_at
+		   FROM restricted_views
+		   WHERE id = ANY($1) AND enabled = true"#,
+    )
+    .bind(restricted_view_ids.to_vec())
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("failed to validate restricted views: {error}"))?;
+
+    if rows.len() != restricted_view_ids.len() {
+        return Err("one or more restricted_view_ids do not exist or are disabled".to_string());
+    }
+
+    let views = rows
+        .into_iter()
+        .map(RestrictedView::try_from)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    for view in views {
+        if session_kind == ScopedSessionKind::Guest && !view.allow_guest_access {
+            return Err(format!(
+                "restricted view '{}' does not allow guest access",
+                view.name
+            ));
+        }
+        if !claims.has_role("admin")
+            && !view.allowed_org_ids.is_empty()
+            && !view
+                .allowed_org_ids
+                .iter()
+                .all(|org_id| claims.allows_org_id(Some(*org_id)))
+        {
+            return Err(format!(
+                "restricted view '{}' exceeds caller organization boundary",
+                view.name
+            ));
+        }
+        if !claims.has_role("admin")
+            && !view.allowed_markings.is_empty()
+            && !view
+                .allowed_markings
+                .iter()
+                .all(|marking| claims.allows_marking(marking))
+        {
+            return Err(format!(
+                "restricted view '{}' exceeds caller classification boundary",
+                view.name
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+async fn load_current_user(
+    pool: &sqlx::PgPool,
+    user_id: Uuid,
+) -> Result<Option<User>, sqlx::Error> {
     sqlx::query_as::<_, User>(
         "SELECT id, email, name, password_hash, is_active, organization_id, attributes, mfa_enforced, auth_source, created_at, updated_at FROM users WHERE id = $1 AND is_active = true",
     )
@@ -301,6 +477,8 @@ mod tests {
             sub: Uuid::nil(),
             iat: 0,
             exp: i64::MAX,
+            iss: None,
+            aud: None,
             jti: Uuid::nil(),
             email: "user@example.com".to_string(),
             name: "User".to_string(),
@@ -327,5 +505,22 @@ mod tests {
         let claims = claims_with_clearance("confidential");
         assert!(validate_requested_clearance(&claims, Some("public")).is_ok());
         assert!(validate_requested_clearance(&claims, Some("pii")).is_err());
+    }
+
+    #[test]
+    fn guest_permissions_default_to_safe_subset() {
+        let claims = auth_middleware::Claims {
+            permissions: vec![
+                "datasets:read".to_string(),
+                "datasets:write".to_string(),
+                "reports:self".to_string(),
+            ],
+            ..claims_with_clearance("public")
+        };
+
+        assert_eq!(
+            resolve_guest_permissions(&claims, &[]),
+            vec!["datasets:read".to_string(), "reports:self".to_string()]
+        );
     }
 }

@@ -6,6 +6,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+use std::collections::BTreeSet;
 use uuid::Uuid;
 
 use auth_middleware::layer::AuthUser;
@@ -20,10 +21,14 @@ use crate::{
         schema::{load_effective_properties, validate_object_properties},
     },
     handlers::actions::preview_action_for_simulation,
+    handlers::actions::{ensure_action_actor_permission, ensure_action_target_permission},
     models::{
         action_type::ActionType,
-        graph::GraphQuery,
-        object_view::{ObjectSimulationRequest, ObjectSimulationResponse, ObjectViewResponse},
+        graph::{GraphQuery, GraphResponse},
+        object_view::{
+            ObjectSimulationImpactSummary, ObjectSimulationRequest, ObjectSimulationResponse,
+            ObjectViewResponse,
+        },
         rule::RuleMatchResponse,
     },
 };
@@ -162,7 +167,11 @@ pub async fn list_objects(
 
     let total = objects.len();
     let offset = (page.saturating_sub(1) as usize) * per_page;
-    let data = objects.into_iter().skip(offset).take(per_page).collect::<Vec<_>>();
+    let data = objects
+        .into_iter()
+        .skip(offset)
+        .take(per_page)
+        .collect::<Vec<_>>();
 
     Json(json!({
         "data": data,
@@ -378,25 +387,35 @@ pub async fn list_neighbors(
 
 async fn load_applicable_actions(
     state: &AppState,
-    object_type_id: Uuid,
+    claims: &auth_middleware::claims::Claims,
+    object: &ObjectInstance,
 ) -> Result<Vec<ActionType>, String> {
     let rows = sqlx::query_as::<_, crate::models::action_type::ActionTypeRow>(
         r#"SELECT id, name, display_name, description, object_type_id, operation_kind,
-                  input_schema, config, confirmation_required, permission_key, owner_id,
+                  input_schema, config, confirmation_required, permission_key, authorization_policy,
+                  owner_id,
                   created_at, updated_at
            FROM action_types
            WHERE object_type_id = $1
            ORDER BY created_at DESC"#,
     )
-    .bind(object_type_id)
+    .bind(object.object_type_id)
     .fetch_all(&state.db)
     .await
     .map_err(|error| format!("failed to load actions: {error}"))?;
 
-    rows.into_iter()
-        .map(ActionType::try_from)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("failed to decode actions: {error}"))
+    let mut actions = Vec::new();
+    for row in rows {
+        let action = ActionType::try_from(row)
+            .map_err(|error| format!("failed to decode actions: {error}"))?;
+        if ensure_action_actor_permission(claims, &action).is_ok()
+            && ensure_action_target_permission(&action, Some(object)).is_ok()
+        {
+            actions.push(action);
+        }
+    }
+
+    Ok(actions)
 }
 
 fn build_object_timeline(
@@ -442,6 +461,86 @@ fn build_object_timeline(
             .cmp(left["at"].as_str().unwrap_or_default())
     });
     timeline
+}
+
+fn collect_changed_properties(
+    manual_patch: &Map<String, Value>,
+    action_preview: Option<&Value>,
+) -> Vec<String> {
+    let mut properties = BTreeSet::new();
+    for key in manual_patch.keys() {
+        properties.insert(key.clone());
+    }
+
+    if let Some(action_patch) = action_preview
+        .and_then(|preview| preview.get("patch"))
+        .and_then(Value::as_object)
+    {
+        for key in action_patch.keys() {
+            properties.insert(key.clone());
+        }
+    }
+
+    properties.into_iter().collect()
+}
+
+fn extract_graph_object_ids(graph: &GraphResponse) -> Vec<Uuid> {
+    let mut impacted = BTreeSet::new();
+    for node in &graph.nodes {
+        if node.kind != "object_instance" {
+            continue;
+        }
+        let Some(value) = node.id.strip_prefix("object:") else {
+            continue;
+        };
+        if let Ok(object_id) = Uuid::parse_str(value) {
+            impacted.insert(object_id);
+        }
+    }
+
+    let mut ordered = Vec::new();
+    if let Some(root_object_id) = graph.root_object_id {
+        ordered.push(root_object_id);
+        impacted.remove(&root_object_id);
+    }
+    ordered.extend(impacted);
+    ordered
+}
+
+fn build_simulation_impact_summary(
+    graph: &GraphResponse,
+    action_preview: &Value,
+    matching_rules: usize,
+    changed_properties: &[String],
+    impacted_object_count: usize,
+    predicted_delete: bool,
+) -> ObjectSimulationImpactSummary {
+    let impacted_types = graph
+        .summary
+        .object_types
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+
+    ObjectSimulationImpactSummary {
+        scope: graph.summary.scope.clone(),
+        action_kind: action_preview
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or("manual_patch")
+            .to_string(),
+        predicted_delete,
+        impacted_object_count,
+        impacted_type_count: impacted_types.len(),
+        impacted_types,
+        direct_neighbors: graph.summary.root_neighbor_count,
+        max_hops_reached: graph.summary.max_hops_reached,
+        boundary_crossings: graph.summary.boundary_crossings,
+        sensitive_objects: graph.summary.sensitive_objects,
+        sensitive_markings: graph.summary.sensitive_markings.clone(),
+        matching_rules,
+        changed_properties: changed_properties.to_vec(),
+    }
 }
 
 async fn simulate_object_state(
@@ -524,7 +623,7 @@ pub async fn get_object_view(
         Ok(graph) => graph,
         Err(error) => return db_error(error),
     };
-    let actions = match load_applicable_actions(&state, type_id).await {
+    let actions = match load_applicable_actions(&state, &claims, &object).await {
         Ok(actions) => actions,
         Err(error) => return db_error(error),
     };
@@ -548,6 +647,10 @@ pub async fn get_object_view(
             "neighbor_count": neighbors.len(),
             "graph_nodes": graph.total_nodes,
             "graph_edges": graph.total_edges,
+            "graph_scope": graph.summary.scope.clone(),
+            "sensitive_objects": graph.summary.sensitive_objects,
+            "boundary_crossings": graph.summary.boundary_crossings,
+            "max_hops_reached": graph.summary.max_hops_reached,
             "matching_rules": matching_rules.len(),
             "recent_rule_runs": recent_rule_runs.len(),
         }),
@@ -605,7 +708,14 @@ pub async fn simulate_object(
         None => None,
     };
 
-    let simulated = match simulate_object_state(&state, &object, &manual_patch, action_preview.as_ref()).await {
+    let simulated = match simulate_object_state(
+        &state,
+        &object,
+        &manual_patch,
+        action_preview.as_ref(),
+    )
+    .await
+    {
         Ok(simulated) => simulated,
         Err(error) => return invalid(error),
     };
@@ -656,14 +766,26 @@ pub async fn simulate_object(
         Err(error) => return db_error(error),
     };
 
-    let mut impacted_objects = vec![obj_id];
+    let changed_properties = collect_changed_properties(&manual_patch, action_preview.as_ref());
+    let predicted_delete = action_preview
+        .as_ref()
+        .and_then(|preview| preview.get("kind"))
+        .and_then(Value::as_str)
+        == Some("delete_object");
+
+    let mut impacted_objects = extract_graph_object_ids(&graph);
     if let Some(counterpart) = action_preview
         .as_ref()
         .and_then(|preview| preview.get("counterpart_object_id"))
         .and_then(Value::as_str)
         .and_then(|value| Uuid::parse_str(value).ok())
     {
-        impacted_objects.push(counterpart);
+        if !impacted_objects.contains(&counterpart) {
+            impacted_objects.push(counterpart);
+        }
+    }
+    if impacted_objects.is_empty() {
+        impacted_objects.push(obj_id);
     }
 
     let recent_rule_runs = match load_recent_rule_runs(&state, obj_id, 8).await {
@@ -671,21 +793,29 @@ pub async fn simulate_object(
         Err(error) => return db_error(error),
     };
     let timeline = build_object_timeline(&object, &recent_rule_runs, action_preview.as_ref());
+    let action_preview = action_preview.unwrap_or_else(|| {
+        json!({
+            "kind": "manual_patch",
+            "patch": manual_patch,
+        })
+    });
+    let impact_summary = build_simulation_impact_summary(
+        &graph,
+        &action_preview,
+        matching_rules.len(),
+        &changed_properties,
+        impacted_objects.len(),
+        predicted_delete,
+    );
 
     Json(ObjectSimulationResponse {
         before: object_to_json(object.clone()),
         after: simulated.map(object_to_json),
-        deleted: action_preview
-            .as_ref()
-            .and_then(|preview| preview.get("kind"))
-            .and_then(Value::as_str)
-            == Some("delete_object"),
-        action_preview: action_preview.unwrap_or_else(|| json!({
-            "kind": "manual_patch",
-            "patch": manual_patch,
-        })),
+        deleted: predicted_delete,
+        action_preview,
         matching_rules,
         graph,
+        impact_summary,
         impacted_objects,
         timeline,
     })
@@ -704,4 +834,106 @@ pub async fn load_object_instance(
     .bind(obj_id)
     .fetch_optional(db)
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{build_simulation_impact_summary, extract_graph_object_ids};
+    use crate::models::graph::{GraphEdge, GraphNode, GraphResponse, GraphSummary};
+    use uuid::Uuid;
+
+    fn graph_response() -> GraphResponse {
+        GraphResponse {
+            mode: "object".to_string(),
+            root_object_id: Some(Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap()),
+            root_type_id: None,
+            depth: 2,
+            total_nodes: 2,
+            total_edges: 1,
+            summary: GraphSummary {
+                scope: "sensitive_connected".to_string(),
+                node_kinds: Default::default(),
+                edge_kinds: Default::default(),
+                object_types: [("Case".to_string(), 1), ("Customer".to_string(), 1)]
+                    .into_iter()
+                    .collect(),
+                markings: [("public".to_string(), 1), ("pii".to_string(), 1)]
+                    .into_iter()
+                    .collect(),
+                root_neighbor_count: 1,
+                max_hops_reached: 1,
+                boundary_crossings: 1,
+                sensitive_objects: 1,
+                sensitive_markings: vec!["pii".to_string()],
+            },
+            nodes: vec![
+                GraphNode {
+                    id: "object:00000000-0000-0000-0000-000000000001".to_string(),
+                    kind: "object_instance".to_string(),
+                    label: "Root".to_string(),
+                    secondary_label: Some("Case".to_string()),
+                    color: None,
+                    route: None,
+                    metadata: json!({}),
+                },
+                GraphNode {
+                    id: "object:00000000-0000-0000-0000-000000000002".to_string(),
+                    kind: "object_instance".to_string(),
+                    label: "Neighbor".to_string(),
+                    secondary_label: Some("Customer".to_string()),
+                    color: None,
+                    route: None,
+                    metadata: json!({}),
+                },
+            ],
+            edges: vec![GraphEdge {
+                id: "link:1".to_string(),
+                kind: "link_instance".to_string(),
+                source: "object:00000000-0000-0000-0000-000000000001".to_string(),
+                target: "object:00000000-0000-0000-0000-000000000002".to_string(),
+                label: "linked".to_string(),
+                metadata: json!({}),
+            }],
+        }
+    }
+
+    #[test]
+    fn graph_object_ids_keep_root_first() {
+        let graph = graph_response();
+
+        let impacted = extract_graph_object_ids(&graph);
+
+        assert_eq!(
+            impacted,
+            vec![
+                Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+                Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap(),
+            ]
+        );
+    }
+
+    #[test]
+    fn simulation_impact_summary_reuses_graph_summary() {
+        let graph = graph_response();
+
+        let summary = build_simulation_impact_summary(
+            &graph,
+            &json!({ "kind": "delete_object" }),
+            2,
+            &["status".to_string(), "risk_score".to_string()],
+            2,
+            true,
+        );
+
+        assert_eq!(summary.scope, "sensitive_connected");
+        assert_eq!(summary.action_kind, "delete_object");
+        assert!(summary.predicted_delete);
+        assert_eq!(summary.impacted_object_count, 2);
+        assert_eq!(summary.impacted_type_count, 2);
+        assert_eq!(summary.direct_neighbors, 1);
+        assert_eq!(summary.matching_rules, 2);
+        assert_eq!(summary.changed_properties.len(), 2);
+    }
 }

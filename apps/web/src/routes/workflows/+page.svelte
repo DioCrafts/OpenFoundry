@@ -14,6 +14,7 @@
     startWorkflowRun,
     triggerWorkflowEvent,
     updateWorkflow,
+    type WorkflowActionProposal,
     type WorkflowApproval,
     type WorkflowDefinition,
     type WorkflowRun,
@@ -43,16 +44,56 @@
   let eventPayloadText = $state('{\n  "source": "workflow-builder"\n}');
   let error = $state('');
   let stepConfigText = $state<Record<string, string>>({});
+  let approvalNotes = $state<Record<string, string>>({});
 
   let draft = $state<WorkflowDraft>(createEmptyWorkflow());
 
-  function createStep(stepType = 'action'): WorkflowStep {
+  function defaultStepConfig(stepType: string): Record<string, unknown> {
+    if (stepType === 'submit_action') {
+      return {
+        action_id: '',
+        target_object_id_field: 'event.object_id',
+        parameters: {},
+        justification: 'Automated workflow submit action from {{trigger.type}}',
+        result_key: 'automation.last_submit_action',
+      };
+    }
+
+    if (stepType === 'notification') {
+      return {
+        title: 'Workflow notification',
+        message: 'Workflow condition met for {{trigger.type}}',
+        channels: ['in_app'],
+        severity: 'info',
+      };
+    }
+
+    return {};
+  }
+
+  function createProposalApprovalConfig(): Record<string, unknown> {
+    return {
+      title: 'Review proposed ontology action',
+      instructions: 'Inspect the proposal and approve to auto-apply it into the Ontology.',
+      channels: ['in_app', 'email'],
+      proposal: {
+        action_id: '',
+        target_object_id_field: 'event.object_id',
+        parameters: {},
+        summary: 'Review ontology action proposal for {{event.object_id}}',
+        auto_apply_on_approval: true,
+        execution_identity: 'approver',
+      },
+    };
+  }
+
+  function createStep(stepType = 'action', config: Record<string, unknown> = defaultStepConfig(stepType)): WorkflowStep {
     return {
       id: crypto.randomUUID(),
-      name: `New ${stepType}`,
+      name: stepType === 'submit_action' ? 'Submit action' : stepType === 'approval' && 'proposal' in config ? 'Proposal review' : `New ${stepType}`,
       step_type: stepType,
       description: '',
-      config: {},
+      config,
       next_step_id: null,
       branches: [],
     };
@@ -194,7 +235,13 @@
   function addStep(stepType = 'action') {
     const step = createStep(stepType);
     draft.steps = [...draft.steps, step];
-    stepConfigText = { ...stepConfigText, [step.id]: '{}' };
+    stepConfigText = { ...stepConfigText, [step.id]: JSON.stringify(step.config ?? {}, null, 2) };
+  }
+
+  function addProposalApprovalStep() {
+    const step = createStep('approval', createProposalApprovalConfig());
+    draft.steps = [...draft.steps, step];
+    stepConfigText = { ...stepConfigText, [step.id]: JSON.stringify(step.config ?? {}, null, 2) };
   }
 
   function duplicateStep(stepId: string) {
@@ -262,6 +309,18 @@
     return draft.steps.find((step) => step.id === stepId)?.name ?? 'End';
   }
 
+  function proposalForApproval(approval: WorkflowApproval): WorkflowActionProposal | null {
+    return approval.payload?.proposal ?? null;
+  }
+
+  function proposalExecutionStatus(approval: WorkflowApproval) {
+    return approval.payload?.proposal_execution?.status ?? null;
+  }
+
+  function formatPreview(value: unknown) {
+    return JSON.stringify(value ?? {}, null, 2);
+  }
+
   function updateTriggerField(key: string, value: string) {
     draft.trigger_config = {
       ...draft.trigger_config,
@@ -314,8 +373,12 @@
   }
 
   async function decide(approval: WorkflowApproval, decision: 'approved' | 'rejected') {
-    await decideWorkflowApproval(approval.id, { decision, payload: {} });
+    const comment = approvalNotes[approval.id]?.trim();
+    await decideWorkflowApproval(approval.id, { decision, comment: comment || undefined, payload: {} });
     notifications.success(`Approval ${decision}`);
+    const nextNotes = { ...approvalNotes };
+    delete nextNotes[approval.id];
+    approvalNotes = nextNotes;
     await Promise.all([loadApprovals(), loadRuns()]);
   }
 
@@ -329,7 +392,7 @@
   <div class="flex items-center justify-between">
     <div>
       <h1 class="text-2xl font-bold">Workflows & Notifications</h1>
-      <p class="mt-1 text-sm text-gray-500">Build trigger-driven workflows, route them through approval queues, and pair them with notification delivery.</p>
+      <p class="mt-1 text-sm text-gray-500">Build event-driven automations, submit ontology actions automatically, and route proposal-based HITL reviews through one queue.</p>
     </div>
     <div class="flex gap-2">
       <button onclick={newWorkflow} class="rounded-xl border border-slate-200 px-4 py-2 hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">New workflow</button>
@@ -407,10 +470,38 @@
                   <div class="font-medium">{approval.title}</div>
                   <div class="mt-1 text-sm text-gray-500">{approval.instructions || 'No instructions'}</div>
                   <div class="mt-2 text-xs text-gray-500">Assigned to {ownerName(approval.assigned_to)}</div>
+                  {#if proposalForApproval(approval)}
+                    <div class="mt-3 rounded-xl border border-blue-200 bg-blue-50/70 p-3 text-sm text-slate-700 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-slate-200">
+                      <div class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700 dark:text-blue-300">Proposal</div>
+                      <div class="mt-2 font-medium">{proposalForApproval(approval)?.summary}</div>
+                      <div class="mt-2 text-xs text-gray-500">
+                        Action {proposalForApproval(approval)?.action_id.slice(0, 8)}
+                        {#if proposalForApproval(approval)?.target_object_id}
+                          · Target {proposalForApproval(approval)?.target_object_id?.slice(0, 8)}
+                        {/if}
+                        · Identity {proposalForApproval(approval)?.execution_identity}
+                      </div>
+                      {#if proposalForApproval(approval)?.reasoning}
+                        <pre class="mt-3 overflow-x-auto rounded-lg bg-white/70 p-3 text-xs dark:bg-gray-900">{formatPreview(proposalForApproval(approval)?.reasoning)}</pre>
+                      {/if}
+                      <pre class="mt-3 overflow-x-auto rounded-lg bg-white/70 p-3 text-xs dark:bg-gray-900">{formatPreview(proposalForApproval(approval)?.preview)}</pre>
+                      {#if proposalExecutionStatus(approval)}
+                        <div class="mt-2 text-xs text-gray-500">Execution state: {proposalExecutionStatus(approval)}</div>
+                      {/if}
+                    </div>
+                  {/if}
                 </div>
-                <div class="flex gap-2">
-                  <button onclick={() => void decide(approval, 'approved')} class="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">Approve</button>
-                  <button onclick={() => void decide(approval, 'rejected')} class="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-rose-700">Reject</button>
+                <div class="w-56 space-y-2">
+                  <textarea
+                    bind:value={approvalNotes[approval.id]}
+                    rows="4"
+                    placeholder="Optional review note"
+                    class="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs dark:border-gray-700 dark:bg-gray-900"
+                  ></textarea>
+                  <div class="flex gap-2">
+                    <button onclick={() => void decide(approval, 'approved')} class="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">Approve</button>
+                    <button onclick={() => void decide(approval, 'rejected')} class="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-rose-700">Reject</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -497,11 +588,13 @@
         <div class="flex items-center justify-between">
           <div>
             <div class="text-xs uppercase tracking-[0.22em] text-gray-400">Workflow builder</div>
-            <div class="mt-1 text-sm text-gray-500">A visual step lane with config JSON, branching, approval routing, and notifications.</div>
+            <div class="mt-1 text-sm text-gray-500">A visual step lane with config JSON, branching, notifications, direct submit actions, and proposal-based approvals.</div>
           </div>
           <div class="flex gap-2">
             <button onclick={() => addStep('action')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">Add action</button>
             <button onclick={() => addStep('approval')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">Add approval</button>
+            <button onclick={addProposalApprovalStep} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">Add proposal review</button>
+            <button onclick={() => addStep('submit_action')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">Add submit action</button>
             <button onclick={() => addStep('notification')} class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-gray-700 dark:hover:bg-gray-800">Add notification</button>
           </div>
         </div>

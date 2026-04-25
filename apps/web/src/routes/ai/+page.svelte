@@ -27,6 +27,7 @@
 		listProviders,
 		listTools,
 		renderPrompt,
+		runProviderBenchmark,
 		searchKnowledgeBase,
 		updateAgent,
 		updateKnowledgeBase,
@@ -36,6 +37,7 @@
 		type AgentDefinition,
 		type AgentExecutionResponse,
 		type AiPlatformOverview,
+		type ChatAttachment,
 		type ChatCompletionResponse,
 		type Conversation,
 		type ConversationSummary,
@@ -44,6 +46,7 @@
 		type KnowledgeDocument,
 		type KnowledgeSearchResult,
 		type LlmProvider,
+		type ProviderBenchmarkResponse,
 		type PromptTemplate,
 		type ToolDefinition,
 	} from '$lib/api/ai';
@@ -64,6 +67,10 @@
 		cost_tier: string;
 		tags_text: string;
 		use_cases_text: string;
+		network_scope: string;
+		supported_modalities_text: string;
+		input_cost_per_1k_tokens_usd: number;
+		output_cost_per_1k_tokens_usd: number;
 	};
 
 	type PromptDraft = {
@@ -107,6 +114,7 @@
 		description: string;
 		category: string;
 		execution_mode: string;
+		execution_config_text: string;
 		status: string;
 		input_schema_text: string;
 		output_schema_text: string;
@@ -130,6 +138,7 @@
 		user_message: string;
 		objective: string;
 		knowledge_base_id: string;
+		context_text: string;
 	};
 
 	type ChatDraft = {
@@ -140,8 +149,10 @@
 		prompt_variables_text: string;
 		knowledge_base_id: string;
 		preferred_provider_id: string;
+		attachments_text: string;
 		max_tokens: number;
 		fallback_enabled: boolean;
+		require_private_network: boolean;
 	};
 
 	let overview = $state<AiPlatformOverview | null>(null);
@@ -155,6 +166,7 @@
 	let conversations = $state<ConversationSummary[]>([]);
 	let activeConversation = $state<Conversation | null>(null);
 	let chatResponse = $state<ChatCompletionResponse | null>(null);
+	let benchmarkResponse = $state<ProviderBenchmarkResponse | null>(null);
 	let agentExecution = $state<AgentExecutionResponse | null>(null);
 	let guardrailResponse = $state<EvaluateGuardrailsResponse | null>(null);
 	let renderedPrompt = $state('');
@@ -198,6 +210,10 @@
 			cost_tier: 'standard',
 			tags_text: 'production, chat',
 			use_cases_text: 'chat, copilot, general',
+			network_scope: 'public',
+			supported_modalities_text: 'text, image, embedding',
+			input_cost_per_1k_tokens_usd: 0.00015,
+			output_cost_per_1k_tokens_usd: 0.0006,
 		};
 	}
 
@@ -247,7 +263,13 @@
 			name: 'SQL Generator',
 			description: 'Creates starter SQL from natural language prompts.',
 			category: 'analysis',
-			execution_mode: 'simulated',
+			execution_mode: 'native_sql',
+			execution_config_text: formatJson({
+				default_dataset_name: 'provider_metrics',
+				time_column: 'event_date',
+				default_limit: 100,
+				metric_hints: ['avg_latency_ms', 'error_rate']
+			}),
 			status: 'active',
 			input_schema_text: formatJson({ type: 'object', properties: { question: { type: 'string' } } }),
 			output_schema_text: formatJson({ type: 'object', properties: { sql: { type: 'string' } } }),
@@ -274,6 +296,20 @@
 			user_message: 'Investigate why provider latency is rising and recommend the next action.',
 			objective: 'Stabilize provider routing',
 			knowledge_base_id: '',
+			context_text: formatJson({
+				tool_inputs: {
+					'SQL Generator': {
+						question: 'Show the providers with the highest latency in the last 30 days',
+						dataset_name: 'provider_metrics'
+					},
+					'Ontology Mapper': {
+						answer: 'Create an incident linked to the degraded provider and notify platform ops.'
+					},
+					'Knowledge Search': {
+						query: 'provider reroute threshold'
+					}
+				}
+			}),
 		};
 	}
 
@@ -286,8 +322,10 @@
 			prompt_variables_text: formatJson({ team_name: 'Platform Ops' }),
 			knowledge_base_id: '',
 			preferred_provider_id: '',
+			attachments_text: formatJson([]),
 			max_tokens: 512,
 			fallback_enabled: true,
+			require_private_network: false,
 		};
 	}
 
@@ -308,6 +346,10 @@
 		return JSON.stringify(value, null, 2);
 	}
 
+	function parseAttachments(value: string): ChatAttachment[] {
+		return parseJson<ChatAttachment[]>(value, []);
+	}
+
 	function providerToDraft(provider: LlmProvider): ProviderDraft {
 		return {
 			id: provider.id,
@@ -323,6 +365,10 @@
 			cost_tier: provider.cost_tier,
 			tags_text: provider.tags.join(', '),
 			use_cases_text: provider.route_rules.use_cases.join(', '),
+			network_scope: provider.route_rules.network_scope,
+			supported_modalities_text: provider.route_rules.supported_modalities.join(', '),
+			input_cost_per_1k_tokens_usd: provider.route_rules.input_cost_per_1k_tokens_usd,
+			output_cost_per_1k_tokens_usd: provider.route_rules.output_cost_per_1k_tokens_usd,
 		};
 	}
 
@@ -359,6 +405,7 @@
 			description: tool.description,
 			category: tool.category,
 			execution_mode: tool.execution_mode,
+			execution_config_text: formatJson(tool.execution_config),
 			status: tool.status,
 			input_schema_text: formatJson(tool.input_schema),
 			output_schema_text: formatJson(tool.output_schema),
@@ -481,6 +528,10 @@
 				fallback_provider_ids: [],
 				weight: providerDraft.load_balance_weight,
 				max_context_tokens: 64000,
+				network_scope: providerDraft.network_scope,
+				supported_modalities: parseCsv(providerDraft.supported_modalities_text),
+				input_cost_per_1k_tokens_usd: providerDraft.input_cost_per_1k_tokens_usd,
+				output_cost_per_1k_tokens_usd: providerDraft.output_cost_per_1k_tokens_usd,
 			},
 		};
 	}
@@ -592,6 +643,7 @@
 				description: toolDraft.description,
 				category: toolDraft.category,
 				execution_mode: toolDraft.execution_mode,
+				execution_config: parseJson<Record<string, unknown>>(toolDraft.execution_config_text, {}),
 				status: toolDraft.status,
 				input_schema: parseJson<Record<string, unknown>>(toolDraft.input_schema_text, {}),
 				output_schema: parseJson<Record<string, unknown>>(toolDraft.output_schema_text, {}),
@@ -634,6 +686,7 @@
 				user_message: executionDraft.user_message,
 				objective: executionDraft.objective || undefined,
 				knowledge_base_id: executionDraft.knowledge_base_id || undefined,
+				context: parseJson<Record<string, unknown>>(executionDraft.context_text, {}),
 			});
 			notifications.success('Agent executed.');
 		});
@@ -647,6 +700,7 @@
 
 	async function sendChat() {
 		await runAction('chat', async () => {
+			benchmarkResponse = null;
 			chatResponse = await createChatCompletion({
 				conversation_id: chatDraft.conversation_id || undefined,
 				user_message: chatDraft.user_message,
@@ -655,8 +709,10 @@
 				prompt_variables: parseJson<Record<string, string>>(chatDraft.prompt_variables_text, {}),
 				knowledge_base_id: chatDraft.knowledge_base_id || undefined,
 				preferred_provider_id: chatDraft.preferred_provider_id || undefined,
+				attachments: parseAttachments(chatDraft.attachments_text),
 				max_tokens: chatDraft.max_tokens,
 				fallback_enabled: chatDraft.fallback_enabled,
+				require_private_network: chatDraft.require_private_network,
 			});
 			selectedConversationId = chatResponse.conversation_id;
 			chatDraft = { ...chatDraft, conversation_id: chatResponse.conversation_id };
@@ -672,11 +728,27 @@
 		});
 	}
 
+	async function runChatBenchmark() {
+		await runAction('benchmark', async () => {
+			benchmarkResponse = await runProviderBenchmark({
+				prompt: chatDraft.user_message,
+				system_prompt: chatDraft.system_prompt || undefined,
+				attachments: parseAttachments(chatDraft.attachments_text),
+				use_case: 'chat',
+				max_tokens: chatDraft.max_tokens,
+				require_private_network: chatDraft.require_private_network,
+			});
+			overview = await getOverview();
+			notifications.success('Provider benchmark completed.');
+		});
+	}
+
 	function resetConversation() {
 		selectedConversationId = '';
 		activeConversation = null;
 		chatDraft = createEmptyChatDraft();
 		chatResponse = null;
+		benchmarkResponse = null;
 	}
 
 	function openCopilot() {
@@ -720,6 +792,19 @@
 				<div class="mt-3 grid gap-3 md:grid-cols-2">
 					<input class="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm text-white placeholder:text-slate-200 outline-none" type="number" value={String(providerDraft.load_balance_weight)} oninput={(event) => providerDraft = { ...providerDraft, load_balance_weight: Number((event.currentTarget as HTMLInputElement).value) || 100 }} placeholder="Weight" />
 					<input class="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm text-white placeholder:text-slate-200 outline-none" type="number" value={String(providerDraft.max_output_tokens)} oninput={(event) => providerDraft = { ...providerDraft, max_output_tokens: Number((event.currentTarget as HTMLInputElement).value) || 2048 }} placeholder="Max tokens" />
+				</div>
+				<div class="mt-3 grid gap-3 md:grid-cols-2">
+					<select class="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm text-white outline-none" value={providerDraft.network_scope} onchange={(event) => providerDraft = { ...providerDraft, network_scope: (event.currentTarget as HTMLSelectElement).value }}>
+						<option value="public">public</option>
+						<option value="private">private</option>
+						<option value="hybrid">hybrid</option>
+						<option value="local">local</option>
+					</select>
+					<input class="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm text-white placeholder:text-slate-200 outline-none" value={providerDraft.supported_modalities_text} oninput={(event) => providerDraft = { ...providerDraft, supported_modalities_text: (event.currentTarget as HTMLInputElement).value }} placeholder="text, image, embedding" />
+				</div>
+				<div class="mt-3 grid gap-3 md:grid-cols-2">
+					<input class="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm text-white placeholder:text-slate-200 outline-none" type="number" step="0.0001" min="0" value={String(providerDraft.input_cost_per_1k_tokens_usd)} oninput={(event) => providerDraft = { ...providerDraft, input_cost_per_1k_tokens_usd: Number((event.currentTarget as HTMLInputElement).value) || 0 }} placeholder="Input $ / 1K" />
+					<input class="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm text-white placeholder:text-slate-200 outline-none" type="number" step="0.0001" min="0" value={String(providerDraft.output_cost_per_1k_tokens_usd)} oninput={(event) => providerDraft = { ...providerDraft, output_cost_per_1k_tokens_usd: Number((event.currentTarget as HTMLInputElement).value) || 0 }} placeholder="Output $ / 1K" />
 				</div>
 				<div class="mt-4 flex items-center justify-between gap-3">
 					<div class="flex items-center gap-2 text-sm text-slate-100">
@@ -841,10 +926,12 @@
 			knowledgeBases={knowledgeBases}
 			draft={chatDraft}
 			response={chatResponse}
+			benchmarkResponse={benchmarkResponse}
 			busy={busy}
 			onSelectConversation={(conversationId) => void refreshConversation(conversationId)}
 			onDraftChange={(draft) => chatDraft = draft}
 			onSend={sendChat}
+			onBenchmark={runChatBenchmark}
 			onResetConversation={resetConversation}
 		/>
 	{/if}

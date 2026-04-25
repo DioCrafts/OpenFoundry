@@ -1,16 +1,8 @@
 use auth_middleware::layer::AuthUser;
-use axum::{
-    Json,
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-};
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    AppState,
-    domain::security,
-};
+use crate::{AppState, domain::security};
 
 use super::common::json_error;
 
@@ -117,7 +109,9 @@ pub async fn verify_signature(
     .into_response()
 }
 
-fn require_security_write(claims: &auth_middleware::Claims) -> Result<(), axum::response::Response> {
+fn require_security_write(
+    claims: &auth_middleware::Claims,
+) -> Result<(), axum::response::Response> {
     if claims.has_role("admin") || claims.has_permission("control_panel", "write") {
         Ok(())
     } else {

@@ -106,7 +106,9 @@ fn build_preview(package: &FunctionPackage, request: &ValidateFunctionPackageReq
     })
 }
 
-fn parse_parameters(parameters: &Value) -> Result<std::collections::HashMap<String, Value>, String> {
+fn parse_parameters(
+    parameters: &Value,
+) -> Result<std::collections::HashMap<String, Value>, String> {
     let Some(parameters) = parameters.as_object() else {
         return Err("parameters must be a JSON object".to_string());
     };
@@ -138,6 +140,7 @@ fn synthetic_action(package: &FunctionPackage, object_type_id: Uuid) -> ActionTy
         config: json!({ "function_package_id": package.id }),
         confirmation_required: false,
         permission_key: None,
+        authorization_policy: Default::default(),
         owner_id: package.owner_id,
         created_at: package.created_at,
         updated_at: package.updated_at,
@@ -366,10 +369,7 @@ pub async fn simulate_function_package(
         Some(target_object_id) => match load_object_instance(&state.db, target_object_id).await {
             Ok(Some(object)) => {
                 if let Err(error) = ensure_object_access(&claims, &object) {
-                    return (
-                        StatusCode::FORBIDDEN,
-                        Json(json!({ "error": error })),
-                    )
+                    return (StatusCode::FORBIDDEN, Json(json!({ "error": error })))
                         .into_response();
                 }
                 Some(object)

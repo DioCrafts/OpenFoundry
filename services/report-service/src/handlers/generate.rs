@@ -41,7 +41,16 @@ pub async fn generate_report(
     let execution_id = uuid::Uuid::now_v7();
     let snapshot = data_fetcher::build_snapshot(&state, &report, &headers).await;
     let generated = generators::generate(&report, &snapshot, execution_id, generated_at);
-    let distributions = distribution::simulate_distribution(&report, generated_at);
+    let distributions = distribution::deliver_report(
+        &state,
+        &report,
+        execution_id,
+        generated_at,
+        &generated.preview,
+        &generated.artifact,
+        &generated.metrics,
+    )
+    .await;
     let preview = serde_json::to_value(&generated.preview)
         .map_err(|cause| internal_error(cause.to_string()))?;
     let artifact = serde_json::to_value(&generated.artifact)

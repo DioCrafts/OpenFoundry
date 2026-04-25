@@ -35,7 +35,7 @@
 		<button class="rounded-full border border-cyan-300 px-3 py-1.5 text-sm text-cyan-700 hover:bg-cyan-50 dark:border-cyan-800 dark:text-cyan-300 dark:hover:bg-cyan-950/40" onclick={() => onEvaluate?.()} disabled={busy}>Evaluate guardrails</button>
 	</div>
 
-	<div class="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+	<div class="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
 		<div class="rounded-2xl bg-slate-950 px-4 py-4 text-white">
 			<div class="text-[11px] uppercase tracking-[0.24em] text-slate-300">Providers</div>
 			<div class="mt-2 text-3xl font-semibold">{overview?.provider_count ?? 0}</div>
@@ -56,6 +56,11 @@
 			<div class="text-[11px] uppercase tracking-[0.24em] text-slate-500">Cache Hit Rate</div>
 			<div class="mt-2 text-3xl font-semibold text-slate-900 dark:text-slate-100">{overview ? `${Math.round(overview.cache_hit_rate * 100)}%` : '0%'}</div>
 		</div>
+		<div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 dark:border-slate-800 dark:bg-slate-900">
+			<div class="text-[11px] uppercase tracking-[0.24em] text-slate-500">LLM Cost</div>
+			<div class="mt-2 text-3xl font-semibold text-slate-900 dark:text-slate-100">${(overview?.estimated_llm_cost_usd ?? 0).toFixed(2)}</div>
+			<div class="mt-1 text-xs text-slate-500">{overview?.benchmark_run_count ?? 0} benchmarks</div>
+		</div>
 	</div>
 
 	<div class="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
@@ -75,6 +80,11 @@
 							<div>Latency: {provider.health_state.avg_latency_ms} ms</div>
 							<div>Error rate: {(provider.health_state.error_rate * 100).toFixed(1)}%</div>
 							<div>Weight: {provider.route_rules.weight}</div>
+						</div>
+						<div class="mt-2 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-3">
+							<div>Network: {provider.route_rules.network_scope}</div>
+							<div>Modalities: {provider.route_rules.supported_modalities.join(', ')}</div>
+							<div>Cost: ${provider.route_rules.input_cost_per_1k_tokens_usd.toFixed(4)} / ${provider.route_rules.output_cost_per_1k_tokens_usd.toFixed(4)}</div>
 						</div>
 					</div>
 				{/each}

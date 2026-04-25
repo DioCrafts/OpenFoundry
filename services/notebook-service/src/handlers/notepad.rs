@@ -1,10 +1,10 @@
+use auth_middleware::layer::AuthUser;
 use axum::{
     Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
 };
-use auth_middleware::layer::AuthUser;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -12,8 +12,8 @@ use crate::{
     AppState,
     domain::notepad,
     models::notepad::{
-        CreateNotepadDocumentRequest, ListNotepadDocumentsQuery, NotepadDocument,
-        NotepadPresence, UpdateNotepadDocumentRequest, UpsertNotepadPresenceRequest,
+        CreateNotepadDocumentRequest, ListNotepadDocumentsQuery, NotepadDocument, NotepadPresence,
+        UpdateNotepadDocumentRequest, UpsertNotepadPresenceRequest,
     },
 };
 

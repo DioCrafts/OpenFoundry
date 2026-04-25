@@ -22,3 +22,4 @@ uuid = { workspace = true }
 config = { workspace = true }
 reqwest = { workspace = true }
 event-bus = { workspace = true }
+redis = { workspace = true }

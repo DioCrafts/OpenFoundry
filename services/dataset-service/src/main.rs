@@ -43,30 +43,9 @@ async fn main() {
         .await
         .expect("failed to run migrations");
 
-    let jwt_config = JwtConfig::new(&cfg.jwt_secret);
+    let jwt_config = JwtConfig::new(&cfg.jwt_secret).with_env_defaults();
 
-    let storage: std::sync::Arc<dyn StorageBackend> = match cfg.storage_backend.as_str() {
-        "local" => {
-            let root = cfg
-                .local_storage_root
-                .as_deref()
-                .unwrap_or("/tmp/of-datasets");
-            std::sync::Arc::new(
-                storage_abstraction::local::LocalStorage::new(root)
-                    .expect("failed to init local storage"),
-            )
-        }
-        _ => std::sync::Arc::new(
-            storage_abstraction::s3::S3Storage::new(
-                &cfg.storage_bucket,
-                cfg.s3_region.as_deref().unwrap_or("us-east-1"),
-                cfg.s3_endpoint.as_deref(),
-                cfg.s3_access_key.as_deref().unwrap_or("minioadmin"),
-                cfg.s3_secret_key.as_deref().unwrap_or("minioadmin"),
-            )
-            .expect("failed to init S3 storage"),
-        ),
-    };
+    let storage = build_storage_backend(&cfg);
 
     let state = AppState {
         db: pool,
@@ -177,6 +156,10 @@ async fn main() {
             get(handlers::quality::get_dataset_quality),
         )
         .route(
+            "/api/v1/datasets/{id}/lint",
+            get(handlers::lint::get_dataset_lint),
+        )
+        .route(
             "/api/v1/datasets/{id}/quality/profile",
             post(handlers::quality::refresh_dataset_quality),
         )
@@ -210,4 +193,41 @@ async fn main() {
         .expect("failed to bind");
 
     axum::serve(listener, app).await.expect("server error");
+}
+
+fn build_storage_backend(cfg: &config::AppConfig) -> std::sync::Arc<dyn StorageBackend> {
+    match cfg.storage_backend.as_str() {
+        "local" => {
+            let root = cfg
+                .local_storage_root
+                .as_deref()
+                .unwrap_or("/tmp/of-datasets");
+            std::sync::Arc::new(
+                storage_abstraction::local::LocalStorage::new(root)
+                    .expect("failed to init local storage"),
+            )
+        }
+        "s3" => {
+            let access_key = cfg
+                .s3_access_key
+                .as_deref()
+                .expect("s3_access_key must be configured when storage_backend=s3");
+            let secret_key = cfg
+                .s3_secret_key
+                .as_deref()
+                .expect("s3_secret_key must be configured when storage_backend=s3");
+
+            std::sync::Arc::new(
+                storage_abstraction::s3::S3Storage::new(
+                    &cfg.storage_bucket,
+                    cfg.s3_region.as_deref().unwrap_or("us-east-1"),
+                    cfg.s3_endpoint.as_deref(),
+                    access_key,
+                    secret_key,
+                )
+                .expect("failed to init S3 storage"),
+            )
+        }
+        other => panic!("unsupported storage backend '{other}'"),
+    }
 }

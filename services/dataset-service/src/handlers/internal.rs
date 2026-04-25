@@ -15,6 +15,7 @@ pub struct InternalDatasetMetadata {
     pub id: Uuid,
     pub name: String,
     pub format: String,
+    pub marking: String,
     pub tags: Vec<String>,
     pub current_version: i32,
     pub active_branch: String,
@@ -35,6 +36,7 @@ pub async fn get_dataset_metadata(
             id: dataset.id,
             name: dataset.name,
             format: dataset.format,
+            marking: marking_from_tags(&dataset.tags),
             tags: dataset.tags,
             current_version: dataset.current_version,
             active_branch: dataset.active_branch,
@@ -47,5 +49,39 @@ pub async fn get_dataset_metadata(
             tracing::error!("internal dataset metadata lookup failed: {error}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
+    }
+}
+
+fn marking_from_tags(tags: &[String]) -> String {
+    for prefix in ["marking:", "classification:"] {
+        if let Some(marking) = tags
+            .iter()
+            .find_map(|tag| tag.strip_prefix(prefix).and_then(normalize_marking))
+        {
+            return marking.to_string();
+        }
+    }
+
+    if tags.iter().any(|tag| tag.eq_ignore_ascii_case("pii")) {
+        "pii".to_string()
+    } else if tags
+        .iter()
+        .any(|tag| tag.eq_ignore_ascii_case("confidential"))
+    {
+        "confidential".to_string()
+    } else {
+        "public".to_string()
+    }
+}
+
+fn normalize_marking(value: &str) -> Option<&'static str> {
+    if value.eq_ignore_ascii_case("public") {
+        Some("public")
+    } else if value.eq_ignore_ascii_case("confidential") {
+        Some("confidential")
+    } else if value.eq_ignore_ascii_case("pii") {
+        Some("pii")
+    } else {
+        None
     }
 }

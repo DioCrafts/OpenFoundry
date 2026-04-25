@@ -45,7 +45,7 @@ async fn main() {
         .await
         .expect("failed to run migrations");
 
-    let jwt_config = JwtConfig::new(&cfg.jwt_secret);
+    let jwt_config = JwtConfig::new(&cfg.jwt_secret).with_env_defaults();
     let http_client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .build()
@@ -81,6 +81,14 @@ async fn main() {
             post(handlers::streams::push_events),
         )
         .route(
+            "/api/v1/streaming/streams/{id}/dead-letters",
+            get(handlers::streams::list_dead_letters),
+        )
+        .route(
+            "/api/v1/streaming/dead-letters/{id}/replay",
+            post(handlers::streams::replay_dead_letter),
+        )
+        .route(
             "/api/v1/streaming/windows",
             get(handlers::streams::list_windows).post(handlers::streams::create_window),
         )
@@ -103,6 +111,10 @@ async fn main() {
         .route(
             "/api/v1/streaming/topologies/{id}/runtime",
             get(handlers::topologies::get_runtime),
+        )
+        .route(
+            "/api/v1/streaming/topologies/{id}/replay",
+            post(handlers::topologies::replay_topology),
         )
         .route(
             "/api/v1/streaming/connectors",

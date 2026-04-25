@@ -1,0 +1,48 @@
+global:
+  publicWebOrigin: https://eu.openfoundry.example.com
+  ingress:
+    enabled: true
+    className: nginx
+    hosts:
+      - host: eu.openfoundry.example.com
+        paths:
+          - path: /
+    tls:
+      - secretName: open-foundry-eu-tls
+        hosts:
+          - eu.openfoundry.example.com
+  deploymentFabric:
+    cloud: hybrid
+    environment: production
+    cell: eu-regulated
+    region: eu-west-1
+    geoRestrictions:
+      enabled: true
+      allowedCountries:
+        - ES
+        - FR
+        - DE
+        - IT
+        - NL
+      allowedIngressCidrs:
+        - 185.10.0.0/16
+        - 194.25.0.0/16
+      allowedEgressCidrs:
+        - 10.40.0.0/16
+        - 10.41.0.0/16
+      ingressAnnotations:
+        nginx.ingress.kubernetes.io/configuration-snippet: |
+          more_set_headers "X-OpenFoundry-Residency: eu-only";
+          more_set_headers "X-OpenFoundry-Geo-Scope: ES,FR,DE,IT,NL";
+      requiredNodeLabels:
+        topology.kubernetes.io/region: eu-west-1
+        openfoundry.io/residency: eu
+      residencyLabel: eu
+
+services:
+  gateway:
+    replicas: 3
+  dataset-service:
+    replicas: 3
+  query-service:
+    replicas: 3

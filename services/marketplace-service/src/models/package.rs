@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::models::decode_json;
+use crate::models::{decode_json, devops::PackagedResource};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -68,9 +68,11 @@ pub struct PackageVersion {
     pub id: Uuid,
     pub listing_id: Uuid,
     pub version: String,
+    pub release_channel: String,
     pub changelog: String,
     pub dependency_mode: String,
     pub dependencies: Vec<DependencyRequirement>,
+    pub packaged_resources: Vec<PackagedResource>,
     pub manifest: Value,
     pub published_at: DateTime<Utc>,
 }
@@ -78,11 +80,15 @@ pub struct PackageVersion {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublishVersionRequest {
     pub version: String,
+    #[serde(default = "default_release_channel")]
+    pub release_channel: String,
     pub changelog: String,
     #[serde(default = "default_dependency_mode")]
     pub dependency_mode: String,
     #[serde(default)]
     pub dependencies: Vec<DependencyRequirement>,
+    #[serde(default)]
+    pub packaged_resources: Vec<PackagedResource>,
     #[serde(default)]
     pub manifest: Value,
 }
@@ -92,9 +98,11 @@ pub struct PackageVersionRow {
     pub id: Uuid,
     pub listing_id: Uuid,
     pub version: String,
+    pub release_channel: String,
     pub changelog: String,
     pub dependency_mode: String,
     pub dependencies: Value,
+    pub packaged_resources: Value,
     pub manifest: Value,
     pub published_at: DateTime<Utc>,
 }
@@ -107,9 +115,11 @@ impl TryFrom<PackageVersionRow> for PackageVersion {
             id: row.id,
             listing_id: row.listing_id,
             version: row.version,
+            release_channel: row.release_channel,
             changelog: row.changelog,
             dependency_mode: row.dependency_mode,
             dependencies: decode_json(row.dependencies, "dependencies")?,
+            packaged_resources: decode_json(row.packaged_resources, "packaged_resources")?,
             manifest: row.manifest,
             published_at: row.published_at,
         })
@@ -118,4 +128,8 @@ impl TryFrom<PackageVersionRow> for PackageVersion {
 
 fn default_dependency_mode() -> String {
     "strict".to_string()
+}
+
+fn default_release_channel() -> String {
+    "stable".to_string()
 }

@@ -1,5 +1,8 @@
 {{- range $serviceName, $service := .Values.services }}
 {{- if $service.enabled }}
+{{- $globalNodeSelector := $.Values.global.deploymentFabric.geoRestrictions.requiredNodeLabels | default dict }}
+{{- $serviceNodeSelector := $service.nodeSelector | default dict }}
+{{- $nodeSelector := merge (dict) $globalNodeSelector $serviceNodeSelector }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -28,6 +31,12 @@ spec:
 {{- end }}
     spec:
       serviceAccountName: {{ include "open-foundry.serviceAccountName" (dict "root" $) }}
+{{- if gt (len $.Values.global.imagePullSecrets) 0 }}
+      imagePullSecrets:
+{{- range $.Values.global.imagePullSecrets }}
+        - name: {{ . | quote }}
+{{- end }}
+{{- end }}
       terminationGracePeriodSeconds: {{ default $.Values.global.terminationGracePeriodSeconds $service.terminationGracePeriodSeconds }}
       securityContext:
 {{ toYaml (default $.Values.global.podSecurityContext $service.podSecurityContext) | indent 8 }}
@@ -40,9 +49,9 @@ spec:
             matchLabels:
 {{ include "open-foundry.selectorLabels" (dict "root" $ "serviceName" $serviceName) | nindent 14 }}
 {{- end }}
-{{- with $service.nodeSelector }}
+{{- if gt (len $nodeSelector) 0 }}
       nodeSelector:
-{{ toYaml . | indent 8 }}
+{{ toYaml $nodeSelector | indent 8 }}
 {{- end }}
 {{- with $service.affinity }}
       affinity:
@@ -55,9 +64,12 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: platform-profile
+          configMap:
+            name: {{ include "open-foundry.platformProfileConfigMapName" (dict "root" $) }}
       containers:
         - name: {{ $serviceName }}
-          image: "{{ $service.image.repository }}:{{ $service.image.tag }}"
+          image: "{{ include "open-foundry.image" (dict "root" $ "repository" $service.image.repository "tag" $service.image.tag) }}"
           imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
           ports:
             - name: http
@@ -68,6 +80,30 @@ spec:
                 name: {{ $.Values.global.existingSecret }}
 {{- end }}
           env:
+            - name: OPENFOUNDRY_DEPLOYMENT_CLOUD
+              value: {{ $.Values.global.deploymentFabric.cloud | quote }}
+            - name: OPENFOUNDRY_DEPLOYMENT_ENVIRONMENT
+              value: {{ $.Values.global.deploymentFabric.environment | quote }}
+            - name: OPENFOUNDRY_DEPLOYMENT_REGION
+              value: {{ $.Values.global.deploymentFabric.region | quote }}
+            - name: OPENFOUNDRY_DEPLOYMENT_CELL
+              value: {{ $.Values.global.deploymentFabric.cell | quote }}
+            - name: OPENFOUNDRY_ACTIVE_CLOUD_PROVIDER
+              value: {{ $.Values.global.deploymentFabric.multiCloud.activeProvider | quote }}
+            - name: OPENFOUNDRY_AIRGAPPED
+              value: {{ ternary "true" "false" $.Values.global.deploymentFabric.airGap.enabled | quote }}
+            - name: OPENFOUNDRY_RELEASE_BUNDLE
+              value: {{ $.Values.global.deploymentFabric.airGap.releaseBundle | quote }}
+            - name: OPENFOUNDRY_ALLOWED_GEO_COUNTRIES
+              value: {{ join "," $.Values.global.deploymentFabric.geoRestrictions.allowedCountries | quote }}
+            - name: OPENFOUNDRY_RESIDENCY_LABEL
+              value: {{ $.Values.global.deploymentFabric.geoRestrictions.residencyLabel | quote }}
+            - name: OPENFOUNDRY_APOLLO_ENABLED
+              value: {{ ternary "true" "false" $.Values.apollo.enabled | quote }}
+            - name: OPENFOUNDRY_APOLLO_ACTION_MODE
+              value: {{ $.Values.apollo.actionMode | quote }}
+            - name: OPENFOUNDRY_PLATFORM_PROFILE_PATH
+              value: "/etc/openfoundry/platform-profile/deployment-fabric.yaml"
 {{- range $envKey, $envValue := $service.env }}
             - name: {{ $envKey }}
               value: {{ $envValue | quote }}
@@ -105,6 +141,9 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: platform-profile
+              mountPath: /etc/openfoundry/platform-profile
+              readOnly: true
           securityContext:
 {{ toYaml (default $.Values.global.containerSecurityContext $service.containerSecurityContext) | indent 12 }}
 {{- if $.Values.global.probes.readiness.enabled }}

@@ -1,6 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
@@ -12,8 +12,9 @@ use crate::{
     },
     handlers::objects::ObjectInstance,
     models::rule::{
-        MachineryInsight, OntologyRule, OntologyRuleRow, OntologyRuleRun, RuleEffectSpec,
-        RuleEvaluateResponse, RuleMatchResponse, RuleTriggerSpec,
+        MachineryCapabilityLoad, MachineryInsight, MachineryQueueItem,
+        MachineryQueueRecommendation, MachineryQueueResponse, OntologyRule, OntologyRuleRow,
+        OntologyRuleRun, RuleEffectSpec, RuleEvaluateResponse, RuleMatchResponse, RuleTriggerSpec,
     },
 };
 
@@ -97,7 +98,11 @@ pub async fn validate_rule_definition(
         }
     }
 
-    for property_name in trigger_spec.exists.iter().chain(trigger_spec.changed_properties.iter()) {
+    for property_name in trigger_spec
+        .exists
+        .iter()
+        .chain(trigger_spec.changed_properties.iter())
+    {
         if !property_types.contains_key(property_name) {
             return Err(invalid_rule(format!(
                 "unknown property '{property_name}' in trigger specification"
@@ -161,13 +166,50 @@ pub async fn validate_rule_definition(
                 "schedule.offset_hours must not be zero so the schedule can move in time",
             ));
         }
+
+        if let Some(priority_score) = schedule.priority_score {
+            if !(0..=100).contains(&priority_score) {
+                return Err(invalid_rule(
+                    "schedule.priority_score must be between 0 and 100",
+                ));
+            }
+        }
+
+        if let Some(estimated_duration_minutes) = schedule.estimated_duration_minutes {
+            if estimated_duration_minutes <= 0 {
+                return Err(invalid_rule(
+                    "schedule.estimated_duration_minutes must be greater than zero",
+                ));
+            }
+        }
+
+        if let Some(required_capability) = &schedule.required_capability {
+            if required_capability.trim().is_empty() {
+                return Err(invalid_rule(
+                    "schedule.required_capability must not be empty when provided",
+                ));
+            }
+        }
+
+        if let Some(hard_deadline_hours) = schedule.hard_deadline_hours {
+            if hard_deadline_hours == 0 {
+                return Err(invalid_rule(
+                    "schedule.hard_deadline_hours must not be zero when provided",
+                ));
+            }
+        }
     }
 
     if let Some(alert) = &effect_spec.alert {
         if alert.title.trim().is_empty() {
-            return Err(invalid_rule("alert.title is required when alert is configured"));
+            return Err(invalid_rule(
+                "alert.title is required when alert is configured",
+            ));
         }
-        if !matches!(alert.severity.as_str(), "low" | "medium" | "high" | "critical") {
+        if !matches!(
+            alert.severity.as_str(),
+            "low" | "medium" | "high" | "critical"
+        ) {
             return Err(invalid_rule(
                 "alert.severity must be one of low, medium, high, critical",
             ));
@@ -274,7 +316,10 @@ fn matches_numeric_thresholds(
         let Some(value) = properties.get(key) else {
             return Err(format!("property '{key}' is missing for {label}"));
         };
-        let Some(number) = value.as_f64().or_else(|| value.as_i64().map(|value| value as f64)) else {
+        let Some(number) = value
+            .as_f64()
+            .or_else(|| value.as_i64().map(|value| value as f64))
+        else {
             return Err(format!("property '{key}' is not numeric for {label}"));
         };
         if !comparator(number, *threshold) {
@@ -286,10 +331,7 @@ fn matches_numeric_thresholds(
     Ok(())
 }
 
-fn build_rule_effect_preview(
-    effect_spec: &RuleEffectSpec,
-    object: &ObjectInstance,
-) -> Value {
+fn build_rule_effect_preview(effect_spec: &RuleEffectSpec, object: &ObjectInstance) -> Value {
     let mut object_patch = effect_spec
         .object_patch
         .as_ref()
@@ -299,11 +341,22 @@ fn build_rule_effect_preview(
 
     let schedule_preview = effect_spec.schedule.as_ref().map(|schedule| {
         let scheduled_at = (Utc::now() + Duration::hours(schedule.offset_hours)).to_rfc3339();
-        object_patch.insert(schedule.property_name.clone(), Value::String(scheduled_at.clone()));
+        let hard_deadline_at = schedule
+            .hard_deadline_hours
+            .map(|hours| (Utc::now() + Duration::hours(hours)).to_rfc3339());
+        object_patch.insert(
+            schedule.property_name.clone(),
+            Value::String(scheduled_at.clone()),
+        );
         json!({
             "property_name": schedule.property_name,
             "scheduled_at": scheduled_at,
             "offset_hours": schedule.offset_hours,
+            "priority_score": schedule.priority_score.unwrap_or(50),
+            "estimated_duration_minutes": schedule.estimated_duration_minutes.unwrap_or(30),
+            "required_capability": schedule.required_capability,
+            "constraint_tags": schedule.constraint_tags,
+            "hard_deadline_at": hard_deadline_at,
         })
     });
 
@@ -319,6 +372,49 @@ fn build_rule_effect_preview(
         "alert": effect_spec.alert,
         "object_id": object.id,
     })
+}
+
+fn derived_priority_score(object: &ObjectInstance, effect_preview: &Value) -> i32 {
+    let explicit = effect_preview
+        .get("schedule")
+        .and_then(|schedule| schedule.get("priority_score"))
+        .and_then(Value::as_i64)
+        .map(|value| value as i32)
+        .unwrap_or(50);
+    let risk_boost = object
+        .properties
+        .get("risk_score")
+        .and_then(Value::as_f64)
+        .map(|value| (value * 20.0).round() as i32)
+        .unwrap_or(0);
+    let severity_boost = match effect_preview
+        .get("alert")
+        .and_then(|alert| alert.get("severity"))
+        .and_then(Value::as_str)
+    {
+        Some("critical") => 25,
+        Some("high") => 18,
+        Some("medium") => 10,
+        Some("low") => 4,
+        _ => 0,
+    };
+    let marking_boost = match object.marking.as_str() {
+        "pii" => 18,
+        "confidential" => 10,
+        _ => 0,
+    };
+
+    (explicit + risk_boost + severity_boost + marking_boost).clamp(0, 100)
+}
+
+fn dynamic_pressure_from_queue(queue_depth: usize, overdue_count: usize) -> String {
+    if overdue_count > 0 || queue_depth >= 8 {
+        "high".to_string()
+    } else if queue_depth >= 3 {
+        "medium".to_string()
+    } else {
+        "low".to_string()
+    }
 }
 
 pub fn evaluate_rule_against_object(
@@ -476,6 +572,282 @@ pub async fn record_rule_run(
     .map_err(|error| format!("failed to record rule run: {error}"))
 }
 
+pub async fn enqueue_rule_schedule(
+    state: &AppState,
+    rule: &OntologyRule,
+    object: &ObjectInstance,
+    rule_run_id: Uuid,
+    effect_preview: &Value,
+    created_by: Uuid,
+) -> Result<Option<MachineryQueueItem>, String> {
+    let Some(schedule) = effect_preview.get("schedule") else {
+        return Ok(None);
+    };
+
+    let scheduled_for = schedule
+        .get("scheduled_at")
+        .and_then(Value::as_str)
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.with_timezone(&Utc))
+        .ok_or_else(|| {
+            "rule schedule preview is missing a valid scheduled_at timestamp".to_string()
+        })?;
+    let priority_score = derived_priority_score(object, effect_preview);
+    let estimated_duration_minutes = schedule
+        .get("estimated_duration_minutes")
+        .and_then(Value::as_i64)
+        .map(|value| value as i32)
+        .unwrap_or(30)
+        .max(1);
+    let required_capability = schedule
+        .get("required_capability")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .filter(|value| !value.trim().is_empty());
+    let constraint_snapshot = json!({
+        "marking": object.marking,
+        "organization_id": object.organization_id,
+        "risk_score": object.properties.get("risk_score").cloned().unwrap_or(Value::Null),
+        "constraint_tags": schedule.get("constraint_tags").cloned().unwrap_or_else(|| json!([])),
+        "hard_deadline_at": schedule.get("hard_deadline_at").cloned().unwrap_or(Value::Null),
+        "source": "ontology-rule",
+    });
+
+    let schedule_id = Uuid::now_v7();
+
+    let row = sqlx::query_as::<_, MachineryQueueItem>(
+        r#"INSERT INTO ontology_rule_schedules (
+               id, rule_id, rule_run_id, object_id, status, scheduled_for, priority_score,
+               estimated_duration_minutes, required_capability, constraint_snapshot, created_by
+           )
+           VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7, $8, $9::jsonb, $10)
+           RETURNING
+               id,
+               rule_id,
+               rule_run_id,
+               object_id,
+               $11 AS rule_name,
+               $12 AS rule_display_name,
+               $13 AS object_type_id,
+               status,
+               scheduled_for,
+               priority_score,
+               estimated_duration_minutes,
+               required_capability,
+               constraint_snapshot,
+               created_by,
+               created_at,
+               updated_at,
+               started_at,
+               completed_at"#,
+    )
+    .bind(schedule_id)
+    .bind(rule.id)
+    .bind(rule_run_id)
+    .bind(object.id)
+    .bind(scheduled_for)
+    .bind(priority_score)
+    .bind(estimated_duration_minutes)
+    .bind(required_capability)
+    .bind(constraint_snapshot)
+    .bind(created_by)
+    .bind(&rule.name)
+    .bind(&rule.display_name)
+    .bind(object.object_type_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|error| format!("failed to enqueue machinery schedule: {error}"))?;
+
+    Ok(Some(row))
+}
+
+pub async fn machinery_queue(
+    state: &AppState,
+    object_type_id: Option<Uuid>,
+) -> Result<MachineryQueueResponse, String> {
+    let rows = if let Some(object_type_id) = object_type_id {
+        sqlx::query_as::<_, MachineryQueueItem>(
+            r#"SELECT
+                   schedule.id,
+                   schedule.rule_id,
+                   schedule.rule_run_id,
+                   schedule.object_id,
+                   rules.name AS rule_name,
+                   rules.display_name AS rule_display_name,
+                   rules.object_type_id,
+                   schedule.status,
+                   schedule.scheduled_for,
+                   schedule.priority_score,
+                   schedule.estimated_duration_minutes,
+                   schedule.required_capability,
+                   schedule.constraint_snapshot,
+                   schedule.created_by,
+                   schedule.created_at,
+                   schedule.updated_at,
+                   schedule.started_at,
+                   schedule.completed_at
+               FROM ontology_rule_schedules AS schedule
+               INNER JOIN ontology_rules AS rules ON rules.id = schedule.rule_id
+               WHERE rules.object_type_id = $1
+               ORDER BY schedule.scheduled_for ASC, schedule.priority_score DESC, schedule.created_at ASC"#,
+        )
+        .bind(object_type_id)
+        .fetch_all(&state.db)
+        .await
+        .map_err(|error| format!("failed to load machinery queue: {error}"))?
+    } else {
+        sqlx::query_as::<_, MachineryQueueItem>(
+            r#"SELECT
+                   schedule.id,
+                   schedule.rule_id,
+                   schedule.rule_run_id,
+                   schedule.object_id,
+                   rules.name AS rule_name,
+                   rules.display_name AS rule_display_name,
+                   rules.object_type_id,
+                   schedule.status,
+                   schedule.scheduled_for,
+                   schedule.priority_score,
+                   schedule.estimated_duration_minutes,
+                   schedule.required_capability,
+                   schedule.constraint_snapshot,
+                   schedule.created_by,
+                   schedule.created_at,
+                   schedule.updated_at,
+                   schedule.started_at,
+                   schedule.completed_at
+               FROM ontology_rule_schedules AS schedule
+               INNER JOIN ontology_rules AS rules ON rules.id = schedule.rule_id
+               ORDER BY schedule.scheduled_for ASC, schedule.priority_score DESC, schedule.created_at ASC"#,
+        )
+        .fetch_all(&state.db)
+        .await
+        .map_err(|error| format!("failed to load machinery queue: {error}"))?
+    };
+
+    let now = Utc::now();
+    let mut recommended_rows = rows
+        .iter()
+        .filter(|row| matches!(row.status.as_str(), "pending" | "in_progress"))
+        .cloned()
+        .collect::<Vec<_>>();
+    recommended_rows.sort_by(|left, right| {
+        let left_overdue = left.scheduled_for <= now && left.status == "pending";
+        let right_overdue = right.scheduled_for <= now && right.status == "pending";
+        right_overdue
+            .cmp(&left_overdue)
+            .then(right.priority_score.cmp(&left.priority_score))
+            .then(left.scheduled_for.cmp(&right.scheduled_for))
+            .then(left.created_at.cmp(&right.created_at))
+    });
+
+    let queue_depth = recommended_rows.len();
+    let overdue_count = recommended_rows
+        .iter()
+        .filter(|row| row.scheduled_for <= now && row.status == "pending")
+        .count();
+    let total_estimated_minutes = recommended_rows
+        .iter()
+        .map(|row| row.estimated_duration_minutes.max(0) as usize)
+        .sum();
+    let next_due_at = recommended_rows.iter().map(|row| row.scheduled_for).min();
+
+    let mut capability_load = BTreeMap::<String, MachineryCapabilityLoad>::new();
+    for row in &recommended_rows {
+        let capability = row
+            .required_capability
+            .clone()
+            .unwrap_or_else(|| "general".to_string());
+        let entry = capability_load
+            .entry(capability.clone())
+            .or_insert(MachineryCapabilityLoad {
+                capability,
+                pending_count: 0,
+                total_estimated_minutes: 0,
+            });
+        entry.pending_count += 1;
+        entry.total_estimated_minutes += row.estimated_duration_minutes.max(0) as usize;
+    }
+    let mut capability_load = capability_load.into_values().collect::<Vec<_>>();
+    capability_load.sort_by(|left, right| {
+        right.pending_count.cmp(&left.pending_count).then(
+            right
+                .total_estimated_minutes
+                .cmp(&left.total_estimated_minutes),
+        )
+    });
+
+    Ok(MachineryQueueResponse {
+        object_type_id,
+        data: rows,
+        recommendation: MachineryQueueRecommendation {
+            generated_at: now,
+            strategy: "priority+deadline+constraint-aware".to_string(),
+            queue_depth,
+            overdue_count,
+            total_estimated_minutes,
+            next_due_at,
+            recommended_order: recommended_rows.iter().map(|row| row.id).collect(),
+            capability_load,
+        },
+    })
+}
+
+pub async fn transition_machinery_queue_item(
+    state: &AppState,
+    schedule_id: Uuid,
+    status: &str,
+) -> Result<Option<MachineryQueueItem>, String> {
+    if !matches!(
+        status,
+        "pending" | "in_progress" | "completed" | "cancelled"
+    ) {
+        return Err("unsupported machinery queue status".to_string());
+    }
+
+    sqlx::query_as::<_, MachineryQueueItem>(
+        r#"UPDATE ontology_rule_schedules AS schedule
+           SET status = $2,
+               updated_at = NOW(),
+               started_at = CASE
+                   WHEN $2 = 'in_progress' AND schedule.started_at IS NULL THEN NOW()
+                   ELSE schedule.started_at
+               END,
+               completed_at = CASE
+                   WHEN $2 = 'completed' THEN NOW()
+                   WHEN $2 IN ('pending', 'in_progress') THEN NULL
+                   ELSE schedule.completed_at
+               END
+           FROM ontology_rules AS rules
+           WHERE schedule.id = $1
+             AND rules.id = schedule.rule_id
+           RETURNING
+               schedule.id,
+               schedule.rule_id,
+               schedule.rule_run_id,
+               schedule.object_id,
+               rules.name AS rule_name,
+               rules.display_name AS rule_display_name,
+               rules.object_type_id,
+               schedule.status,
+               schedule.scheduled_for,
+               schedule.priority_score,
+               schedule.estimated_duration_minutes,
+               schedule.required_capability,
+               schedule.constraint_snapshot,
+               schedule.created_by,
+               schedule.created_at,
+               schedule.updated_at,
+               schedule.started_at,
+               schedule.completed_at"#,
+    )
+    .bind(schedule_id)
+    .bind(status)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| format!("failed to transition machinery queue item: {error}"))
+}
+
 pub async fn evaluate_rules_for_object(
     state: &AppState,
     object: &ObjectInstance,
@@ -567,21 +939,77 @@ pub async fn machinery_insights(
         grouped_runs.entry(run.rule_id).or_default().push(run);
     }
 
+    let schedules = sqlx::query_as::<_, MachineryQueueItem>(
+        r#"SELECT
+               schedule.id,
+               schedule.rule_id,
+               schedule.rule_run_id,
+               schedule.object_id,
+               rules.name AS rule_name,
+               rules.display_name AS rule_display_name,
+               rules.object_type_id,
+               schedule.status,
+               schedule.scheduled_for,
+               schedule.priority_score,
+               schedule.estimated_duration_minutes,
+               schedule.required_capability,
+               schedule.constraint_snapshot,
+               schedule.created_by,
+               schedule.created_at,
+               schedule.updated_at,
+               schedule.started_at,
+               schedule.completed_at
+           FROM ontology_rule_schedules AS schedule
+           INNER JOIN ontology_rules AS rules ON rules.id = schedule.rule_id
+           WHERE schedule.rule_id = ANY($1)
+           ORDER BY schedule.created_at DESC"#,
+    )
+    .bind(&rule_ids)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|error| format!("failed to load machinery schedules: {error}"))?;
+
+    let mut grouped_schedules = HashMap::<Uuid, Vec<MachineryQueueItem>>::new();
+    for schedule in schedules {
+        grouped_schedules
+            .entry(schedule.rule_id)
+            .or_default()
+            .push(schedule);
+    }
+
     Ok(rules
         .into_iter()
         .map(|rule| {
             let runs = grouped_runs.remove(&rule.id).unwrap_or_default();
+            let schedules = grouped_schedules.remove(&rule.id).unwrap_or_default();
             let matched_runs = runs.iter().filter(|run| run.matched).count();
-            let pending_schedules = runs
+            let pending_schedules = schedules
                 .iter()
-                .filter(|run| {
-                    run.effect_preview
-                        .as_ref()
-                        .and_then(|preview| preview.get("schedule"))
-                        .is_some()
+                .filter(|schedule| matches!(schedule.status.as_str(), "pending" | "in_progress"))
+                .count();
+            let overdue_schedules = schedules
+                .iter()
+                .filter(|schedule| {
+                    schedule.status == "pending" && schedule.scheduled_for <= Utc::now()
                 })
                 .count();
+            let avg_schedule_lead_hours = if schedules.is_empty() {
+                None
+            } else {
+                Some(
+                    schedules
+                        .iter()
+                        .map(|schedule| {
+                            (schedule.scheduled_for - schedule.created_at).num_minutes() as f64
+                                / 60.0
+                        })
+                        .sum::<f64>()
+                        / schedules.len() as f64,
+                )
+            };
             let last_matched = runs.iter().find(|run| run.matched);
+            let dynamic_pressure =
+                dynamic_pressure_from_queue(pending_schedules, overdue_schedules);
 
             MachineryInsight {
                 rule_id: rule.id,
@@ -591,6 +1019,9 @@ pub async fn machinery_insights(
                 matched_runs,
                 total_runs: runs.len(),
                 pending_schedules,
+                overdue_schedules,
+                avg_schedule_lead_hours,
+                dynamic_pressure,
                 last_matched_at: last_matched.map(|run| run.created_at),
                 last_object_id: last_matched.map(|run| run.object_id),
             }
@@ -653,7 +1084,9 @@ mod tests {
             object_type_id: Uuid::nil(),
             evaluation_mode: RuleEvaluationMode::Advisory,
             trigger_spec: RuleTriggerSpec {
-                equals: [("status".to_string(), json!("pending"))].into_iter().collect(),
+                equals: [("status".to_string(), json!("pending"))]
+                    .into_iter()
+                    .collect(),
                 numeric_gte: [("risk_score".to_string(), 0.8)].into_iter().collect(),
                 numeric_lte: HashMap::new(),
                 exists: vec![],

@@ -21,9 +21,13 @@ pub async fn search_ontology(
         return Ok(Vec::new());
     }
 
-    let documents =
-        indexer::build_search_documents(state, claims, request.object_type_id, request.kind.as_deref())
-            .await?;
+    let documents = indexer::build_search_documents(
+        state,
+        claims,
+        request.object_type_id,
+        request.kind.as_deref(),
+    )
+    .await?;
     let semantic_enabled = request.semantic.unwrap_or(true);
     let limit = request.limit.unwrap_or(25).clamp(1, 100);
 

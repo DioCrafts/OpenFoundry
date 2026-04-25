@@ -131,7 +131,7 @@
 		if ($isAuthenticated && $token) {
 			void loadInbox();
 			void loadPreferences();
-			notificationWebsocket.connect($token, applySocketEvent);
+			void notificationWebsocket.connect($token, applySocketEvent);
 
 			return () => notificationWebsocket.disconnect();
 		}

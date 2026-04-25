@@ -8,6 +8,7 @@
     createDatasetQualityRule,
     deleteDatasetQualityRule,
     getDataset,
+    getDatasetLint,
     getDatasetQuality,
     getVersions,
     listBranches,
@@ -19,6 +20,7 @@
     type CreateDatasetQualityRuleParams,
     type Dataset,
     type DatasetColumnProfile,
+    type DatasetLintResponse,
     type DatasetQualityResponse,
     type DatasetQualityRule,
     type DatasetRuleResult,
@@ -34,16 +36,19 @@
   let branches = $state<DatasetBranch[]>([]);
   let users = $state<UserProfile[]>([]);
   let quality = $state<DatasetQualityResponse | null>(null);
+  let lint = $state<DatasetLintResponse | null>(null);
   let loading = $state(true);
-  let activeTab = $state<'schema' | 'versions' | 'branches' | 'preview' | 'quality'>('quality');
+  let activeTab = $state<'schema' | 'versions' | 'branches' | 'preview' | 'quality' | 'linter'>('quality');
   let descriptionInput = $state('');
   let tagsInput = $state('');
   let ownerId = $state('');
   let metadataError = $state('');
   let qualityError = $state('');
+  let lintError = $state('');
   let branchError = $state('');
   let savingMetadata = $state(false);
   let refreshingQuality = $state(false);
+  let refreshingLint = $state(false);
   let creatingBranch = $state(false);
   let checkingOutBranch = $state('');
   let savingRule = $state(false);
@@ -94,6 +99,23 @@
     return 'text-rose-600 dark:text-rose-300';
   }
 
+  function severityBadge(severity: string) {
+    if (severity === 'high') return 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300';
+    if (severity === 'medium') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300';
+    return 'bg-slate-100 text-slate-700 dark:bg-gray-800 dark:text-gray-300';
+  }
+
+  function postureBadge(posture: string) {
+    if (posture === 'critical') return 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300';
+    if (posture === 'optimize') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300';
+    if (posture === 'watch') return 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300';
+    return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300';
+  }
+
+  function findingsBySeverity(severity: string) {
+    return lint?.findings.filter((finding) => finding.severity === severity).length ?? 0;
+  }
+
   function parseTags(value: string) {
     return value.split(',').map((tag) => tag.trim()).filter(Boolean);
   }
@@ -108,6 +130,19 @@
 
   function ruleResultFor(rule: DatasetQualityRule): DatasetRuleResult | undefined {
     return quality?.profile?.rule_results.find((result) => result.rule_id === rule.id);
+  }
+
+  async function refreshLintState(datasetIdToLoad: string, silent = false) {
+    if (!datasetIdToLoad) return;
+    if (!silent) refreshingLint = true;
+    lintError = '';
+    try {
+      lint = await getDatasetLint(datasetIdToLoad);
+    } catch (cause) {
+      lintError = cause instanceof Error ? cause.message : 'Failed to refresh dataset linter';
+    } finally {
+      if (!silent) refreshingLint = false;
+    }
   }
 
   function resetRuleForm() {
@@ -208,18 +243,20 @@
   async function load() {
     loading = true;
     try {
-      const [nextDataset, nextVersions, nextBranches, nextUsers, nextQuality] = await Promise.all([
+      const [nextDataset, nextVersions, nextBranches, nextUsers, nextQuality, nextLint] = await Promise.all([
         getDataset(datasetId),
         getVersions(datasetId),
         listBranches(datasetId).catch(() => [] as DatasetBranch[]),
         listUsers().catch(() => [] as UserProfile[]),
         getDatasetQuality(datasetId).catch(() => null as DatasetQualityResponse | null),
+        getDatasetLint(datasetId).catch(() => null as DatasetLintResponse | null),
       ]);
       dataset = nextDataset;
       versions = nextVersions;
       branches = nextBranches;
       users = nextUsers;
       quality = nextQuality;
+      lint = nextLint;
       descriptionInput = nextDataset.description;
       tagsInput = nextDataset.tags.join(', ');
       ownerId = nextDataset.owner_id;
@@ -244,6 +281,7 @@
         owner_id: ownerId || undefined,
         tags: parseTags(tagsInput),
       });
+      await refreshLintState(dataset.id, true);
     } catch (cause) {
       metadataError = cause instanceof Error ? cause.message : 'Failed to save metadata';
     } finally {
@@ -258,6 +296,7 @@
     try {
       quality = await refreshDatasetQualityProfile(dataset.id);
       dataset = await getDataset(dataset.id);
+      await refreshLintState(dataset.id, true);
       if (!columnName) {
         columnName = quality.profile?.columns[0]?.name ?? '';
       }
@@ -280,6 +319,7 @@
       };
       await createDatasetBranch(dataset.id, payload);
       branches = await listBranches(dataset.id);
+      await refreshLintState(dataset.id, true);
       branchName = 'feature-experiment';
       branchDescription = '';
     } catch (cause) {
@@ -297,6 +337,7 @@
       dataset = await checkoutDatasetBranch(dataset.id, name);
       branches = await listBranches(dataset.id);
       versions = await getVersions(dataset.id);
+      await refreshLintState(dataset.id, true);
       branchSourceVersion = String(dataset.current_version);
     } catch (cause) {
       branchError = cause instanceof Error ? cause.message : 'Failed to switch branch';
@@ -314,6 +355,7 @@
       quality = ruleFormMode === 'edit' && editingRuleId
         ? await updateDatasetQualityRule(dataset.id, editingRuleId, payload)
         : await createDatasetQualityRule(dataset.id, payload);
+      await refreshLintState(dataset.id, true);
       resetRuleForm();
     } catch (cause) {
       qualityError = cause instanceof Error ? cause.message : 'Failed to save quality rule';
@@ -327,6 +369,7 @@
     qualityError = '';
     try {
       quality = await deleteDatasetQualityRule(dataset.id, ruleId);
+      await refreshLintState(dataset.id, true);
       if (editingRuleId === ruleId) {
         resetRuleForm();
       }
@@ -468,6 +511,13 @@
           class:border-transparent={activeTab !== 'quality'}
           onclick={() => activeTab = 'quality'}
         >Quality</button>
+        <button
+          class="border-b-2 pb-2 px-1 text-sm font-medium transition-colors"
+          class:border-blue-600={activeTab === 'linter'}
+          class:text-blue-600={activeTab === 'linter'}
+          class:border-transparent={activeTab !== 'linter'}
+          onclick={() => activeTab = 'linter'}
+        >Linter{#if lint?.summary.total_findings} ({lint.summary.total_findings}){/if}</button>
       </nav>
     </div>
 
@@ -572,7 +622,7 @@
           </div>
         </div>
       </div>
-    {:else}
+    {:else if activeTab === 'quality'}
       <div class="space-y-6">
         <div class="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-900 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -807,6 +857,171 @@
             </div>
           </div>
         </div>
+      </div>
+    {:else}
+      <div class="space-y-6">
+        <div class="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-900 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div class="text-xs uppercase tracking-[0.22em] text-gray-400">Dataset Linter</div>
+            <div class="mt-1 text-sm text-gray-500">Anti-pattern analysis for filesystem layout, enrollment churn, quality coverage, and derived artifact pressure.</div>
+          </div>
+          <button onclick={() => refreshLintState(datasetId)} disabled={refreshingLint} class="rounded-xl bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50 dark:bg-white dark:text-slate-900">
+            {refreshingLint ? 'Refreshing...' : 'Refresh Analysis'}
+          </button>
+        </div>
+
+        {#if lintError}
+          <div class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-300">{lintError}</div>
+        {/if}
+
+        {#if !lint}
+          <div class="rounded-2xl border border-dashed border-slate-300 px-6 py-10 text-center text-gray-500 dark:border-gray-700">
+            The dataset linter could not load yet.
+          </div>
+        {:else}
+          <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+              <div class="text-xs uppercase tracking-[0.22em] text-gray-400">Resource Posture</div>
+              <div class="mt-3 flex items-center gap-3">
+                <span class={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${postureBadge(lint.summary.resource_posture)}`}>
+                  {lint.summary.resource_posture}
+                </span>
+                <span class="text-sm text-gray-500">{new Date(lint.analyzed_at).toLocaleString()}</span>
+              </div>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+              <div class="text-xs uppercase tracking-[0.22em] text-gray-400">Findings</div>
+              <div class="mt-3 text-3xl font-semibold">{lint.summary.total_findings}</div>
+              <div class="mt-2 flex flex-wrap gap-2 text-xs text-gray-500">
+                <span>{findingsBySeverity('high')} high</span>
+                <span>{findingsBySeverity('medium')} medium</span>
+                <span>{findingsBySeverity('low')} low</span>
+              </div>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+              <div class="text-xs uppercase tracking-[0.22em] text-gray-400">Filesystem Layout</div>
+              <div class="mt-3 text-3xl font-semibold">{lint.summary.object_count}</div>
+              <div class="mt-2 text-sm text-gray-500">
+                {lint.summary.small_file_count} small files · avg {(lint.summary.average_object_size_bytes / (1024 * 1024)).toFixed(1)} MB
+              </div>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+              <div class="text-xs uppercase tracking-[0.22em] text-gray-400">Lifecycle Pressure</div>
+              <div class="mt-3 text-3xl font-semibold">{lint.summary.tracked_versions}</div>
+              <div class="mt-2 text-sm text-gray-500">
+                {lint.summary.branch_count} branches · {lint.summary.materialized_view_count} materialized views
+              </div>
+            </div>
+          </div>
+
+          <div class="grid gap-6 xl:grid-cols-[1.15fr,0.85fr]">
+            <div class="space-y-4">
+              <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+                <div class="flex items-center justify-between">
+                  <h2 class="text-lg font-semibold">Findings</h2>
+                  <div class="text-sm text-gray-500">
+                    {lint.summary.enabled_rule_count} quality rules · {lint.summary.active_alert_count} active alerts
+                  </div>
+                </div>
+
+                <div class="mt-4 space-y-4">
+                  {#if lint.findings.length === 0}
+                    <div class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-300">
+                      No anti-patterns detected from the current dataset metadata, filesystem layout, quality state, and transaction history.
+                    </div>
+                  {:else}
+                    {#each lint.findings as finding (finding.code)}
+                      <div class="rounded-xl border border-slate-200 p-4 dark:border-gray-700">
+                        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                          <div class="space-y-3">
+                            <div class="flex flex-wrap items-center gap-2">
+                              <div class="font-medium">{finding.title}</div>
+                              <span class={`rounded-full px-2.5 py-1 text-xs font-medium uppercase tracking-[0.12em] ${severityBadge(finding.severity)}`}>{finding.severity}</span>
+                              <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 dark:bg-gray-800 dark:text-gray-300">{finding.category}</span>
+                            </div>
+                            <div class="text-sm text-gray-600 dark:text-gray-300">{finding.description}</div>
+                            <div class="text-sm text-gray-500">{finding.impact}</div>
+                            {#if finding.evidence.length > 0}
+                              <div class="flex flex-wrap gap-2">
+                                {#each finding.evidence as signal}
+                                  <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 dark:bg-gray-800 dark:text-gray-300">{signal}</span>
+                                {/each}
+                              </div>
+                            {/if}
+                          </div>
+                        </div>
+                      </div>
+                    {/each}
+                  {/if}
+                </div>
+              </div>
+            </div>
+
+            <div class="space-y-4">
+              <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+                <h2 class="text-lg font-semibold">Recommendations</h2>
+                <div class="mt-4 space-y-3">
+                  {#if lint.recommendations.length === 0}
+                    <div class="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-gray-500 dark:border-gray-700">
+                      No remediation actions suggested right now.
+                    </div>
+                  {:else}
+                    {#each lint.recommendations as recommendation (recommendation.code)}
+                      <div class="rounded-xl border border-slate-200 p-4 dark:border-gray-700">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <div class="font-medium">{recommendation.title}</div>
+                          <span class={`rounded-full px-2.5 py-1 text-xs font-medium uppercase tracking-[0.12em] ${severityBadge(recommendation.priority)}`}>{recommendation.priority}</span>
+                        </div>
+                        <div class="mt-2 text-sm text-gray-500">{recommendation.rationale}</div>
+                        <div class="mt-3 space-y-2">
+                          {#each recommendation.actions as action}
+                            <div class="rounded-xl border border-dashed border-slate-200 px-3 py-2 text-sm text-slate-600 dark:border-gray-700 dark:text-gray-300">
+                              {action}
+                            </div>
+                          {/each}
+                        </div>
+                      </div>
+                    {/each}
+                  {/if}
+                </div>
+              </div>
+
+              <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+                <h2 class="text-lg font-semibold">Operational Signals</h2>
+                <div class="mt-4 space-y-3 text-sm text-gray-500">
+                  <div class="flex items-center justify-between">
+                    <span>Transactions</span>
+                    <span>{lint.summary.transaction_count}</span>
+                  </div>
+                  <div class="flex items-center justify-between">
+                    <span>Pending transactions</span>
+                    <span>{lint.summary.pending_transaction_count}</span>
+                  </div>
+                  <div class="flex items-center justify-between">
+                    <span>Failed transactions</span>
+                    <span>{lint.summary.failed_transaction_count}</span>
+                  </div>
+                  <div class="flex items-center justify-between">
+                    <span>Stale branches</span>
+                    <span>{lint.summary.stale_branch_count}</span>
+                  </div>
+                  <div class="flex items-center justify-between">
+                    <span>Auto-refresh views</span>
+                    <span>{lint.summary.auto_refresh_view_count}</span>
+                  </div>
+                  <div class="flex items-center justify-between">
+                    <span>Largest object</span>
+                    <span>{(lint.summary.largest_object_bytes / (1024 * 1024)).toFixed(1)} MB</span>
+                  </div>
+                  <div class="flex items-center justify-between">
+                    <span>Quality score</span>
+                    <span class={toneFor(lint.summary.quality_score)}>{lint.summary.quality_score?.toFixed(1) ?? '--'}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        {/if}
       </div>
     {/if}
   </div>

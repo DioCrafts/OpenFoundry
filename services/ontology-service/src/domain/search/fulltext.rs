@@ -2,7 +2,9 @@ use std::collections::HashSet;
 
 pub fn tokenize(input: &str) -> Vec<String> {
     input
-        .split(|character: char| !character.is_alphanumeric() && character != '_' && character != '-')
+        .split(|character: char| {
+            !character.is_alphanumeric() && character != '_' && character != '-'
+        })
         .filter(|token| !token.is_empty())
         .map(|token| token.to_lowercase())
         .collect()
@@ -49,7 +51,11 @@ mod tests {
     #[test]
     fn prefers_title_hits() {
         let with_title = score("customer health", "Customer Health", "weekly status board");
-        let with_body = score("customer health", "Overview", "customer health weekly board");
+        let with_body = score(
+            "customer health",
+            "Overview",
+            "customer health weekly board",
+        );
         assert!(with_title > with_body);
     }
 }

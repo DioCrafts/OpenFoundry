@@ -30,11 +30,11 @@
 				</div>
 			</div>
 
-			{#if runtime?.latest_run}
+			{#if runtime?.latest_run || runtime?.preview}
 				<div class="rounded-[24px] border border-dashed border-cyan-300 bg-cyan-50/60 p-4 dark:border-cyan-900 dark:bg-cyan-950/20">
 					<div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-700 dark:text-cyan-300">Latest Aggregates</div>
 					<div class="mt-3 space-y-2">
-						{#each runtime.latest_run.aggregate_windows as aggregate}
+						{#each (runtime.latest_run?.aggregate_windows ?? runtime.preview?.aggregate_windows ?? []) as aggregate}
 							<div class="rounded-2xl border border-cyan-200 bg-white px-4 py-3 text-sm text-slate-700 dark:border-cyan-900 dark:bg-slate-950 dark:text-slate-200">
 								{aggregate.window_name} • {aggregate.group_key} • {aggregate.measure_name} = {aggregate.value}
 							</div>

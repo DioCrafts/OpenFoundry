@@ -24,6 +24,7 @@
 		type AppWidget,
 		type SlatePackageFile,
 		type SlatePackageResponse,
+		type WorkshopScenarioPreset,
 		type WidgetBinding,
 		type WidgetCatalogItem,
 		type WidgetEvent,
@@ -78,6 +79,22 @@
 
 	function currentPage() {
 		return draft.pages.find((page) => page.id === selectedPageId) ?? draft.pages[0];
+	}
+
+	function flattenWidgets(widgets: AppWidget[]): AppWidget[] {
+		return widgets.flatMap((widget) => [widget, ...flattenWidgets(widget.children ?? [])]);
+	}
+
+	function widgetsByType(widgetType: string) {
+		return draft.pages.flatMap((page) => flattenWidgets(page.widgets)).filter((widget) => widget.widget_type === widgetType);
+	}
+
+	function scenarioWidgets() {
+		return widgetsByType('scenario');
+	}
+
+	function agentWidgets() {
+		return widgetsByType('agent');
 	}
 
 	function selectedWidget() {
@@ -696,6 +713,79 @@
 			});
 	}
 
+	function updateInteractiveWorkshop(patch: Partial<AppDefinition['settings']['interactive_workshop']>) {
+		draft = {
+			...draft,
+			settings: {
+				...draft.settings,
+				interactive_workshop: {
+					...draft.settings.interactive_workshop,
+					...patch,
+				},
+			},
+		};
+	}
+
+	function serializeSuggestedQuestions() {
+		return draft.settings.interactive_workshop.suggested_questions.join('\n');
+	}
+
+	function updateSuggestedQuestions(text: string) {
+		updateInteractiveWorkshop({
+			suggested_questions: text
+				.split('\n')
+				.map((line) => line.trim())
+				.filter(Boolean),
+		});
+	}
+
+	function serializePresetParameters(preset: WorkshopScenarioPreset) {
+		return Object.entries(preset.parameters ?? {})
+			.map(([key, value]) => `${key}=${value}`)
+			.join('\n');
+	}
+
+	function parsePresetParameters(text: string) {
+		return Object.fromEntries(
+			text
+				.split('\n')
+				.map((line) => line.trim())
+				.filter(Boolean)
+				.map((line) => {
+					const [key, ...valueParts] = line.split('=');
+					return [key?.trim() ?? '', valueParts.join('=').trim()];
+				})
+				.filter(([key, value]) => key.length > 0 && value.length > 0),
+		);
+	}
+
+	function addScenarioPreset() {
+		const nextPreset: WorkshopScenarioPreset = {
+			id: crypto.randomUUID(),
+			label: `Scenario ${draft.settings.interactive_workshop.scenario_presets.length + 1}`,
+			description: '',
+			parameters: {},
+			prompt_template: '',
+		};
+		updateInteractiveWorkshop({
+			scenario_presets: [...draft.settings.interactive_workshop.scenario_presets, nextPreset],
+		});
+	}
+
+	function updateScenarioPreset(presetId: string, patch: Partial<WorkshopScenarioPreset>) {
+		updateInteractiveWorkshop({
+			scenario_presets: draft.settings.interactive_workshop.scenario_presets.map((preset) =>
+				preset.id === presetId ? { ...preset, ...patch } : preset,
+			),
+		});
+	}
+
+	function removeScenarioPreset(presetId: string) {
+		updateInteractiveWorkshop({
+			scenario_presets: draft.settings.interactive_workshop.scenario_presets.filter((preset) => preset.id !== presetId),
+		});
+	}
+
 	function setBuilderExperience(experience: string) {
 		draft = {
 			...draft,
@@ -738,7 +828,7 @@
 		<div>
 			<h1 class="text-3xl font-semibold tracking-tight text-slate-950 dark:text-slate-50">Workshop App Builder</h1>
 			<p class="mt-2 max-w-3xl text-sm text-slate-500 dark:text-slate-400">
-				Build internal apps with page layouts, widget catalog, dataset/query/ontology bindings, event handlers, theming, templates, and published runtime previews.
+				Build internal apps with page layouts, widget catalog, dataset/query/ontology bindings, interactive scenario presets, embedded copilots, theming, templates, and published runtime previews.
 			</p>
 		</div>
 
@@ -1244,6 +1334,157 @@
 							</label>
 						</div>
 					{/if}
+
+					<div class="rounded-2xl bg-slate-50 p-4 dark:bg-slate-900">
+						<div class="flex flex-wrap items-center justify-between gap-3">
+							<div>
+								<div class="text-xs uppercase tracking-[0.22em] text-slate-400">Interactive Workshop</div>
+								<div class="mt-1 text-sm text-slate-500">Turn scenario widgets and agent widgets into one coordinated runtime surface with presets, decision briefs, and guided prompts.</div>
+							</div>
+							<label class="flex items-center gap-2 text-sm text-slate-500">
+								<input
+									type="checkbox"
+									checked={draft.settings.interactive_workshop.enabled}
+									oninput={(event) => updateInteractiveWorkshop({ enabled: (event.currentTarget as HTMLInputElement).checked })}
+								/>
+								<span>Enable</span>
+							</label>
+						</div>
+
+						<div class="mt-4 grid gap-3 sm:grid-cols-2">
+							<label class="text-sm">
+								<span class="mb-1 block text-slate-500">Interactive title</span>
+								<input
+									type="text"
+									value={draft.settings.interactive_workshop.title ?? ''}
+									oninput={(event) => updateInteractiveWorkshop({ title: (event.currentTarget as HTMLInputElement).value || null })}
+									class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+								/>
+							</label>
+							<label class="text-sm">
+								<span class="mb-1 block text-slate-500">Primary scenario widget</span>
+								<select
+									value={draft.settings.interactive_workshop.primary_scenario_widget_id ?? ''}
+									oninput={(event) => updateInteractiveWorkshop({ primary_scenario_widget_id: (event.currentTarget as HTMLSelectElement).value || null })}
+									class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+								>
+									<option value="">Any scenario widget</option>
+									{#each scenarioWidgets() as widget (widget.id)}
+										<option value={widget.id}>{widget.title} • {widget.id.slice(0, 8)}</option>
+									{/each}
+								</select>
+							</label>
+							<label class="text-sm sm:col-span-2">
+								<span class="mb-1 block text-slate-500">Interactive subtitle</span>
+								<textarea
+									rows="3"
+									value={draft.settings.interactive_workshop.subtitle ?? ''}
+									oninput={(event) => updateInteractiveWorkshop({ subtitle: (event.currentTarget as HTMLTextAreaElement).value || null })}
+									class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+								></textarea>
+							</label>
+							<label class="text-sm">
+								<span class="mb-1 block text-slate-500">Primary agent widget</span>
+								<select
+									value={draft.settings.interactive_workshop.primary_agent_widget_id ?? ''}
+									oninput={(event) => updateInteractiveWorkshop({ primary_agent_widget_id: (event.currentTarget as HTMLSelectElement).value || null })}
+									class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+								>
+									<option value="">Any agent widget</option>
+									{#each agentWidgets() as widget (widget.id)}
+										<option value={widget.id}>{widget.title} • {widget.id.slice(0, 8)}</option>
+									{/each}
+								</select>
+							</label>
+							<label class="text-sm sm:col-span-2">
+								<span class="mb-1 block text-slate-500">Decision brief template</span>
+								<textarea
+									rows="5"
+									value={draft.settings.interactive_workshop.briefing_template ?? ''}
+									oninput={(event) => updateInteractiveWorkshop({ briefing_template: (event.currentTarget as HTMLTextAreaElement).value || null })}
+									class="w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-950"
+								></textarea>
+								<div class="mt-1 text-xs text-slate-400">Use <code>{'{{parameter_name}}'}</code> placeholders from your scenario runtime parameters.</div>
+							</label>
+							<label class="text-sm sm:col-span-2">
+								<span class="mb-1 block text-slate-500">Suggested copilot questions</span>
+								<textarea
+									rows="4"
+									value={serializeSuggestedQuestions()}
+									oninput={(event) => updateSuggestedQuestions((event.currentTarget as HTMLTextAreaElement).value)}
+									class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+								></textarea>
+								<div class="mt-1 text-xs text-slate-400">One question per line. Questions can also use <code>{'{{parameter_name}}'}</code> placeholders.</div>
+							</label>
+						</div>
+
+						<div class="mt-5 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-950">
+							<div class="flex flex-wrap items-center justify-between gap-3">
+								<div>
+									<div class="text-xs uppercase tracking-[0.22em] text-slate-400">Scenario presets</div>
+									<div class="mt-1 text-sm text-slate-500">Curated what-if starting points that can also seed the Workshop copilot prompt.</div>
+								</div>
+								<button type="button" class="rounded-xl border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-900" onclick={addScenarioPreset}>Add preset</button>
+							</div>
+
+							<div class="mt-4 space-y-4">
+								{#if draft.settings.interactive_workshop.scenario_presets.length === 0}
+									<div class="rounded-2xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700">
+										Add a preset to turn Workshop into a guided scenario cockpit.
+									</div>
+								{:else}
+									{#each draft.settings.interactive_workshop.scenario_presets as preset (preset.id)}
+										<div class="rounded-2xl border border-slate-200 p-4 dark:border-slate-700">
+											<div class="grid gap-3 sm:grid-cols-2">
+												<label class="text-sm">
+													<span class="mb-1 block text-slate-500">Label</span>
+													<input
+														type="text"
+														value={preset.label}
+														oninput={(event) => updateScenarioPreset(preset.id, { label: (event.currentTarget as HTMLInputElement).value })}
+														class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"
+													/>
+												</label>
+												<label class="text-sm">
+													<span class="mb-1 block text-slate-500">Description</span>
+													<input
+														type="text"
+														value={preset.description ?? ''}
+														oninput={(event) => updateScenarioPreset(preset.id, { description: (event.currentTarget as HTMLInputElement).value || null })}
+														class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"
+													/>
+												</label>
+												<label class="text-sm sm:col-span-2">
+													<span class="mb-1 block text-slate-500">Parameters</span>
+													<textarea
+														rows="4"
+														value={serializePresetParameters(preset)}
+														oninput={(event) => updateScenarioPreset(preset.id, { parameters: parsePresetParameters((event.currentTarget as HTMLTextAreaElement).value) })}
+														class="w-full rounded-xl border border-slate-200 px-3 py-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-900"
+													></textarea>
+													<div class="mt-1 text-xs text-slate-400">One `key=value` pair per line.</div>
+												</label>
+												<label class="text-sm sm:col-span-2">
+													<span class="mb-1 block text-slate-500">Copilot prompt template</span>
+													<textarea
+														rows="3"
+														value={preset.prompt_template ?? ''}
+														oninput={(event) => updateScenarioPreset(preset.id, { prompt_template: (event.currentTarget as HTMLTextAreaElement).value || null })}
+														class="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"
+													></textarea>
+												</label>
+											</div>
+											<div class="mt-3 flex justify-end">
+												<button type="button" class="rounded-xl border border-rose-200 px-3 py-2 text-xs text-rose-600 hover:bg-rose-50 dark:border-rose-900/40 dark:hover:bg-rose-950/20" onclick={() => removeScenarioPreset(preset.id)}>
+													Remove preset
+												</button>
+											</div>
+										</div>
+									{/each}
+								{/if}
+							</div>
+						</div>
+					</div>
 
 					{#if draft.settings.builder_experience === 'slate'}
 						<div class="rounded-2xl bg-slate-50 p-4 dark:bg-slate-900">

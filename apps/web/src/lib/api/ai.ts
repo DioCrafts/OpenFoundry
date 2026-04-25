@@ -10,6 +10,10 @@ export interface ProviderRoutingRules {
 	fallback_provider_ids: string[];
 	weight: number;
 	max_context_tokens: number;
+	network_scope: string;
+	supported_modalities: string[];
+	input_cost_per_1k_tokens_usd: number;
+	output_cost_per_1k_tokens_usd: number;
 }
 
 export interface ProviderHealthState {
@@ -128,6 +132,7 @@ export interface ToolDefinition {
 	description: string;
 	category: string;
 	execution_mode: string;
+	execution_config: Record<string, unknown>;
 	status: string;
 	input_schema: Record<string, unknown>;
 	output_schema: Record<string, unknown>;
@@ -143,20 +148,19 @@ export interface AgentMemorySnapshot {
 }
 
 export interface AgentPlanStep {
-	step_number: number;
+	id: string;
+	title: string;
 	description: string;
 	tool_name: string | null;
-	expected_outcome: string;
+	status: string;
 }
 
 export interface AgentExecutionTrace {
-	step_number: number;
-	action: string;
+	step_id: string;
+	title: string;
 	tool_name: string | null;
 	observation: string;
-	success: boolean;
-	started_at: string;
-	completed_at: string;
+	output: Record<string, unknown>;
 }
 
 export interface AgentDefinition {
@@ -210,8 +214,36 @@ export interface ChatMessage {
 	provider_id: string | null;
 	tool_name: string | null;
 	citations: KnowledgeSearchResult[];
+	attachments: ChatAttachment[];
 	guardrail_verdict: GuardrailVerdict | null;
 	created_at: string;
+}
+
+export interface ChatAttachment {
+	kind: string;
+	name: string | null;
+	mime_type: string | null;
+	url: string | null;
+	base64_data: string | null;
+	text: string | null;
+}
+
+export interface LlmUsageSummary {
+	prompt_tokens: number;
+	completion_tokens: number;
+	total_tokens: number;
+	estimated_cost_usd: number;
+	latency_ms: number;
+	network_scope: string;
+	cache_hit: boolean;
+}
+
+export interface ChatRoutingMetadata {
+	requested_private_network: boolean;
+	used_private_network: boolean;
+	privacy_reason: string | null;
+	candidate_provider_ids: string[];
+	required_modalities: string[];
 }
 
 export interface Conversation {
@@ -245,6 +277,8 @@ export interface ChatCompletionResponse {
 	cache: SemanticCacheMetadata;
 	prompt_used: string;
 	completion_tokens: number;
+	usage: LlmUsageSummary;
+	routing: ChatRoutingMetadata;
 	created_at: string;
 }
 
@@ -256,6 +290,7 @@ export interface CopilotResponse {
 	cited_knowledge: KnowledgeSearchResult[];
 	provider_name: string;
 	cache: SemanticCacheMetadata;
+	usage: LlmUsageSummary;
 	created_at: string;
 }
 
@@ -265,8 +300,45 @@ export interface EvaluateGuardrailsResponse {
 	recommendations: string[];
 }
 
+export interface ProviderBenchmarkScore {
+	quality: number;
+	latency: number;
+	cost: number;
+	safety: number;
+	overall: number;
+}
+
+export interface ProviderBenchmarkResult {
+	provider_id: string;
+	provider_name: string;
+	network_scope: string;
+	reply_preview: string;
+	prompt_tokens: number;
+	completion_tokens: number;
+	total_tokens: number;
+	estimated_cost_usd: number;
+	latency_ms: number;
+	cache_hit: boolean;
+	guardrail: GuardrailVerdict;
+	score: ProviderBenchmarkScore;
+	error: string | null;
+}
+
+export interface ProviderBenchmarkResponse {
+	benchmark_group_id: string;
+	use_case: string;
+	prompt_excerpt: string;
+	required_modalities: string[];
+	requested_private_network: boolean;
+	recommended_provider_id: string | null;
+	results: ProviderBenchmarkResult[];
+	created_at: string;
+}
+
 export interface AiPlatformOverview {
 	provider_count: number;
+	private_provider_count: number;
+	multimodal_provider_count: number;
 	prompt_count: number;
 	knowledge_base_count: number;
 	indexed_document_count: number;
@@ -276,6 +348,10 @@ export interface AiPlatformOverview {
 	cache_entry_count: number;
 	cache_hit_rate: number;
 	blocked_guardrail_events: number;
+	llm_prompt_tokens: number;
+	llm_completion_tokens: number;
+	estimated_llm_cost_usd: number;
+	benchmark_run_count: number;
 }
 
 export function getOverview() {
@@ -413,6 +489,7 @@ export function createTool(body: {
 	description?: string;
 	category?: string;
 	execution_mode?: string;
+	execution_config?: Record<string, unknown>;
 	status?: string;
 	input_schema?: Record<string, unknown>;
 	output_schema?: Record<string, unknown>;
@@ -426,6 +503,7 @@ export function updateTool(id: string, body: {
 	description?: string;
 	category?: string;
 	execution_mode?: string;
+	execution_config?: Record<string, unknown>;
 	status?: string;
 	input_schema?: Record<string, unknown>;
 	output_schema?: Record<string, unknown>;
@@ -469,6 +547,7 @@ export function executeAgent(id: string, body: {
 	user_message: string;
 	objective?: string;
 	knowledge_base_id?: string;
+	context?: Record<string, unknown>;
 }) {
 	return api.post<AgentExecutionResponse>(`/ai/agents/${id}/execute`, body);
 }
@@ -489,10 +568,25 @@ export function createChatCompletion(body: {
 	prompt_variables?: Record<string, string>;
 	knowledge_base_id?: string;
 	preferred_provider_id?: string;
+	attachments?: ChatAttachment[];
 	max_tokens?: number;
 	fallback_enabled?: boolean;
+	require_private_network?: boolean;
 }) {
 	return api.post<ChatCompletionResponse>('/ai/chat/completions', body);
+}
+
+export function runProviderBenchmark(body: {
+	prompt: string;
+	system_prompt?: string;
+	provider_ids?: string[];
+	attachments?: ChatAttachment[];
+	rubric_keywords?: string[];
+	use_case?: string;
+	max_tokens?: number;
+	require_private_network?: boolean;
+}) {
+	return api.post<ProviderBenchmarkResponse>('/ai/evaluations/benchmarks', body);
 }
 
 export function askCopilot(body: {

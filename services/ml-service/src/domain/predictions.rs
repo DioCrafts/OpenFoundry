@@ -98,7 +98,10 @@ fn predict_with_model_state(
         return None;
     }
 
-    let bias = model_state.get("bias").and_then(Value::as_f64).unwrap_or(0.0);
+    let bias = model_state
+        .get("bias")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
     let threshold = model_state
         .get("threshold")
         .and_then(Value::as_f64)

@@ -12,7 +12,7 @@ services:
   # ── PostgreSQL ──────────────────────────────────────────────
   postgres:
     <<: *common
-    image: postgres:16-alpine
+    image: ${OPENFOUNDRY_POSTGRES_IMAGE:-postgres:16-alpine}
     ports:
       - "5432:5432"
     environment:
@@ -31,7 +31,7 @@ services:
   # ── Redis ───────────────────────────────────────────────────
   redis:
     <<: *common
-    image: redis:7-alpine
+    image: ${OPENFOUNDRY_REDIS_IMAGE:-redis:7-alpine}
     ports:
       - "6379:6379"
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
@@ -46,7 +46,7 @@ services:
   # ── NATS (JetStream) ───────────────────────────────────────
   nats:
     <<: *common
-    image: nats:2-alpine
+    image: ${OPENFOUNDRY_NATS_IMAGE:-nats:2-alpine}
     ports:
       - "4222:4222"
       - "8222:8222"
@@ -62,7 +62,7 @@ services:
   # ── MinIO (S3-compatible) ──────────────────────────────────
   minio:
     <<: *common
-    image: minio/minio:latest
+    image: ${OPENFOUNDRY_MINIO_IMAGE:-minio/minio:latest}
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -79,7 +79,7 @@ services:
       retries: 5
 
   minio-init:
-    image: minio/mc:latest
+    image: ${OPENFOUNDRY_MINIO_MC_IMAGE:-minio/mc:latest}
     depends_on:
       minio:
         condition: service_healthy
@@ -95,7 +95,7 @@ services:
   # ── Meilisearch ────────────────────────────────────────────
   meilisearch:
     <<: *common
-    image: getmeili/meilisearch:v1.11
+    image: ${OPENFOUNDRY_MEILISEARCH_IMAGE:-getmeili/meilisearch:v1.11}
     ports:
       - "7700:7700"
     environment:
@@ -112,7 +112,7 @@ services:
   # ── Qdrant (Vector DB) ────────────────────────────────────
   qdrant:
     <<: *common
-    image: qdrant/qdrant:v1.12.5
+    image: ${OPENFOUNDRY_QDRANT_IMAGE:-qdrant/qdrant:v1.12.5}
     ports:
       - "6333:6333"
       - "6334:6334"

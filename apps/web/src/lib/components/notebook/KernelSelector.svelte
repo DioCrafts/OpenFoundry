@@ -1,13 +1,12 @@
 <script lang="ts">
 	import KernelStatus from './KernelStatus.svelte';
-
-	type Kernel = 'python' | 'sql';
+	import type { NotebookKernel } from '$lib/api/notebooks';
 
 	interface Props {
-		value: Kernel;
+		value: NotebookKernel;
 		status?: string | null;
 		disabled?: boolean;
-		onChange?: (kernel: Kernel) => void;
+		onChange?: (kernel: NotebookKernel) => void;
 		onStart?: () => void;
 		onStop?: () => void;
 	}
@@ -22,7 +21,7 @@
 	}: Props = $props();
 
 	function handleChange(event: Event) {
-		onChange?.((event.currentTarget as HTMLSelectElement).value as Kernel);
+		onChange?.((event.currentTarget as HTMLSelectElement).value as NotebookKernel);
 	}
 </script>
 
@@ -39,6 +38,8 @@
 	>
 		<option value="python">Python</option>
 		<option value="sql">SQL</option>
+		<option value="llm">LLM</option>
+		<option value="r">R</option>
 	</select>
 
 	<KernelStatus kernel={value} status={status} />

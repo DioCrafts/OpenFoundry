@@ -113,6 +113,8 @@ pub fn issue_state(
         sub: provider_id,
         iat: chrono::Utc::now().timestamp(),
         exp: chrono::Utc::now().timestamp() + 600,
+        iss: config.issuer().map(str::to_string),
+        aud: config.audience().map(str::to_string),
         jti: uuid::Uuid::now_v7(),
         email: String::new(),
         name: String::new(),

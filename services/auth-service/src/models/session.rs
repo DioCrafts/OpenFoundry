@@ -1,5 +1,5 @@
-use chrono::{DateTime, Utc};
 use auth_middleware::claims::SessionScope;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
@@ -86,6 +86,12 @@ pub struct CreateScopedSessionRequest {
     pub allowed_org_ids: Vec<Uuid>,
     pub workspace: Option<String>,
     pub classification_clearance: Option<String>,
+    #[serde(default)]
+    pub allowed_markings: Vec<String>,
+    #[serde(default)]
+    pub restricted_view_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub consumer_mode: bool,
     pub expires_at: Option<DateTime<Utc>>,
 }
 
@@ -106,6 +112,12 @@ pub struct CreateGuestSessionRequest {
     pub allowed_org_ids: Vec<Uuid>,
     pub workspace: Option<String>,
     pub classification_clearance: Option<String>,
+    #[serde(default)]
+    pub allowed_markings: Vec<String>,
+    #[serde(default)]
+    pub restricted_view_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub consumer_mode: bool,
     pub expires_at: Option<DateTime<Utc>>,
 }
 
@@ -118,8 +130,8 @@ impl TryFrom<ScopedSessionRow> for ScopedSession {
             "guest" => ScopedSessionKind::Guest,
             other => return Err(format!("unsupported scoped session kind: {other}")),
         };
-        let scope = serde_json::from_value::<SessionScope>(row.scope)
-            .map_err(|error| error.to_string())?;
+        let scope =
+            serde_json::from_value::<SessionScope>(row.scope).map_err(|error| error.to_string())?;
 
         Ok(Self {
             id: row.id,

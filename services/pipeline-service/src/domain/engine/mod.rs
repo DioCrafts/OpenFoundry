@@ -191,6 +191,23 @@ pub(crate) async fn execute_node(
                 Err(error) => failed_result(node, Some(error)),
             }
         }
+        "llm" => {
+            match runtime::execute_llm_transform(&env.state, env.actor_id, node, &inputs).await {
+                Ok(result) => success_result(
+                    node,
+                    result.rows_affected,
+                    result.output,
+                    runtime::build_metadata(
+                        fingerprint,
+                        false,
+                        &inputs,
+                        node.output_dataset_id,
+                        result.output_dataset_version,
+                    ),
+                ),
+                Err(error) => failed_result(node, Some(error)),
+            }
+        }
         "wasm" => match runtime::execute_wasm_transform(node) {
             Ok((rows_affected, output)) => success_result(
                 node,
@@ -215,7 +232,7 @@ pub(crate) async fn execute_node(
                         node.output_dataset_id,
                         output_dataset_version,
                     ),
-                    ),
+                ),
                 Err(error) => failed_result(node, Some(error)),
             }
         }

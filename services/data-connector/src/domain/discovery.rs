@@ -18,6 +18,14 @@ pub async fn discover_sources(
 ) -> Result<Vec<DiscoveredSource>, String> {
     let agent_url = agent_registry::resolve_agent_url(state, &connection.config).await?;
     match connection.connector_type.as_str() {
+        "bigquery" => {
+            connectors::bigquery::discover_sources(state, &connection.config, agent_url.as_deref())
+                .await
+        }
+        "kafka" => {
+            connectors::kafka::discover_sources(state, &connection.config, agent_url.as_deref())
+                .await
+        }
         "postgresql" => connectors::postgres::discover_sources(&connection.config).await,
         "rest_api" => {
             connectors::rest_api::discover_sources(state, &connection.config, agent_url.as_deref())
@@ -33,6 +41,10 @@ pub async fn discover_sources(
         }
         "sap" => {
             connectors::sap::discover_sources(state, &connection.config, agent_url.as_deref()).await
+        }
+        "snowflake" => {
+            connectors::snowflake::discover_sources(state, &connection.config, agent_url.as_deref())
+                .await
         }
         "iot" => {
             connectors::iot::discover_sources(state, &connection.config, agent_url.as_deref()).await
@@ -61,6 +73,24 @@ pub async fn query_virtual_table(
 ) -> Result<VirtualTableQueryResponse, String> {
     let agent_url = agent_registry::resolve_agent_url(state, &connection.config).await?;
     match connection.connector_type.as_str() {
+        "bigquery" => {
+            connectors::bigquery::query_virtual_table(
+                state,
+                &connection.config,
+                request,
+                agent_url.as_deref(),
+            )
+            .await
+        }
+        "kafka" => {
+            connectors::kafka::query_virtual_table(
+                state,
+                &connection.config,
+                request,
+                agent_url.as_deref(),
+            )
+            .await
+        }
         "postgresql" => {
             connectors::postgres::query_virtual_table(&connection.config, request).await
         }
@@ -84,6 +114,15 @@ pub async fn query_virtual_table(
         }
         "sap" => {
             connectors::sap::query_virtual_table(
+                state,
+                &connection.config,
+                request,
+                agent_url.as_deref(),
+            )
+            .await
+        }
+        "snowflake" => {
+            connectors::snowflake::query_virtual_table(
                 state,
                 &connection.config,
                 request,

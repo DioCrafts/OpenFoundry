@@ -12,6 +12,7 @@ pub enum DistributionChannel {
     Email,
     S3,
     Slack,
+    Teams,
     Webhook,
 }
 
@@ -21,6 +22,7 @@ impl DistributionChannel {
             Self::Email => "email",
             Self::S3 => "s3",
             Self::Slack => "slack",
+            Self::Teams => "teams",
             Self::Webhook => "webhook",
         }
     }
@@ -40,6 +42,7 @@ impl FromStr for DistributionChannel {
             "email" => Ok(Self::Email),
             "s3" => Ok(Self::S3),
             "slack" => Ok(Self::Slack),
+            "teams" => Ok(Self::Teams),
             "webhook" => Ok(Self::Webhook),
             _ => Err(format!("unsupported distribution channel: {value}")),
         }

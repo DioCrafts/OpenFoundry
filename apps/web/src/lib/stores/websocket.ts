@@ -1,12 +1,12 @@
 import { writable } from 'svelte/store';
 
-import type { NotificationSocketEvent } from '$lib/api/notifications';
+import { issueNotificationSocketTicket, type NotificationSocketEvent } from '$lib/api/notifications';
 
-function notificationSocketUrl(token: string) {
+function notificationSocketUrl(ticket: string) {
 	const configured = import.meta.env.PUBLIC_NOTIFICATION_WS_URL as string | undefined;
 	if (configured) {
 		const url = new URL(configured);
-		url.searchParams.set('token', token);
+		url.searchParams.set('ticket', ticket);
 		return url.toString();
 	}
 
@@ -16,20 +16,35 @@ function notificationSocketUrl(token: string) {
 
 	const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
 	const url = new URL(`${protocol}://${window.location.hostname}:50069/api/v1/notifications/ws`);
-	url.searchParams.set('token', token);
+	url.searchParams.set('ticket', ticket);
 	return url.toString();
 }
 
 function createNotificationWebsocketStore() {
 	const connected = writable(false);
 	let socket: WebSocket | null = null;
+	let requestSerial = 0;
 
-	function connect(token: string, onMessage: (event: NotificationSocketEvent) => void) {
+	async function connect(token: string, onMessage: (event: NotificationSocketEvent) => void) {
 		if (!token || typeof window === 'undefined') {
 			return;
 		}
 
-		const nextUrl = notificationSocketUrl(token);
+		const serial = ++requestSerial;
+		let ticket = '';
+		try {
+			const response = await issueNotificationSocketTicket();
+			ticket = response.ticket;
+		} catch {
+			connected.set(false);
+			return;
+		}
+
+		if (serial !== requestSerial) {
+			return;
+		}
+
+		const nextUrl = notificationSocketUrl(ticket);
 		if (!nextUrl) {
 			return;
 		}
@@ -56,6 +71,7 @@ function createNotificationWebsocketStore() {
 	}
 
 	function disconnect() {
+		requestSerial += 1;
 		if (socket) {
 			socket.close();
 			socket = null;

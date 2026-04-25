@@ -56,5 +56,11 @@ pub struct ListNotificationsQuery {
 
 #[derive(Debug, Deserialize)]
 pub struct WebSocketQuery {
-    pub token: String,
+    pub ticket: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WebSocketTicketResponse {
+    pub ticket: String,
+    pub expires_in: i64,
 }

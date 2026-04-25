@@ -20,10 +20,8 @@ pub fn scan(request: &SensitiveDataScanRequest) -> SensitiveDataScanResponse {
                 first_value = Some(capture.as_str().to_string());
             }
             if request.redact {
-                redacted_content = redacted_content.replace(
-                    capture.as_str(),
-                    &redact_value(kind, capture.as_str()),
-                );
+                redacted_content = redacted_content
+                    .replace(capture.as_str(), &redact_value(kind, capture.as_str()));
             }
         }
 
@@ -40,7 +38,10 @@ pub fn scan(request: &SensitiveDataScanRequest) -> SensitiveDataScanResponse {
     findings.sort_by(|left, right| left.kind.cmp(&right.kind));
 
     SensitiveDataScanResponse {
-        risk_score: findings.iter().map(|finding| score_for_kind(&finding.kind)).sum(),
+        risk_score: findings
+            .iter()
+            .map(|finding| score_for_kind(&finding.kind))
+            .sum(),
         findings,
         redacted_content,
     }
@@ -61,18 +62,15 @@ fn detector_catalog() -> &'static [(&'static str, Regex)] {
             ),
             (
                 "credit_card",
-                Regex::new(r"\b(?:\d[ -]*?){13,16}\b")
-                    .expect("card regex should compile"),
+                Regex::new(r"\b(?:\d[ -]*?){13,16}\b").expect("card regex should compile"),
             ),
             (
                 "api_key",
-                Regex::new(r"\bofk_[A-Za-z0-9_-]{8,}\b")
-                    .expect("api key regex should compile"),
+                Regex::new(r"\bofk_[A-Za-z0-9_-]{8,}\b").expect("api key regex should compile"),
             ),
             (
                 "bearer_token",
-                Regex::new(r"Bearer\s+[A-Za-z0-9._=-]{16,}")
-                    .expect("bearer regex should compile"),
+                Regex::new(r"Bearer\s+[A-Za-z0-9._=-]{16,}").expect("bearer regex should compile"),
             ),
         ]
     })
@@ -83,13 +81,27 @@ fn redact_value(kind: &str, value: &str) -> String {
         "email" => {
             let parts = value.split('@').collect::<Vec<_>>();
             if parts.len() == 2 {
-                format!("{}***@{}", &parts[0].chars().take(2).collect::<String>(), parts[1])
+                format!(
+                    "{}***@{}",
+                    &parts[0].chars().take(2).collect::<String>(),
+                    parts[1]
+                )
             } else {
                 "[redacted-email]".to_string()
             }
         }
         "ssn" => "***-**-****".to_string(),
-        "credit_card" => format!("**** **** **** {}", value.chars().rev().take(4).collect::<String>().chars().rev().collect::<String>()),
+        "credit_card" => format!(
+            "**** **** **** {}",
+            value
+                .chars()
+                .rev()
+                .take(4)
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect::<String>()
+        ),
         "api_key" => "ofk_[redacted]".to_string(),
         "bearer_token" => "Bearer [redacted]".to_string(),
         _ => "[redacted]".to_string(),
@@ -114,12 +126,23 @@ mod tests {
     #[test]
     fn scan_detects_and_redacts_sensitive_content() {
         let response = scan(&SensitiveDataScanRequest {
-            content: "Contact jane@example.com with SSN 123-45-6789 and token ofk_abcdefghi".to_string(),
+            content: "Contact jane@example.com with SSN 123-45-6789 and token ofk_abcdefghi"
+                .to_string(),
             redact: true,
         });
 
-        assert!(response.findings.iter().any(|finding| finding.kind == "email"));
-        assert!(response.findings.iter().any(|finding| finding.kind == "ssn"));
+        assert!(
+            response
+                .findings
+                .iter()
+                .any(|finding| finding.kind == "email")
+        );
+        assert!(
+            response
+                .findings
+                .iter()
+                .any(|finding| finding.kind == "ssn")
+        );
         assert!(response.redacted_content.contains("***-**-****"));
         assert!(response.redacted_content.contains("ofk_[redacted]"));
         assert!(response.risk_score >= 50);

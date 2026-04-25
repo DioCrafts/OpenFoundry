@@ -1,7 +1,7 @@
 use axum::{
-    http::HeaderMap,
     Json,
     extract::{Path, State},
+    http::HeaderMap,
 };
 use chrono::Utc;
 use sqlx::{query_as, types::Json as SqlJson};
@@ -352,7 +352,14 @@ pub async fn execute_agent(
         .map(Into::into)
         .collect::<Vec<LlmProvider>>();
     let final_response = if let Some(provider) = llm::gateway::select_provider(
-        &llm::gateway::route_providers(&providers, None, "agents"),
+        &llm::gateway::route_providers(
+            &providers,
+            None,
+            "agents",
+            &["text".to_string()],
+            false,
+            false,
+        ),
         true,
     ) {
         let knowledge_summary = knowledge_hits
@@ -388,6 +395,7 @@ pub async fn execute_agent(
                     tool_summary
                 },
             ),
+            &[],
             0.2,
             provider.max_output_tokens.min(512),
         )

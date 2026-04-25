@@ -144,6 +144,13 @@ export interface MergeRequestDetail {
 	thread_count: number;
 }
 
+export interface MergeRequestMergeResult {
+	merge_request: MergeRequestDefinition;
+	merge_commit_sha: string;
+	target_branch: string;
+	ci_run: CiRun | null;
+}
+
 export function getOverview() {
 	return api.get<RepositoryOverview>('/code-repos/overview');
 }
@@ -274,6 +281,10 @@ export function updateMergeRequest(
 	}>,
 ) {
 	return api.patch<MergeRequestDefinition>(`/code-repos/merge-requests/${id}`, body);
+}
+
+export function mergeMergeRequest(id: string, body?: { merged_by?: string }) {
+	return api.post<MergeRequestMergeResult>(`/code-repos/merge-requests/${id}/merge`, body ?? {});
 }
 
 export function listComments(id: string) {

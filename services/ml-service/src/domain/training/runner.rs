@@ -38,17 +38,15 @@ pub fn train_trial(
     trial_index: usize,
 ) -> Result<TrialOutcome, String> {
     let dataset = parse_dataset(training_config)?;
-    let learning_rate = hyperparameter::value_as_f64(
-        hyperparameters.get("learning_rate"),
-        0.08,
-    );
+    let learning_rate = hyperparameter::value_as_f64(hyperparameters.get("learning_rate"), 0.08);
     let epochs = hyperparameter::value_as_u64(hyperparameters.get("epochs"), 350) as usize;
     let l2 = hyperparameter::value_as_f64(hyperparameters.get("l2"), 0.0);
 
-    let (weights, bias) = fit_logistic_regression(&dataset.rows, &dataset.labels, learning_rate, epochs, l2);
+    let (weights, bias) =
+        fit_logistic_regression(&dataset.rows, &dataset.labels, learning_rate, epochs, l2);
     let metrics = evaluate_metrics(&dataset, &weights, bias);
-    let objective_metric = select_metric(&metrics, objective_metric_name)
-        .unwrap_or_else(|| metrics[0].clone());
+    let objective_metric =
+        select_metric(&metrics, objective_metric_name).unwrap_or_else(|| metrics[0].clone());
 
     let schema = json!({
         "signature": "tabular-binary",
@@ -56,6 +54,14 @@ pub fn train_trial(
             .get("engine")
             .and_then(Value::as_str)
             .unwrap_or("tabular-logistic"),
+        "model_adapter": {
+            "kind": "native",
+            "framework": training_config
+                .get("engine")
+                .and_then(Value::as_str)
+                .unwrap_or("tabular-logistic"),
+            "runtime": "in-process",
+        },
         "model_state": {
             "feature_names": dataset.feature_names,
             "feature_means": dataset.feature_means,
@@ -72,6 +78,10 @@ pub fn train_trial(
             "feature_count": dataset.rows.first().map(|row| row.len()).unwrap_or(0),
             "objective_metric": objective_metric.name,
             "objective_value": objective_metric.value,
+            "framework": training_config
+                .get("engine")
+                .and_then(Value::as_str)
+                .unwrap_or("tabular-logistic"),
         }
     });
 
@@ -185,7 +195,9 @@ fn scalar_feature(value: Option<&Value>) -> f64 {
             }
         }
         Some(Value::String(text)) => text.parse::<f64>().unwrap_or_else(|_| {
-            let hash = text.bytes().fold(0u64, |acc, byte| acc.wrapping_add(byte as u64));
+            let hash = text
+                .bytes()
+                .fold(0u64, |acc, byte| acc.wrapping_add(byte as u64));
             (hash % 1000) as f64 / 1000.0
         }),
         _ => 0.0,
@@ -328,13 +340,11 @@ fn evaluate_metrics(dataset: &TrainingDataset, weights: &[f64], bias: f64) -> Ve
     let accuracy = round_metric((true_positive + true_negative) / total);
     let precision = round_metric(true_positive / (true_positive + false_positive).max(1.0));
     let recall = round_metric(true_positive / (true_positive + false_negative).max(1.0));
-    let f1 = round_metric(
-        if precision + recall == 0.0 {
-            0.0
-        } else {
-            2.0 * precision * recall / (precision + recall)
-        },
-    );
+    let f1 = round_metric(if precision + recall == 0.0 {
+        0.0
+    } else {
+        2.0 * precision * recall / (precision + recall)
+    });
 
     vec![
         MetricValue {

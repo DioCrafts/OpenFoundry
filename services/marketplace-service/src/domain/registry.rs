@@ -1,6 +1,7 @@
 use chrono::{Duration, Utc};
 
 use crate::models::{
+    devops::MaintenanceWindow,
     install::{InstallActivation, InstallRecord},
     listing::ListingDefinition,
     package::{DependencyRequirement, PackageVersion},
@@ -23,6 +24,11 @@ pub fn install_preview(
     version: &PackageVersion,
     workspace_name: &str,
     activation: InstallActivation,
+    fleet_id: Option<uuid::Uuid>,
+    fleet_name: Option<String>,
+    maintenance_window: Option<MaintenanceWindow>,
+    auto_upgrade_enabled: bool,
+    enrollment_branch: Option<String>,
 ) -> InstallRecord {
     let now = Utc::now();
     InstallRecord {
@@ -30,10 +36,16 @@ pub fn install_preview(
         listing_id: listing.id,
         listing_name: listing.name.clone(),
         version: version.version.clone(),
+        release_channel: version.release_channel.clone(),
         workspace_name: workspace_name.to_string(),
         status: "installed".to_string(),
         dependency_plan: version.dependencies.clone(),
         activation,
+        fleet_id,
+        fleet_name,
+        auto_upgrade_enabled,
+        maintenance_window,
+        enrollment_branch,
         installed_at: now,
         ready_at: Some(now + Duration::minutes(2)),
     }

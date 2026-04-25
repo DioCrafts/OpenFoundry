@@ -41,6 +41,7 @@ pub fn catalog_entries(
     entries
 }
 
+#[allow(dead_code)]
 pub fn live_events(
     topology: &TopologyDefinition,
     streams: &[StreamDefinition],

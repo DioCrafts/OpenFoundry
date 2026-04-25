@@ -1,0 +1,17 @@
+apollo:
+  enabled: true
+  schedule: "*/5 * * * *"
+  actionMode: promote
+  reconcileFleetIds:
+    - 01968b70-4f20-71b8-a6f0-0f4000001001
+  promoteWebhookPath: /api/v1/marketplace/devops/fleets/01968b70-4f20-71b8-a6f0-0f4000001001/sync
+  env:
+    APOLLO_RELEASE_CHANNELS: stable,canary
+    APOLLO_SAFETY_MODE: readiness_gate
+
+global:
+  deploymentFabric:
+    cloud: kubernetes
+    environment: production
+    cell: promotion-control
+    region: eu-west-1

@@ -39,6 +39,81 @@
         "shared_scopes": "Scopes allowed for federation and sharing.",
         "slug": "Stable peer identifier."
       }
+    },
+    {
+      "name": "openfoundry_product_fleet",
+      "description": "Manage a rollout fleet for a packaged OpenFoundry product, including release channel, maintenance window, and auto-upgrade posture.",
+      "attributes": {
+        "listing_id": "UUID of the marketplace listing or product package.",
+        "name": "Human-friendly fleet name.",
+        "environment": "Target environment such as production, staging, or qa.",
+        "workspace_targets": "List of enrollment/workspace targets managed by the fleet.",
+        "release_channel": "stable, beta, canary, or a custom promotion channel.",
+        "auto_upgrade_enabled": "Whether upgrades should roll automatically inside the maintenance window.",
+        "maintenance_window": "Window definition with days, start hour UTC, duration, and timezone label.",
+        "branch_strategy": "How enrollment-level branches should be created for feature work.",
+        "rollout_strategy": "rolling, staged, or other custom rollout posture."
+      }
+    },
+    {
+      "name": "openfoundry_enrollment_branch",
+      "description": "Create an enrollment-level feature branch for a product fleet rollout.",
+      "attributes": {
+        "fleet_id": "UUID of the product fleet owning the branch.",
+        "name": "Branch name exposed to operators.",
+        "repository_branch": "Optional underlying repository branch override.",
+        "notes": "Operational notes or rollout hypothesis for the branch."
+      }
+    },
+    {
+      "name": "openfoundry_deployment_cell",
+      "description": "Model a SaaS or sovereign OpenFoundry deployment cell across one cloud/region pair, including workspace affinity and workload identity posture.",
+      "attributes": {
+        "name": "Stable deployment cell name such as eu-regulated or us-operations.",
+        "cloud": "Target substrate: aws, gcp, azure, onprem, or hybrid.",
+        "region": "Primary region or sovereign site for this cell.",
+        "environment": "production, staging, qa, sovereign, or other control-plane environment.",
+        "workspace_targets": "Enrollment/workspace targets pinned to this cell.",
+        "workload_identity": "Structured cloud identity binding used by the control plane in this cell.",
+        "failover_priority": "Lower number means this cell is promoted first during failover routing."
+      }
+    },
+    {
+      "name": "openfoundry_geo_fence_policy",
+      "description": "Enforce data-residency and geo-ingress/egress restrictions for a deployment cell or platform edge.",
+      "attributes": {
+        "name": "Human-friendly geo fence policy name.",
+        "allowed_countries": "ISO country codes permitted at the edge.",
+        "allowed_ingress_cidrs": "Client CIDR allowlist applied at ingress or WAF layers.",
+        "allowed_egress_cidrs": "Private backbone or partner CIDRs permitted for egress.",
+        "required_node_labels": "Kubernetes node labels that constrain workload residency.",
+        "default_action": "allow, deny, or observe-only posture when traffic is outside the fence."
+      }
+    },
+    {
+      "name": "openfoundry_airgap_bundle",
+      "description": "Manage offline release bundles, private registry mirrors, and public-egress shutdown posture for air-gapped deployments.",
+      "attributes": {
+        "name": "Stable air-gap bundle identifier.",
+        "bundle_version": "Offline release or export bundle version.",
+        "private_registry": "Primary private registry or mirror endpoint used by Kubernetes and Compose profiles.",
+        "mirror_registries": "Upstream registries mirrored into the private environment.",
+        "release_manifest_sha256": "Checksum of the promoted offline release manifest.",
+        "public_egress_disabled": "Whether public internet egress is blocked for workloads using this bundle."
+      }
+    },
+    {
+      "name": "openfoundry_apollo_rollout",
+      "description": "Model autonomous CI/CD rollout posture for OpenFoundry fleets, tied to readiness gates and maintenance windows.",
+      "attributes": {
+        "name": "Human-friendly Apollo rollout name.",
+        "schedule": "Cron schedule for reconciliation or promotion checks.",
+        "action_mode": "observe, gated_sync, or promote.",
+        "control_panel_readiness_path": "API path used to fetch upgrade readiness before a rollout action.",
+        "fleet_ids": "Managed product fleet ids reconciled by Apollo.",
+        "promote_webhook_path": "Optional API path invoked after readiness becomes green.",
+        "release_channels": "Release channels Apollo is allowed to act on."
+      }
     }
   ],
   "data_sources": [

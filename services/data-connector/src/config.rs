@@ -10,6 +10,10 @@ pub struct AppConfig {
     pub jwt_secret: String,
     #[serde(default = "default_dataset_service_url")]
     pub dataset_service_url: String,
+    #[serde(default = "default_pipeline_service_url")]
+    pub pipeline_service_url: String,
+    #[serde(default = "default_ontology_service_url")]
+    pub ontology_service_url: String,
     #[serde(default = "default_sync_poll_interval_secs")]
     pub sync_poll_interval_secs: u64,
     #[serde(default = "default_allow_private_network_egress")]
@@ -28,6 +32,12 @@ fn default_port() -> u16 {
 }
 fn default_dataset_service_url() -> String {
     "http://localhost:50053".to_string()
+}
+fn default_pipeline_service_url() -> String {
+    "http://localhost:50056".to_string()
+}
+fn default_ontology_service_url() -> String {
+    "http://localhost:50057".to_string()
 }
 fn default_sync_poll_interval_secs() -> u64 {
     2

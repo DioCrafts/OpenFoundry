@@ -18,9 +18,11 @@
 
 	type VersionDraft = {
 		version: string;
+		release_channel: string;
 		changelog: string;
 		dependency_mode: string;
 		dependencies_text: string;
+		packaged_resources_text: string;
 		manifest_text: string;
 	};
 
@@ -119,6 +121,10 @@
 				<input class="w-full rounded-2xl border border-stone-700 bg-stone-900 px-4 py-3 outline-none transition focus:border-purple-400" value={versionDraft.version} oninput={(event) => onVersionDraftChange({ version: inputValue(event) })} />
 			</label>
 			<label class="block text-sm">
+				<span class="mb-2 block font-medium text-stone-100">Release channel</span>
+				<input class="w-full rounded-2xl border border-stone-700 bg-stone-900 px-4 py-3 outline-none transition focus:border-purple-400" value={versionDraft.release_channel} oninput={(event) => onVersionDraftChange({ release_channel: inputValue(event) })} />
+			</label>
+			<label class="block text-sm">
 				<span class="mb-2 block font-medium text-stone-100">Dependency mode</span>
 				<input class="w-full rounded-2xl border border-stone-700 bg-stone-900 px-4 py-3 outline-none transition focus:border-purple-400" value={versionDraft.dependency_mode} oninput={(event) => onVersionDraftChange({ dependency_mode: inputValue(event) })} />
 			</label>
@@ -129,6 +135,10 @@
 			<label class="block text-sm">
 				<span class="mb-2 block font-medium text-stone-100">Dependencies JSON</span>
 				<textarea class="min-h-32 w-full rounded-2xl border border-stone-700 bg-stone-900 px-4 py-3 font-mono text-xs text-purple-100 outline-none transition focus:border-purple-400" oninput={(event) => onVersionDraftChange({ dependencies_text: textValue(event) })}>{versionDraft.dependencies_text}</textarea>
+			</label>
+			<label class="block text-sm">
+				<span class="mb-2 block font-medium text-stone-100">Packaged resources JSON</span>
+				<textarea class="min-h-32 w-full rounded-2xl border border-stone-700 bg-stone-900 px-4 py-3 font-mono text-xs text-purple-100 outline-none transition focus:border-purple-400" oninput={(event) => onVersionDraftChange({ packaged_resources_text: textValue(event) })}>{versionDraft.packaged_resources_text}</textarea>
 			</label>
 			<label class="block text-sm">
 				<span class="mb-2 block font-medium text-stone-100">Manifest JSON</span>

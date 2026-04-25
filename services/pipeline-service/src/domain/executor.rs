@@ -29,6 +29,7 @@ pub async fn start_pipeline_run(
     retry_of_run_id: Option<Uuid>,
     attempt_number: i32,
     distributed_worker_count: usize,
+    skip_unchanged: bool,
     context: Value,
 ) -> Result<PipelineRun, String> {
     let nodes = pipeline.parsed_nodes()?;
@@ -39,7 +40,7 @@ pub async fn start_pipeline_run(
     let retry_policy = effective_retry_policy(&pipeline.parsed_retry_policy());
     let actor_id = started_by.unwrap_or(pipeline.owner_id);
     let prior_node_results = latest_successful_node_results(&state.db, pipeline.id).await?;
-    let execution_context = enrich_execution_context(&context, &prior_node_results);
+    let execution_context = enrich_execution_context(&context, &prior_node_results, skip_unchanged);
 
     let run = sqlx::query_as::<_, PipelineRun>(
         r#"INSERT INTO pipeline_runs (
@@ -70,7 +71,7 @@ pub async fn start_pipeline_run(
             start_from_node: from_node_id.clone(),
             max_attempts: retry_policy.max_attempts.max(1),
             distributed_worker_count: distributed_worker_count.max(1),
-            skip_unchanged: true,
+            skip_unchanged,
             prior_node_results,
         },
     )
@@ -156,6 +157,7 @@ pub async fn retry_pipeline_run(
     previous_run: &PipelineRun,
     explicit_from_node_id: Option<String>,
     distributed_worker_count: usize,
+    skip_unchanged: bool,
 ) -> Result<PipelineRun, String> {
     let retry_policy = pipeline.parsed_retry_policy();
     if explicit_from_node_id.is_some() && !retry_policy.allow_partial_reexecution {
@@ -179,6 +181,7 @@ pub async fn retry_pipeline_run(
         Some(previous_run.id),
         previous_run.attempt_number + 1,
         distributed_worker_count,
+        skip_unchanged,
         previous_run.execution_context.clone(),
     )
     .await
@@ -214,6 +217,7 @@ pub async fn run_due_scheduled_pipelines(state: &AppState) -> Result<usize, Stri
             None,
             1,
             state.distributed_pipeline_workers.max(1),
+            true,
             context,
         )
         .await
@@ -305,6 +309,7 @@ async fn latest_successful_node_results(
 fn enrich_execution_context(
     context: &Value,
     prior_node_results: &HashMap<String, NodeResult>,
+    skip_unchanged: bool,
 ) -> Value {
     let mut context = context.clone();
     if let Value::Object(map) = &mut context {
@@ -313,6 +318,8 @@ fn enrich_execution_context(
             json!({
                 "started_at": Utc::now(),
                 "prior_completed_node_count": prior_node_results.len(),
+                "skip_unchanged_requested": skip_unchanged,
+                "mode": if skip_unchanged { "incremental" } else { "full_rebuild" },
             }),
         );
     }
@@ -347,6 +354,16 @@ fn finalize_execution_context(context: &Value, results: &[NodeResult]) -> Value 
                     .and_then(|build| build.get("prior_completed_node_count"))
                     .cloned()
                     .unwrap_or_else(|| json!(0)),
+                "skip_unchanged_requested": map
+                    .get("build")
+                    .and_then(|build| build.get("skip_unchanged_requested"))
+                    .cloned()
+                    .unwrap_or_else(|| json!(true)),
+                "mode": map
+                    .get("build")
+                    .and_then(|build| build.get("mode"))
+                    .cloned()
+                    .unwrap_or_else(|| json!("incremental")),
                 "finished_at": Utc::now(),
                 "completed_nodes": completed_nodes,
                 "skipped_nodes": skipped_nodes,

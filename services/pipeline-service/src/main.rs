@@ -19,6 +19,7 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     pub dataset_service_url: String,
     pub workflow_service_url: String,
+    pub ai_service_url: String,
     pub storage: std::sync::Arc<dyn StorageBackend>,
     pub distributed_pipeline_workers: usize,
 }
@@ -47,33 +48,12 @@ async fn main() {
         .await
         .expect("failed to run migrations");
 
-    let jwt_config = JwtConfig::new(&cfg.jwt_secret);
+    let jwt_config = JwtConfig::new(&cfg.jwt_secret).with_env_defaults();
     let http_client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .build()
         .expect("failed to build HTTP client");
-    let storage: std::sync::Arc<dyn StorageBackend> = match cfg.storage_backend.as_str() {
-        "local" => {
-            let root = cfg
-                .local_storage_root
-                .as_deref()
-                .unwrap_or("/tmp/of-datasets");
-            std::sync::Arc::new(
-                storage_abstraction::local::LocalStorage::new(root)
-                    .expect("failed to init local storage"),
-            )
-        }
-        _ => std::sync::Arc::new(
-            storage_abstraction::s3::S3Storage::new(
-                &cfg.storage_bucket,
-                cfg.s3_region.as_deref().unwrap_or("us-east-1"),
-                cfg.s3_endpoint.as_deref(),
-                cfg.s3_access_key.as_deref().unwrap_or("minioadmin"),
-                cfg.s3_secret_key.as_deref().unwrap_or("minioadmin"),
-            )
-            .expect("failed to init S3 storage"),
-        ),
-    };
+    let storage = build_storage_backend(&cfg);
 
     let state = AppState {
         db: pool,
@@ -81,6 +61,7 @@ async fn main() {
         http_client,
         dataset_service_url: cfg.dataset_service_url.clone(),
         workflow_service_url: cfg.workflow_service_url.clone(),
+        ai_service_url: cfg.ai_service_url.clone(),
         storage,
         distributed_pipeline_workers: cfg.distributed_pipeline_workers.max(1),
     };
@@ -165,4 +146,41 @@ async fn main() {
         .expect("failed to bind");
 
     axum::serve(listener, app).await.expect("server error");
+}
+
+fn build_storage_backend(cfg: &config::AppConfig) -> std::sync::Arc<dyn StorageBackend> {
+    match cfg.storage_backend.as_str() {
+        "local" => {
+            let root = cfg
+                .local_storage_root
+                .as_deref()
+                .unwrap_or("/tmp/of-datasets");
+            std::sync::Arc::new(
+                storage_abstraction::local::LocalStorage::new(root)
+                    .expect("failed to init local storage"),
+            )
+        }
+        "s3" => {
+            let access_key = cfg
+                .s3_access_key
+                .as_deref()
+                .expect("s3_access_key must be configured when storage_backend=s3");
+            let secret_key = cfg
+                .s3_secret_key
+                .as_deref()
+                .expect("s3_secret_key must be configured when storage_backend=s3");
+
+            std::sync::Arc::new(
+                storage_abstraction::s3::S3Storage::new(
+                    &cfg.storage_bucket,
+                    cfg.s3_region.as_deref().unwrap_or("us-east-1"),
+                    cfg.s3_endpoint.as_deref(),
+                    access_key,
+                    secret_key,
+                )
+                .expect("failed to init S3 storage"),
+            )
+        }
+        other => panic!("unsupported storage backend '{other}'"),
+    }
 }

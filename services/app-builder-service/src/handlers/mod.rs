@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::{
     AppState,
     models::{
-        app::{App, AppRow, AppSettings, AppTemplate, AppTemplateRow},
+        app::{App, AppRow, AppSettings, AppTemplate, AppTemplateRow, WorkshopScenarioPreset},
         page::AppPage,
         version::{AppVersion, AppVersionRow},
         widget::WidgetDefinition,
@@ -111,6 +111,8 @@ pub fn sanitize_pages(pages: &mut Vec<AppPage>, settings: &mut AppSettings) {
     if !current_home_exists {
         settings.home_page_id = pages.first().map(|page| page.id.clone());
     }
+
+    sanitize_interactive_workshop_settings(pages, settings);
 }
 
 fn sanitize_widgets(widgets: &mut [WidgetDefinition]) {
@@ -124,6 +126,100 @@ fn sanitize_widgets(widgets: &mut [WidgetDefinition]) {
         }
 
         sanitize_widgets(&mut widget.children);
+    }
+}
+
+fn sanitize_interactive_workshop_settings(pages: &[AppPage], settings: &mut AppSettings) {
+    let widget_ids = collect_widget_ids(pages);
+    settings.interactive_workshop.suggested_questions = settings
+        .interactive_workshop
+        .suggested_questions
+        .iter()
+        .map(|question| question.trim().to_string())
+        .filter(|question| !question.is_empty())
+        .collect();
+
+    for (index, preset) in settings
+        .interactive_workshop
+        .scenario_presets
+        .iter_mut()
+        .enumerate()
+    {
+        sanitize_scenario_preset(index, preset);
+    }
+
+    if settings
+        .interactive_workshop
+        .primary_scenario_widget_id
+        .as_ref()
+        .is_some_and(|widget_id| !widget_ids.contains(widget_id))
+    {
+        settings.interactive_workshop.primary_scenario_widget_id = None;
+    }
+
+    if settings
+        .interactive_workshop
+        .primary_agent_widget_id
+        .as_ref()
+        .is_some_and(|widget_id| !widget_ids.contains(widget_id))
+    {
+        settings.interactive_workshop.primary_agent_widget_id = None;
+    }
+}
+
+fn sanitize_scenario_preset(index: usize, preset: &mut WorkshopScenarioPreset) {
+    if preset.id.trim().is_empty() {
+        preset.id = Uuid::now_v7().to_string();
+    }
+
+    if preset.label.trim().is_empty() {
+        preset.label = format!("Scenario preset {}", index + 1);
+    } else {
+        preset.label = preset.label.trim().to_string();
+    }
+
+    preset.description = preset
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    preset.prompt_template = preset
+        .prompt_template
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    preset.parameters = preset
+        .parameters
+        .iter()
+        .filter_map(|(key, value)| {
+            let key = key.trim();
+            let value = value.trim();
+            if key.is_empty() || value.is_empty() {
+                None
+            } else {
+                Some((key.to_string(), value.to_string()))
+            }
+        })
+        .collect();
+}
+
+fn collect_widget_ids(pages: &[AppPage]) -> std::collections::BTreeSet<String> {
+    let mut ids = std::collections::BTreeSet::new();
+    for page in pages {
+        collect_widget_ids_recursive(&page.widgets, &mut ids);
+    }
+    ids
+}
+
+fn collect_widget_ids_recursive(
+    widgets: &[WidgetDefinition],
+    ids: &mut std::collections::BTreeSet<String>,
+) {
+    for widget in widgets {
+        ids.insert(widget.id.clone());
+        collect_widget_ids_recursive(&widget.children, ids);
     }
 }
 

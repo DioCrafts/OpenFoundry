@@ -13,6 +13,8 @@
 		widget: AppWidget;
 		globalFilter?: string;
 		runtimeParameters?: Record<string, string>;
+		interactivePromptSeed?: string;
+		primaryInteractiveAgentWidgetId?: string | null;
 		onAction?: (event: WidgetEvent, payload?: Record<string, unknown>) => Promise<void> | void;
 	}
 
@@ -31,7 +33,7 @@
 		description?: string;
 	};
 
-	let { widget, globalFilter = '', runtimeParameters = {}, onAction }: Props = $props();
+	let { widget, globalFilter = '', runtimeParameters = {}, interactivePromptSeed = '', primaryInteractiveAgentWidgetId = null, onAction }: Props = $props();
 
 	let result = $state<QueryResult | null>(null);
 	let dataset = $state<Dataset | null>(null);
@@ -96,6 +98,45 @@
 		agentResponse = null;
 		agentError = '';
 		agentPrompt = '';
+	});
+
+	$effect(() => {
+		if (widget.widget_type !== 'scenario' || scenarioParameters.length === 0) {
+			return;
+		}
+
+		const nextEntries = scenarioParameters
+			.filter((parameter) => runtimeParameters[parameter.name] !== undefined)
+			.map((parameter) => [parameter.name, runtimeParameters[parameter.name] ?? parameter.default_value] as const);
+		if (nextEntries.length === 0) {
+			return;
+		}
+
+		const nextState = { ...scenarioState };
+		let changed = false;
+		for (const [name, value] of nextEntries) {
+			if (nextState[name] !== value) {
+				nextState[name] = value;
+				changed = true;
+			}
+		}
+
+		if (changed) {
+			scenarioState = nextState;
+		}
+	});
+
+	$effect(() => {
+		if (widget.widget_type !== 'agent' || !interactivePromptSeed.trim()) {
+			return;
+		}
+		if (primaryInteractiveAgentWidgetId && primaryInteractiveAgentWidgetId !== widget.id) {
+			return;
+		}
+		if (agentPrompt.trim() === interactivePromptSeed.trim()) {
+			return;
+		}
+		agentPrompt = interactivePromptSeed;
 	});
 
 	$effect(() => {
@@ -364,8 +405,15 @@
 				throw new Error('Enter a prompt for the embedded agent');
 			}
 
+			const runtimeContext = Object.entries(runtimeParameters)
+				.map(([key, value]) => `- ${key}: ${value}`)
+				.join('\n');
+			const finalPrompt = booleanProp('include_runtime_context', true) && runtimeContext
+				? `${stringProp('runtime_context_intro', 'Current scenario context:')}\n${runtimeContext}\n\nUser request:\n${agentPrompt.trim()}`
+				: agentPrompt.trim();
+
 			agentResponse = await executeAgent(agentId, {
-				user_message: agentPrompt,
+				user_message: finalPrompt,
 				knowledge_base_id: stringProp('knowledge_base_id', '').trim() || undefined,
 			});
 		} catch (cause) {
@@ -521,12 +569,28 @@
 					{stringProp('reset_label', 'Reset')}
 				</button>
 			</div>
+			{#if stringProp('summary_template', '').trim()}
+				<div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+					{interpolateTemplate(stringProp('summary_template', ''), scenarioState)}
+				</div>
+			{/if}
 		</form>
 	{:else if widget.widget_type === 'agent'}
 		<div class="flex h-full flex-col gap-4">
 			<div class="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
 				{stringProp('welcome_message', 'This widget can run a real OpenFoundry agent.')}
 			</div>
+
+			{#if booleanProp('include_runtime_context', true) && Object.keys(runtimeParameters).length > 0}
+				<div class="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-500">
+					<div class="font-semibold uppercase tracking-[0.18em] text-slate-400">{stringProp('runtime_context_intro', 'Current scenario context:')}</div>
+					<div class="mt-2 flex flex-wrap gap-2">
+						{#each Object.entries(runtimeParameters) as [key, value]}
+							<span class="rounded-full border border-slate-200 px-3 py-1">{key}: {value}</span>
+						{/each}
+					</div>
+				</div>
+			{/if}
 
 			{#if agentError}
 				<div class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{agentError}</div>
@@ -569,7 +633,7 @@
 						<div class="space-y-2">
 							{#each agentResponse.traces as trace}
 								<div class="rounded-xl bg-slate-50 px-3 py-3 text-xs text-slate-600">
-									<div class="font-semibold text-slate-700">Step {trace.step_number}: {trace.action}</div>
+									<div class="font-semibold text-slate-700">{trace.title}</div>
 									<div class="mt-1">{trace.observation}</div>
 								</div>
 							{/each}

@@ -45,7 +45,7 @@ async fn main() {
         .await
         .expect("failed to run migrations");
 
-    let jwt_config = JwtConfig::new(&cfg.jwt_secret);
+    let jwt_config = JwtConfig::new(&cfg.jwt_secret).with_env_defaults();
     let http_client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
@@ -103,6 +103,17 @@ async fn main() {
                 .delete(handlers::interfaces::delete_interface_property),
         )
         .route(
+            "/api/v1/ontology/shared-property-types",
+            get(handlers::shared_properties::list_shared_property_types)
+                .post(handlers::shared_properties::create_shared_property_type),
+        )
+        .route(
+            "/api/v1/ontology/shared-property-types/{id}",
+            get(handlers::shared_properties::get_shared_property_type)
+                .patch(handlers::shared_properties::update_shared_property_type)
+                .delete(handlers::shared_properties::delete_shared_property_type),
+        )
+        .route(
             "/api/v1/ontology/functions",
             get(handlers::functions::list_function_packages)
                 .post(handlers::functions::create_function_package),
@@ -128,6 +139,14 @@ async fn main() {
         .route(
             "/api/v1/ontology/rules/insights",
             get(handlers::rules::get_machinery_insights),
+        )
+        .route(
+            "/api/v1/ontology/rules/machinery/queue",
+            get(handlers::rules::get_machinery_queue),
+        )
+        .route(
+            "/api/v1/ontology/rules/machinery/queue/{id}",
+            patch(handlers::rules::update_machinery_queue_item),
         )
         .route(
             "/api/v1/ontology/rules/{id}",
@@ -156,6 +175,15 @@ async fn main() {
             post(handlers::interfaces::attach_interface_to_type)
                 .delete(handlers::interfaces::detach_interface_from_type),
         )
+        .route(
+            "/api/v1/ontology/types/{type_id}/shared-property-types",
+            get(handlers::shared_properties::list_type_shared_property_types),
+        )
+        .route(
+            "/api/v1/ontology/types/{type_id}/shared-property-types/{shared_property_type_id}",
+            post(handlers::shared_properties::attach_shared_property_type_to_type)
+                .delete(handlers::shared_properties::detach_shared_property_type_from_type),
+        )
         // Action types
         .route("/api/v1/ontology/actions", post(handlers::actions::create_action_type))
         .route("/api/v1/ontology/actions", get(handlers::actions::list_action_types))
@@ -164,6 +192,15 @@ async fn main() {
         .route("/api/v1/ontology/actions/{id}", delete(handlers::actions::delete_action_type))
         .route("/api/v1/ontology/actions/{id}/validate", post(handlers::actions::validate_action))
         .route("/api/v1/ontology/actions/{id}/execute", post(handlers::actions::execute_action))
+        .route(
+            "/api/v1/ontology/actions/{id}/what-if",
+            get(handlers::actions::list_action_what_if_branches)
+                .post(handlers::actions::create_action_what_if_branch),
+        )
+        .route(
+            "/api/v1/ontology/actions/{id}/what-if/{branch_id}",
+            delete(handlers::actions::delete_action_what_if_branch),
+        )
         .route(
             "/api/v1/ontology/actions/{id}/execute-batch",
             post(handlers::actions::execute_action_batch),
@@ -199,6 +236,40 @@ async fn main() {
         )
         .route("/api/v1/ontology/search", post(handlers::search::search_ontology))
         .route("/api/v1/ontology/graph", get(handlers::search::get_graph))
+        .route(
+            "/api/v1/ontology/quiver/vega-spec",
+            post(handlers::search::get_quiver_vega_spec),
+        )
+        .route(
+            "/api/v1/ontology/quiver/visual-functions",
+            get(handlers::search::list_quiver_visual_functions)
+                .post(handlers::search::create_quiver_visual_function),
+        )
+        .route(
+            "/api/v1/ontology/quiver/visual-functions/{id}",
+            get(handlers::search::get_quiver_visual_function)
+                .patch(handlers::search::update_quiver_visual_function)
+                .delete(handlers::search::delete_quiver_visual_function),
+        )
+        .route(
+            "/api/v1/ontology/object-sets",
+            get(handlers::object_sets::list_object_sets)
+                .post(handlers::object_sets::create_object_set),
+        )
+        .route(
+            "/api/v1/ontology/object-sets/{id}",
+            get(handlers::object_sets::get_object_set)
+                .patch(handlers::object_sets::update_object_set)
+                .delete(handlers::object_sets::delete_object_set),
+        )
+        .route(
+            "/api/v1/ontology/object-sets/{id}/evaluate",
+            post(handlers::object_sets::evaluate_object_set),
+        )
+        .route(
+            "/api/v1/ontology/object-sets/{id}/materialize",
+            post(handlers::object_sets::materialize_object_set),
+        )
 
         // Link types
         .route("/api/v1/ontology/links", post(handlers::links::create_link_type))

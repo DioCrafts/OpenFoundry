@@ -79,6 +79,8 @@ pub struct LineageImpactItem {
     pub label: String,
     pub distance: usize,
     pub marking: String,
+    pub effective_marking: String,
+    pub requires_acknowledgement: bool,
     pub metadata: Value,
     pub path: Vec<LineagePathHop>,
 }
@@ -92,6 +94,9 @@ pub struct LineageBuildCandidate {
     pub distance: usize,
     pub triggerable: bool,
     pub marking: String,
+    pub effective_marking: String,
+    pub requires_acknowledgement: bool,
+    pub blocked_reason: Option<String>,
     pub metadata: Value,
 }
 
@@ -110,6 +115,8 @@ pub struct LineageBuildRequest {
     pub include_workflows: bool,
     #[serde(default)]
     pub dry_run: bool,
+    #[serde(default)]
+    pub acknowledge_sensitive_lineage: bool,
     #[serde(default)]
     pub max_depth: Option<usize>,
     #[serde(default)]
@@ -130,6 +137,7 @@ pub struct LineageBuildTriggerResult {
 pub struct LineageBuildResult {
     pub root: LineageNode,
     pub dry_run: bool,
+    pub acknowledged_sensitive_lineage: bool,
     pub propagated_marking: String,
     pub candidates: Vec<LineageBuildCandidate>,
     pub triggered: Vec<LineageBuildTriggerResult>,
@@ -206,6 +214,7 @@ struct DatasetMetadata {
     id: Uuid,
     name: String,
     format: String,
+    marking: String,
     tags: Vec<String>,
     current_version: i32,
     active_branch: String,
@@ -349,8 +358,27 @@ pub async fn trigger_lineage_builds(
     let mut skipped = Vec::new();
 
     if !request.dry_run {
-        for candidate in &candidates {
+        for candidate in &mut candidates {
+            candidate.blocked_reason = None;
+            if candidate.requires_acknowledgement && !request.acknowledge_sensitive_lineage {
+                let message = format!(
+                    "acknowledge sensitive lineage before triggering {} build with {} marking",
+                    candidate.kind, candidate.effective_marking
+                );
+                candidate.blocked_reason = Some(message.clone());
+                skipped.push(LineageBuildTriggerResult {
+                    id: candidate.id,
+                    kind: candidate.kind.clone(),
+                    label: candidate.label.clone(),
+                    run_id: None,
+                    status: "blocked".to_string(),
+                    message: Some(message),
+                });
+                continue;
+            }
+
             if !candidate.triggerable {
+                candidate.blocked_reason = Some("candidate is not active".to_string());
                 skipped.push(LineageBuildTriggerResult {
                     id: candidate.id,
                     kind: candidate.kind.clone(),
@@ -371,7 +399,11 @@ pub async fn trigger_lineage_builds(
                         "root_dataset_id": dataset_id,
                         "root_marking": impact.propagated_marking,
                         "candidate_id": candidate.id,
-                        "candidate_kind": candidate.kind,
+                        "candidate_kind": candidate.kind.clone(),
+                        "candidate_marking": candidate.marking.clone(),
+                        "effective_marking": candidate.effective_marking.clone(),
+                        "requires_acknowledgement": candidate.requires_acknowledgement,
+                        "acknowledged_sensitive_lineage": request.acknowledge_sensitive_lineage,
                         "requested_by": requested_by,
                         "requested_at": Utc::now(),
                     }),
@@ -394,6 +426,7 @@ pub async fn trigger_lineage_builds(
                         None,
                         1,
                         state.distributed_pipeline_workers.max(1),
+                        true,
                         build_context,
                     )
                     .await
@@ -485,6 +518,7 @@ pub async fn trigger_lineage_builds(
     Ok(LineageBuildResult {
         root: impact.root,
         dry_run: request.dry_run,
+        acknowledged_sensitive_lineage: request.acknowledge_sensitive_lineage,
         propagated_marking: impact.propagated_marking,
         candidates,
         triggered,
@@ -670,7 +704,8 @@ pub async fn ensure_dataset_snapshot(
     let existing = get_node_record(&state.db, dataset.id, NodeKind::Dataset)
         .await
         .map_err(|error| error.to_string())?;
-    let base_marking = marking_from_dataset_tags(&dataset.tags);
+    let base_marking = normalize_marking(Some(dataset.marking.as_str()))
+        .unwrap_or_else(|| marking_from_dataset_tags(&dataset.tags));
     let effective_marking = max_markings([
         Some(base_marking.as_str()),
         existing.as_ref().map(|record| record.marking.as_str()),
@@ -690,6 +725,7 @@ pub async fn ensure_dataset_snapshot(
                 "current_version": dataset.current_version,
                 "active_branch": dataset.active_branch,
                 "owner_id": dataset.owner_id,
+                "dataset_marking": dataset.marking,
                 "base_marking": base_marking,
                 "metadata_refreshed_at": dataset.updated_at,
             }),
@@ -815,19 +851,20 @@ pub fn filter_impact_for_claims(
     let upstream = impact
         .upstream
         .into_iter()
-        .filter(|item| can_access_marking(claims, &item.marking))
+        .filter(|item| can_access_marking(claims, &item.effective_marking))
         .collect();
     let downstream: Vec<_> = impact
         .downstream
         .into_iter()
-        .filter(|item| can_access_marking(claims, &item.marking))
+        .filter(|item| can_access_marking(claims, &item.effective_marking))
         .collect();
     let allowed_ids: BTreeSet<Uuid> = downstream.iter().map(|item| item.id).collect();
     let build_candidates = impact
         .build_candidates
         .into_iter()
         .filter(|candidate| {
-            allowed_ids.contains(&candidate.id) && can_access_marking(claims, &candidate.marking)
+            allowed_ids.contains(&candidate.id)
+                && can_access_marking(claims, &candidate.effective_marking)
         })
         .collect();
 
@@ -1402,6 +1439,17 @@ fn build_impact_items(
         let Some(node) = build_node_view(*node_key, nodes) else {
             continue;
         };
+        let effective_marking =
+            effective_path_marking(&node.marking, relation_ids, &relation_index);
+        let requires_acknowledgement = requires_marking_acknowledgement(&effective_marking);
+        let metadata = merge_metadata(
+            Some(&node.metadata),
+            json!({
+                "node_marking": node.marking,
+                "effective_marking": effective_marking,
+            }),
+            None,
+        );
         let path = relation_ids
             .iter()
             .filter_map(|relation_id| relation_index.get(relation_id))
@@ -1421,7 +1469,9 @@ fn build_impact_items(
             label: node.label,
             distance: relation_ids.len(),
             marking: node.marking,
-            metadata: node.metadata,
+            effective_marking,
+            requires_acknowledgement,
+            metadata,
             path,
         });
     }
@@ -1453,8 +1503,25 @@ fn build_candidate(
         distance: item.distance,
         triggerable,
         marking: item.marking.clone(),
+        effective_marking: item.effective_marking.clone(),
+        requires_acknowledgement: item.requires_acknowledgement,
+        blocked_reason: None,
         metadata: item.metadata.clone(),
     }
+}
+
+fn effective_path_marking(
+    node_marking: &str,
+    relation_ids: &[Uuid],
+    relation_index: &HashMap<Uuid, &LineageRelationRecord>,
+) -> String {
+    max_markings(
+        std::iter::once(Some(node_marking)).chain(relation_ids.iter().filter_map(|relation_id| {
+            relation_index
+                .get(relation_id)
+                .map(|relation| Some(relation.effective_marking.as_str()))
+        })),
+    )
 }
 
 fn merge_metadata(base: Option<&Value>, overlay: Value, extra: Option<&Value>) -> Value {
@@ -1544,6 +1611,10 @@ where
     best.to_string()
 }
 
+fn requires_marking_acknowledgement(marking: &str) -> bool {
+    marking_rank(marking) > 0
+}
+
 fn marking_rank(marking: &str) -> u8 {
     match marking {
         "pii" => 2,
@@ -1594,7 +1665,7 @@ async fn load_pipeline_by_id(
 mod tests {
     use super::{
         Claims, Direction, LineageNodeRecord, LineageRelationRecord, NodeKey, NodeKind, bfs_paths,
-        build_impact_items, can_access_marking, max_markings,
+        build_candidate, build_impact_items, can_access_marking, max_markings,
     };
     use chrono::Utc;
     use serde_json::json;
@@ -1606,6 +1677,8 @@ mod tests {
             sub: Uuid::now_v7(),
             iat: Utc::now().timestamp(),
             exp: Utc::now().timestamp() + 3600,
+            iss: None,
+            aud: None,
             jti: Uuid::now_v7(),
             email: "test@example.com".to_string(),
             name: "Test".to_string(),
@@ -1735,5 +1808,92 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].distance, 1);
         assert_eq!(items[0].marking, "pii");
+        assert_eq!(items[0].effective_marking, "pii");
+        assert!(items[0].requires_acknowledgement);
+    }
+
+    #[test]
+    fn impact_items_elevate_effective_marking_from_path() {
+        let source_id = Uuid::now_v7();
+        let target_id = Uuid::now_v7();
+        let root = NodeKey {
+            id: source_id,
+            kind: NodeKind::Dataset,
+        };
+        let target_key = NodeKey {
+            id: target_id,
+            kind: NodeKind::Pipeline,
+        };
+        let relations = vec![LineageRelationRecord {
+            id: Uuid::now_v7(),
+            source_id,
+            source_kind: "dataset".to_string(),
+            target_id,
+            target_kind: "pipeline".to_string(),
+            relation_kind: "consumes".to_string(),
+            pipeline_id: Some(target_id),
+            workflow_id: None,
+            node_id: Some("node-a".to_string()),
+            step_id: None,
+            effective_marking: "confidential".to_string(),
+            metadata: json!({}),
+        }];
+        let mut nodes = HashMap::new();
+        nodes.insert(
+            target_key,
+            LineageNodeRecord {
+                entity_id: target_id,
+                entity_kind: "pipeline".to_string(),
+                label: "Public pipeline".to_string(),
+                marking: "public".to_string(),
+                metadata: json!({ "status": "active" }),
+            },
+        );
+        let mut paths = HashMap::new();
+        paths.insert(root, Vec::new());
+        paths.insert(target_key, vec![relations[0].id]);
+
+        let items = build_impact_items(root, &paths, &nodes, &relations);
+
+        assert_eq!(items[0].marking, "public");
+        assert_eq!(items[0].effective_marking, "confidential");
+        assert!(items[0].requires_acknowledgement);
+    }
+
+    #[test]
+    fn build_candidate_requires_acknowledgement_when_effective_marking_is_sensitive() {
+        let target_id = Uuid::now_v7();
+        let item = super::LineageImpactItem {
+            id: target_id,
+            kind: "pipeline".to_string(),
+            label: "Risk scorer".to_string(),
+            distance: 2,
+            marking: "public".to_string(),
+            effective_marking: "pii".to_string(),
+            requires_acknowledgement: true,
+            metadata: json!({ "status": "active" }),
+            path: Vec::new(),
+        };
+        let mut nodes = HashMap::new();
+        nodes.insert(
+            NodeKey {
+                id: target_id,
+                kind: NodeKind::Pipeline,
+            },
+            LineageNodeRecord {
+                entity_id: target_id,
+                entity_kind: "pipeline".to_string(),
+                label: "Risk scorer".to_string(),
+                marking: "public".to_string(),
+                metadata: json!({ "status": "active" }),
+            },
+        );
+
+        let candidate = build_candidate(&item, &nodes);
+
+        assert!(candidate.triggerable);
+        assert!(candidate.requires_acknowledgement);
+        assert_eq!(candidate.effective_marking, "pii");
+        assert!(candidate.blocked_reason.is_none());
     }
 }

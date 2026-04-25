@@ -7,8 +7,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{AppState, domain::type_system::validate_cardinality};
 use crate::models::link_type::*;
+use crate::{AppState, domain::type_system::validate_cardinality};
 use auth_middleware::layer::AuthUser;
 
 // --- Link Type CRUD ---

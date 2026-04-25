@@ -26,7 +26,9 @@ pub async fn get_repository_diff(
         .ok_or_else(|| not_found("repository not found"))?;
     let repository = crate::models::repository::RepositoryDefinition::try_from(repository)
         .map_err(|cause| crate::handlers::internal_error(cause.to_string()))?;
-    let branch_name = query.branch.unwrap_or_else(|| repository.default_branch.clone());
+    let branch_name = query
+        .branch
+        .unwrap_or_else(|| repository.default_branch.clone());
     let patch = crate::domain::git::repository_diff(
         &state.repo_storage_root,
         repository.id,

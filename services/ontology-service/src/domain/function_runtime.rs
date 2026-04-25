@@ -347,7 +347,325 @@ async function main() {
 await main();
 "#;
 
-pub fn parse_inline_function_config(config: &Value) -> Result<Option<InlineFunctionConfig>, String> {
+const PYTHON_RUNTIME_BOOTSTRAP: &str = r#"import io
+import json
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+action = json.loads(action_json)
+target_object = json.loads(target_object_json)
+parameters = json.loads(parameters_json)
+object_set = json.loads(object_set_json)
+linked_objects = json.loads(linked_objects_json)
+justification = json.loads(justification_json)
+function_package = json.loads(function_package_json)
+capabilities = json.loads(capabilities_json)
+service_token = json.loads(service_token_json)
+ontology_service_url = json.loads(ontology_service_url_json)
+ai_service_url = json.loads(ai_service_url_json)
+preferred_entrypoint = json.loads(preferred_entrypoint_json)
+
+def _normalize_base_url(value):
+    return value if value.endswith('/') else value + '/'
+
+def _parse_response_payload(payload):
+    if payload is None:
+        return None
+    if isinstance(payload, bytes):
+        payload = payload.decode('utf-8')
+    if not payload or not str(payload).strip():
+        return None
+    try:
+        return json.loads(payload)
+    except Exception:
+        return payload
+
+def _error_message(method, path, status, payload):
+    if isinstance(payload, dict) and payload.get('error'):
+        return f"{method} {path} failed with {status}: {payload['error']}"
+    if isinstance(payload, str) and payload.strip():
+        return f"{method} {path} failed with {status}: {payload}"
+    return f"{method} {path} failed with {status}"
+
+def _guard_url(url):
+    if capabilities.get('allow_network'):
+        return
+
+    allowed_origins = {
+        urllib.parse.urlparse(ontology_service_url).scheme + '://' + urllib.parse.urlparse(ontology_service_url).netloc,
+        urllib.parse.urlparse(ai_service_url).scheme + '://' + urllib.parse.urlparse(ai_service_url).netloc,
+    }
+    parsed = urllib.parse.urlparse(url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    if origin not in allowed_origins:
+        raise RuntimeError(f"Network access is disabled for {origin}")
+
+def _request(base_url, method, path, body=None, query=None):
+    normalized_base = _normalize_base_url(base_url)
+    url = urllib.parse.urljoin(normalized_base, path.lstrip('/'))
+    if query:
+        query = {key: value for key, value in query.items() if value is not None and value != ''}
+        suffix = urllib.parse.urlencode(query)
+        if suffix:
+            url = f"{url}?{suffix}"
+
+    _guard_url(url)
+    data = None
+    headers = {
+        'authorization': service_token,
+    }
+    if body is not None:
+        headers['content-type'] = 'application/json'
+        data = json.dumps(body).encode('utf-8')
+
+    request = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request) as response:
+            payload = response.read()
+            return _parse_response_payload(payload)
+    except urllib.error.HTTPError as error:
+        payload = _parse_response_payload(error.read())
+        raise RuntimeError(_error_message(method, path, error.code, payload))
+    except Exception as error:
+        raise RuntimeError(f"{method} {path} failed: {error}")
+
+def _blocked_capability(name):
+    def _raise(*args, **kwargs):
+        raise RuntimeError(f"{name} capability is disabled for this function package")
+    return _raise
+
+class _OntologySdk:
+    def get_object(self, *, type_id, object_id):
+        return _request(ontology_service_url, 'GET', f'/api/v1/ontology/types/{type_id}/objects/{object_id}')
+
+    def update_object(self, *, type_id, object_id, properties, replace=False, marking=None):
+        return _request(
+            ontology_service_url,
+            'PATCH',
+            f'/api/v1/ontology/types/{type_id}/objects/{object_id}',
+            {
+                'properties': properties,
+                'replace': replace,
+                'marking': marking,
+            },
+        )
+
+    def query_objects(self, *, type_id, equals=None, limit=None):
+        return _request(
+            ontology_service_url,
+            'POST',
+            f'/api/v1/ontology/types/{type_id}/objects/query',
+            {
+                'equals': equals or {},
+                'limit': limit,
+            },
+        )
+
+    def list_neighbors(self, *, type_id, object_id):
+        return _request(ontology_service_url, 'GET', f'/api/v1/ontology/types/{type_id}/objects/{object_id}/neighbors')
+
+    def create_link(self, *, link_type_id, source_object_id, target_object_id, properties=None):
+        return _request(
+            ontology_service_url,
+            'POST',
+            f'/api/v1/ontology/links/{link_type_id}/instances',
+            {
+                'source_object_id': source_object_id,
+                'target_object_id': target_object_id,
+                'properties': properties,
+            },
+        )
+
+    def search(self, *, query, kind=None, object_type_id=None, limit=None, semantic=True):
+        return _request(
+            ontology_service_url,
+            'POST',
+            '/api/v1/ontology/search',
+            {
+                'query': query,
+                'kind': kind,
+                'object_type_id': object_type_id,
+                'limit': limit,
+                'semantic': semantic,
+            },
+        )
+
+    def graph(self, *, root_object_id=None, root_type_id=None, depth=None, limit=None):
+        return _request(
+            ontology_service_url,
+            'GET',
+            '/api/v1/ontology/graph',
+            None,
+            {
+                'root_object_id': root_object_id,
+                'root_type_id': root_type_id,
+                'depth': depth,
+                'limit': limit,
+            },
+        )
+
+    def get_object_view(self, *, type_id, object_id):
+        return _request(ontology_service_url, 'GET', f'/api/v1/ontology/types/{type_id}/objects/{object_id}/view')
+
+    def simulate_object(self, *, type_id, object_id, action_id=None, action_parameters=None, properties_patch=None, depth=None):
+        return _request(
+            ontology_service_url,
+            'POST',
+            f'/api/v1/ontology/types/{type_id}/objects/{object_id}/simulate',
+            {
+                'action_id': action_id,
+                'action_parameters': action_parameters or {},
+                'properties_patch': properties_patch or {},
+                'depth': depth,
+            },
+        )
+
+    def validate_action(self, *, action_id, target_object_id=None, parameters=None):
+        return _request(
+            ontology_service_url,
+            'POST',
+            f'/api/v1/ontology/actions/{action_id}/validate',
+            {
+                'target_object_id': target_object_id,
+                'parameters': parameters or {},
+            },
+        )
+
+    def execute_action(self, *, action_id, target_object_id=None, parameters=None, justification=None):
+        return _request(
+            ontology_service_url,
+            'POST',
+            f'/api/v1/ontology/actions/{action_id}/execute',
+            {
+                'target_object_id': target_object_id,
+                'parameters': parameters or {},
+                'justification': justification,
+            },
+        )
+
+class _AiSdk:
+    def complete(
+        self,
+        *,
+        user_message,
+        system_prompt=None,
+        preferred_provider_id=None,
+        knowledge_base_id=None,
+        temperature=0.2,
+        max_tokens=512,
+    ):
+        return _request(
+            ai_service_url,
+            'POST',
+            '/api/v1/ai/chat/completions',
+            {
+                'user_message': user_message,
+                'system_prompt': system_prompt,
+                'preferred_provider_id': preferred_provider_id,
+                'knowledge_base_id': knowledge_base_id,
+                'fallback_enabled': True,
+                'temperature': temperature,
+                'max_tokens': max_tokens,
+            },
+        )
+
+class _Sdk:
+    def __init__(self):
+        self.ontology = _OntologySdk()
+        self.ai = _AiSdk()
+
+class _Llm:
+    def complete(self, **kwargs):
+        return sdk.ai.complete(**kwargs)
+
+sdk = _Sdk()
+llm = _Llm()
+
+if not capabilities.get('allow_ontology_read', True):
+    sdk.ontology.get_object = _blocked_capability('ontology.read')
+    sdk.ontology.query_objects = _blocked_capability('ontology.read')
+    sdk.ontology.list_neighbors = _blocked_capability('ontology.read')
+    sdk.ontology.search = _blocked_capability('ontology.read')
+    sdk.ontology.graph = _blocked_capability('ontology.read')
+    sdk.ontology.get_object_view = _blocked_capability('ontology.read')
+    sdk.ontology.simulate_object = _blocked_capability('ontology.read')
+    sdk.ontology.validate_action = _blocked_capability('ontology.read')
+
+if not capabilities.get('allow_ontology_write', True):
+    sdk.ontology.update_object = _blocked_capability('ontology.write')
+    sdk.ontology.create_link = _blocked_capability('ontology.write')
+    sdk.ontology.execute_action = _blocked_capability('ontology.write')
+
+if not capabilities.get('allow_ai', True):
+    sdk.ai.complete = _blocked_capability('ai.complete')
+    llm.complete = _blocked_capability('ai.complete')
+
+context = {
+    'action': action,
+    'target_object': target_object,
+    'targetObject': target_object,
+    'parameters': parameters,
+    'object_set': object_set,
+    'objectSet': object_set,
+    'linked_objects': linked_objects,
+    'linkedObjects': linked_objects,
+    'justification': justification,
+    'context_now': context_now,
+    'contextNow': context_now,
+    'function_package': function_package,
+    'functionPackage': function_package,
+    'capabilities': capabilities,
+    'sdk': sdk,
+    'llm': llm,
+}
+result = None
+object_patch = None
+link = None
+delete_object = False
+_buf = io.StringIO()
+_real_stdout = sys.stdout
+sys.stdout = _buf
+"#;
+
+const PYTHON_RUNTIME_ENTRYPOINT_INVOCATION: &str = r#"
+def _resolve_python_entrypoint():
+    if preferred_entrypoint == 'default':
+        candidates = [globals().get('default'), globals().get('handler')]
+    elif preferred_entrypoint == 'handler':
+        candidates = [globals().get('handler'), globals().get('default')]
+    else:
+        candidates = [globals().get('handler'), globals().get('default')]
+
+    for candidate in candidates:
+        if callable(candidate):
+            return candidate
+    return None
+
+_entrypoint = _resolve_python_entrypoint()
+if _entrypoint is not None:
+    _entrypoint_result = _entrypoint(context)
+    if _entrypoint_result is not None:
+        if isinstance(_entrypoint_result, dict):
+            if 'output' in _entrypoint_result:
+                result = _entrypoint_result.get('output')
+            elif not any(key in _entrypoint_result for key in ('object_patch', 'link', 'delete_object')):
+                result = _entrypoint_result
+
+            if 'object_patch' in _entrypoint_result:
+                object_patch = _entrypoint_result.get('object_patch')
+            if 'link' in _entrypoint_result:
+                link = _entrypoint_result.get('link')
+            if 'delete_object' in _entrypoint_result:
+                delete_object = bool(_entrypoint_result.get('delete_object'))
+        else:
+            result = _entrypoint_result
+"#;
+
+pub fn parse_inline_function_config(
+    config: &Value,
+) -> Result<Option<InlineFunctionConfig>, String> {
     let Some(runtime) = config.get("runtime").and_then(Value::as_str) else {
         return Ok(None);
     };
@@ -415,8 +733,7 @@ pub fn validate_function_capabilities(
 
     if capabilities.timeout_seconds == 0 || capabilities.timeout_seconds > 300 {
         return Err(
-            "timeout_seconds must be between 1 and 300 for ontology function execution"
-                .to_string(),
+            "timeout_seconds must be between 1 and 300 for ontology function execution".to_string(),
         );
     }
 
@@ -529,6 +846,7 @@ pub async fn execute_inline_python_function(
         Some(target) => load_linked_objects(state, claims, target.id).await?,
         None => Vec::new(),
     };
+    let service_token = issue_inline_function_token(state, claims)?;
     let target_json = serde_json::to_string(&target.cloned().map(object_to_json))
         .map_err(|error| error.to_string())?;
     let action_json = serde_json::to_string(&json!({
@@ -538,6 +856,7 @@ pub async fn execute_inline_python_function(
         "object_type_id": action.object_type_id,
         "operation_kind": &action.operation_kind,
         "permission_key": &action.permission_key,
+        "authorization_policy": &action.authorization_policy,
     }))
     .map_err(|error| error.to_string())?;
     let parameters_json = serde_json::to_string(parameters).map_err(|error| error.to_string())?;
@@ -550,6 +869,19 @@ pub async fn execute_inline_python_function(
         serde_json::to_string(&resolved.package).map_err(|error| error.to_string())?;
     let capabilities_json =
         serde_json::to_string(&resolved.capabilities).map_err(|error| error.to_string())?;
+    let service_token_json =
+        serde_json::to_string(&service_token).map_err(|error| error.to_string())?;
+    let ontology_service_url_json =
+        serde_json::to_string(&state.ontology_service_url).map_err(|error| error.to_string())?;
+    let ai_service_url_json =
+        serde_json::to_string(&state.ai_service_url).map_err(|error| error.to_string())?;
+    let preferred_entrypoint_json = serde_json::to_string(
+        &resolved
+            .package
+            .as_ref()
+            .map(|package| package.entrypoint.as_str()),
+    )
+    .map_err(|error| error.to_string())?;
 
     Python::with_gil(|py| -> Result<Value, String> {
         let locals = PyDict::new_bound(py);
@@ -580,15 +912,31 @@ pub async fn execute_inline_python_function(
         locals
             .set_item("capabilities_json", capabilities_json.clone())
             .map_err(|error| error.to_string())?;
+        locals
+            .set_item("service_token_json", service_token_json.clone())
+            .map_err(|error| error.to_string())?;
+        locals
+            .set_item(
+                "ontology_service_url_json",
+                ontology_service_url_json.clone(),
+            )
+            .map_err(|error| error.to_string())?;
+        locals
+            .set_item("ai_service_url_json", ai_service_url_json.clone())
+            .map_err(|error| error.to_string())?;
+        locals
+            .set_item(
+                "preferred_entrypoint_json",
+                preferred_entrypoint_json.clone(),
+            )
+            .map_err(|error| error.to_string())?;
 
-        py.run_bound(
-            "import io, json, sys\naction = json.loads(action_json)\ntarget_object = json.loads(target_object_json)\nparameters = json.loads(parameters_json)\nobject_set = json.loads(object_set_json)\nlinked_objects = json.loads(linked_objects_json)\njustification = json.loads(justification_json)\nfunction_package = json.loads(function_package_json)\ncapabilities = json.loads(capabilities_json)\ncontext = {\n    'action': action,\n    'target_object': target_object,\n    'parameters': parameters,\n    'object_set': object_set,\n    'linked_objects': linked_objects,\n    'justification': justification,\n    'context_now': context_now,\n    'function_package': function_package,\n    'capabilities': capabilities,\n}\nresult = None\nobject_patch = None\nlink = None\ndelete_object = False\n_buf = io.StringIO()\n_real_stdout = sys.stdout\nsys.stdout = _buf",
-            None,
-            Some(&locals),
-        )
-        .map_err(|error| error.to_string())?;
+        py.run_bound(PYTHON_RUNTIME_BOOTSTRAP, None, Some(&locals))
+            .map_err(|error| error.to_string())?;
 
         let execution = py.run_bound(&config.source, None, Some(&locals));
+        let entrypoint_execution = execution
+            .and_then(|_| py.run_bound(PYTHON_RUNTIME_ENTRYPOINT_INVOCATION, None, Some(&locals)));
         let stdout = py
             .eval_bound("_buf.getvalue()", None, Some(&locals))
             .ok()
@@ -610,7 +958,7 @@ pub async fn execute_inline_python_function(
             .and_then(|value| value.extract::<String>().ok());
         let _ = py.run_bound("sys.stdout = _real_stdout", None, Some(&locals));
 
-        execution.map_err(|error| error.to_string())?;
+        entrypoint_execution.map_err(|error| error.to_string())?;
 
         let mut response = response_json
             .map(|raw| serde_json::from_str::<Value>(&raw).map_err(|error| error.to_string()))
@@ -654,6 +1002,7 @@ async fn execute_inline_typescript_function(
                 "object_type_id": action.object_type_id,
                 "operation_kind": &action.operation_kind,
                 "permission_key": &action.permission_key,
+                "authorization_policy": &action.authorization_policy,
             },
             "targetObject": target.cloned().map(object_to_json),
             "parameters": parameters,
@@ -683,18 +1032,21 @@ async fn execute_inline_typescript_function(
     fs::write(&runner_file_path, TYPESCRIPT_RUNTIME_RUNNER)
         .await
         .map_err(|error| format!("failed to write TypeScript runtime harness: {error}"))?;
-    fs::write(&input_file_path, serde_json::to_vec(&input).map_err(|error| error.to_string())?)
-        .await
-        .map_err(|error| format!("failed to write TypeScript runtime input: {error}"))?;
+    fs::write(
+        &input_file_path,
+        serde_json::to_vec(&input).map_err(|error| error.to_string())?,
+    )
+    .await
+    .map_err(|error| format!("failed to write TypeScript runtime input: {error}"))?;
 
     let output = timeout(
         Duration::from_secs(resolved.capabilities.timeout_seconds),
         Command::new(&state.node_runtime_command)
-        .arg("--experimental-strip-types")
-        .arg(&runner_file_path)
-        .arg(&user_file_path)
-        .arg(&input_file_path)
-        .output(),
+            .arg("--experimental-strip-types")
+            .arg(&runner_file_path)
+            .arg(&user_file_path)
+            .arg(&input_file_path)
+            .output(),
     )
     .await
     .map_err(|_| {

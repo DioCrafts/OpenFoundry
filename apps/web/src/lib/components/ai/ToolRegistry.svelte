@@ -7,6 +7,7 @@
 		description: string;
 		category: string;
 		execution_mode: string;
+		execution_config_text: string;
 		status: string;
 		input_schema_text: string;
 		output_schema_text: string;
@@ -30,6 +31,7 @@
 		description: '',
 		category: '',
 		execution_mode: '',
+		execution_config_text: '',
 		status: '',
 		input_schema_text: '',
 		output_schema_text: '',
@@ -79,14 +81,28 @@
 				<input class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-800 dark:bg-slate-900" value={localDraft.category} oninput={(event) => updateDraft('category', (event.currentTarget as HTMLInputElement).value)} placeholder="analysis" />
 			</div>
 			<div class="grid gap-4 md:grid-cols-2">
-				<input class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-800 dark:bg-slate-900" value={localDraft.execution_mode} oninput={(event) => updateDraft('execution_mode', (event.currentTarget as HTMLInputElement).value)} placeholder="simulated" />
+				<select class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-800 dark:bg-slate-900" value={localDraft.execution_mode} onchange={(event) => updateDraft('execution_mode', (event.currentTarget as HTMLSelectElement).value)}>
+					<option value="native_sql">native_sql</option>
+					<option value="native_dataset">native_dataset</option>
+					<option value="native_ontology">native_ontology</option>
+					<option value="native_pipeline">native_pipeline</option>
+					<option value="native_report">native_report</option>
+					<option value="native_workflow">native_workflow</option>
+					<option value="native_code_repo">native_code_repo</option>
+					<option value="knowledge_search">knowledge_search</option>
+					<option value="openfoundry_api">openfoundry_api</option>
+					<option value="http_json">http_json</option>
+					<option value="simulated">simulated</option>
+				</select>
 				<input class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-800 dark:bg-slate-900" value={localDraft.tags_text} oninput={(event) => updateDraft('tags_text', (event.currentTarget as HTMLInputElement).value)} placeholder="sql, copilot" />
 			</div>
 			<textarea class="h-24 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-800 dark:bg-slate-900" oninput={(event) => updateDraft('description', (event.currentTarget as HTMLTextAreaElement).value)}>{localDraft.description}</textarea>
+			<textarea class="h-40 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-xs dark:border-slate-800 dark:bg-slate-900" oninput={(event) => updateDraft('execution_config_text', (event.currentTarget as HTMLTextAreaElement).value)}>{localDraft.execution_config_text}</textarea>
 			<div class="grid gap-4 md:grid-cols-2">
 				<textarea class="h-40 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-800 dark:bg-slate-900" oninput={(event) => updateDraft('input_schema_text', (event.currentTarget as HTMLTextAreaElement).value)}>{localDraft.input_schema_text}</textarea>
 				<textarea class="h-40 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-slate-800 dark:bg-slate-900" oninput={(event) => updateDraft('output_schema_text', (event.currentTarget as HTMLTextAreaElement).value)}>{localDraft.output_schema_text}</textarea>
 			</div>
+			<p class="text-xs text-slate-500">`native_dataset`, `native_sql`, `native_ontology`, `native_pipeline`, `native_report`, `native_workflow`, `native_code_repo` y `knowledge_search` se ejecutan dentro del runtime del agente. `openfoundry_api` y `http_json` aceptan `execution_config` para rutas, auth y payloads.</p>
 		</div>
 	</div>
 </section>

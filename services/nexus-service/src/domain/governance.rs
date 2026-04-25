@@ -139,7 +139,9 @@ fn ensure_space_membership(
         return Err(format!("{label} space has unsupported status"));
     }
     if !space.member_peer_ids.contains(&peer_id) {
-        return Err(format!("{label} peer is not a member of the selected space"));
+        return Err(format!(
+            "{label} peer is not a member of the selected space"
+        ));
     }
     Ok(())
 }
@@ -241,7 +243,11 @@ mod tests {
         }
     }
 
-    fn share(contract_id: uuid::Uuid, provider_peer_id: uuid::Uuid, consumer_peer_id: uuid::Uuid) -> SharedDataset {
+    fn share(
+        contract_id: uuid::Uuid,
+        provider_peer_id: uuid::Uuid,
+        consumer_peer_id: uuid::Uuid,
+    ) -> SharedDataset {
         let now = Utc::now();
         SharedDataset {
             id: uuid::Uuid::now_v7(),

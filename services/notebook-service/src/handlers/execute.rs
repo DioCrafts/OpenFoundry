@@ -7,6 +7,10 @@ use axum::{
 use uuid::Uuid;
 
 use crate::AppState;
+use crate::domain::{
+    environment,
+    kernel::{KernelExecutionContext, KernelWorkspaceFileContext},
+};
 use crate::models::cell::{Cell, CellOutput, ExecuteCellRequest};
 use crate::models::session::Session;
 use auth_middleware::layer::AuthUser;
@@ -26,10 +30,32 @@ async fn load_session(db: &sqlx::PgPool, session_id: Uuid) -> Result<Option<Sess
         .await
 }
 
+async fn load_kernel_context(
+    state: &AppState,
+    notebook_id: Uuid,
+) -> Result<KernelExecutionContext, String> {
+    let workspace_dir = environment::notebook_workspace_root(&state.data_dir, notebook_id)
+        .to_string_lossy()
+        .to_string();
+    let workspace_files = environment::list_workspace_files(&state.data_dir, notebook_id).await?;
+
+    Ok(KernelExecutionContext {
+        notebook_id,
+        workspace_dir: Some(workspace_dir),
+        workspace_files: workspace_files
+            .into_iter()
+            .map(|file| KernelWorkspaceFileContext {
+                path: file.path,
+                content: file.content,
+            })
+            .collect(),
+    })
+}
+
 pub async fn execute_cell(
     AuthUser(claims): AuthUser,
     State(state): State<AppState>,
-    Path((_notebook_id, cell_id)): Path<(Uuid, Uuid)>,
+    Path((notebook_id, cell_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<ExecuteCellRequest>,
 ) -> impl IntoResponse {
     let cell = match sqlx::query_as::<_, Cell>("SELECT * FROM cells WHERE id = $1")
@@ -85,9 +111,20 @@ pub async fn execute_cell(
         update_session_status(&state.db, session.id, "busy").await;
     }
 
+    let context = match load_kernel_context(&state, notebook_id).await {
+        Ok(context) => context,
+        Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+    };
+
     let result = state
         .kernel_manager
-        .execute(&cell.kernel, &cell.source, body.session_id, &claims)
+        .execute(
+            &cell.kernel,
+            &cell.source,
+            body.session_id,
+            &claims,
+            &context,
+        )
         .await;
 
     let (output, exec_count) = match result {
@@ -157,6 +194,11 @@ pub async fn execute_all_cells(
     .await
     .unwrap_or_default();
 
+    let context = match load_kernel_context(&state, notebook_id).await {
+        Ok(context) => context,
+        Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+    };
+
     let mut results = Vec::new();
     for cell in &cells {
         let session_id = shared_session
@@ -166,7 +208,7 @@ pub async fn execute_all_cells(
 
         let result = state
             .kernel_manager
-            .execute(&cell.kernel, &cell.source, session_id, &claims)
+            .execute(&cell.kernel, &cell.source, session_id, &claims, &context)
             .await;
         let count = cell.execution_count.unwrap_or(0) + 1;
 

@@ -1,4 +1,5 @@
 pub mod category;
+pub mod devops;
 pub mod install;
 pub mod listing;
 pub mod package;

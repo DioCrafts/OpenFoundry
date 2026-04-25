@@ -12,6 +12,8 @@ pub struct AppConfig {
     pub data_dir: String,
     #[serde(default = "default_query_service_url")]
     pub query_service_url: String,
+    #[serde(default = "default_ai_service_url")]
+    pub ai_service_url: String,
 }
 
 fn default_host() -> String {
@@ -25,6 +27,9 @@ fn default_data_dir() -> String {
 }
 fn default_query_service_url() -> String {
     "http://127.0.0.1:50055".to_string()
+}
+fn default_ai_service_url() -> String {
+    "http://127.0.0.1:50057".to_string()
 }
 
 impl AppConfig {

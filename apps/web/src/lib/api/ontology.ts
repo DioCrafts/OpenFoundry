@@ -29,6 +29,22 @@ export interface Property {
   updated_at: string;
 }
 
+export interface SharedPropertyType {
+  id: string;
+  name: string;
+  display_name: string;
+  description: string;
+  property_type: string;
+  required: boolean;
+  unique_constraint: boolean;
+  time_dependent: boolean;
+  default_value: unknown;
+  validation_rules: unknown;
+  owner_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface LinkType {
   id: string;
   name: string;
@@ -102,6 +118,19 @@ export interface GraphEdge {
   metadata: Record<string, unknown>;
 }
 
+export interface GraphSummary {
+  scope: string;
+  node_kinds: Record<string, number>;
+  edge_kinds: Record<string, number>;
+  object_types: Record<string, number>;
+  markings: Record<string, number>;
+  root_neighbor_count: number;
+  max_hops_reached: number;
+  boundary_crossings: number;
+  sensitive_objects: number;
+  sensitive_markings: string[];
+}
+
 export interface GraphResponse {
   mode: string;
   root_object_id: string | null;
@@ -109,8 +138,87 @@ export interface GraphResponse {
   depth: number;
   total_nodes: number;
   total_edges: number;
+  summary: GraphSummary;
   nodes: GraphNode[];
   edges: GraphEdge[];
+}
+
+export interface ObjectSetPolicy {
+  allowed_markings: string[];
+  minimum_clearance: string | null;
+  deny_guest_sessions: boolean;
+  required_restricted_view_id: string | null;
+}
+
+export interface ObjectSetFilter {
+  field: string;
+  operator: string;
+  value: unknown;
+}
+
+export interface ObjectSetTraversal {
+  direction: 'outbound' | 'inbound' | 'both';
+  link_type_id: string | null;
+  target_object_type_id: string | null;
+  max_hops: number;
+}
+
+export interface ObjectSetJoin {
+  secondary_object_type_id: string;
+  left_field: string;
+  right_field: string;
+  join_kind: 'inner' | 'left';
+}
+
+export interface ObjectSetDefinition {
+  id: string;
+  name: string;
+  description: string;
+  base_object_type_id: string;
+  filters: ObjectSetFilter[];
+  traversals: ObjectSetTraversal[];
+  join: ObjectSetJoin | null;
+  projections: string[];
+  what_if_label: string | null;
+  policy: ObjectSetPolicy;
+  materialized_snapshot: unknown[] | null;
+  materialized_at: string | null;
+  materialized_row_count: number;
+  owner_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ObjectSetEvaluationResponse {
+  object_set: ObjectSetDefinition;
+  total_base_matches: number;
+  total_rows: number;
+  traversal_neighbor_count: number;
+  rows: Record<string, unknown>[];
+  generated_at: string;
+  materialized: boolean;
+}
+
+export type QuiverChartKind = 'line' | 'area' | 'bar' | 'point';
+
+export interface QuiverVisualFunction {
+  id: string;
+  name: string;
+  description: string;
+  primary_type_id: string;
+  secondary_type_id: string | null;
+  join_field: string;
+  secondary_join_field: string;
+  date_field: string;
+  metric_field: string;
+  group_field: string;
+  selected_group: string | null;
+  chart_kind: QuiverChartKind;
+  shared: boolean;
+  vega_spec: Record<string, unknown>;
+  owner_id: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export type ActionOperationKind =
@@ -129,6 +237,16 @@ export interface ActionInputField {
   default_value?: unknown;
 }
 
+export interface ActionAuthorizationPolicy {
+  required_permission_keys?: string[];
+  any_role?: string[];
+  all_roles?: string[];
+  attribute_equals?: Record<string, unknown>;
+  allowed_markings?: string[];
+  minimum_clearance?: string | null;
+  deny_guest_sessions?: boolean;
+}
+
 export interface ActionType {
   id: string;
   name: string;
@@ -140,6 +258,23 @@ export interface ActionType {
   config: unknown;
   confirmation_required: boolean;
   permission_key: string | null;
+  authorization_policy: ActionAuthorizationPolicy;
+  owner_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ActionWhatIfBranch {
+  id: string;
+  action_id: string;
+  target_object_id: string | null;
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  preview: Record<string, unknown>;
+  before_object: Record<string, unknown> | null;
+  after_object: Record<string, unknown> | null;
+  deleted: boolean;
   owner_id: string;
   created_at: string;
   updated_at: string;
@@ -213,6 +348,11 @@ export interface RuleAlertSpec {
 export interface RuleScheduleSpec {
   property_name: string;
   offset_hours: number;
+  priority_score?: number;
+  estimated_duration_minutes?: number;
+  required_capability?: string | null;
+  constraint_tags?: string[];
+  hard_deadline_hours?: number | null;
 }
 
 export interface RuleEffectSpec {
@@ -262,8 +402,55 @@ export interface MachineryInsight {
   matched_runs: number;
   total_runs: number;
   pending_schedules: number;
+  overdue_schedules: number;
+  avg_schedule_lead_hours: number | null;
+  dynamic_pressure: string;
   last_matched_at: string | null;
   last_object_id: string | null;
+}
+
+export interface MachineryQueueItem {
+  id: string;
+  rule_id: string;
+  rule_run_id: string;
+  object_id: string;
+  rule_name: string;
+  rule_display_name: string;
+  object_type_id: string;
+  status: string;
+  scheduled_for: string;
+  priority_score: number;
+  estimated_duration_minutes: number;
+  required_capability: string | null;
+  constraint_snapshot: Record<string, unknown>;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface MachineryCapabilityLoad {
+  capability: string;
+  pending_count: number;
+  total_estimated_minutes: number;
+}
+
+export interface MachineryQueueRecommendation {
+  generated_at: string;
+  strategy: string;
+  queue_depth: number;
+  overdue_count: number;
+  total_estimated_minutes: number;
+  next_due_at: string | null;
+  recommended_order: string[];
+  capability_load: MachineryCapabilityLoad[];
+}
+
+export interface MachineryQueueResponse {
+  object_type_id: string | null;
+  data: MachineryQueueItem[];
+  recommendation: MachineryQueueRecommendation;
 }
 
 export interface ObjectViewResponse {
@@ -284,6 +471,21 @@ export interface ObjectSimulationResponse {
   action_preview: Record<string, unknown>;
   matching_rules: RuleMatchResponse[];
   graph: GraphResponse;
+  impact_summary: {
+    scope: string;
+    action_kind: string;
+    predicted_delete: boolean;
+    impacted_object_count: number;
+    impacted_type_count: number;
+    impacted_types: string[];
+    direct_neighbors: number;
+    max_hops_reached: number;
+    boundary_crossings: number;
+    sensitive_objects: number;
+    sensitive_markings: string[];
+    matching_rules: number;
+    changed_properties: string[];
+  };
   impacted_objects: string[];
   timeline: Array<Record<string, unknown>>;
 }
@@ -298,6 +500,7 @@ export interface CreateActionTypeBody {
   config?: unknown;
   confirmation_required?: boolean;
   permission_key?: string;
+  authorization_policy?: ActionAuthorizationPolicy;
 }
 
 export interface UpdateActionTypeBody {
@@ -308,6 +511,7 @@ export interface UpdateActionTypeBody {
   config?: unknown;
   confirmation_required?: boolean;
   permission_key?: string;
+  authorization_policy?: ActionAuthorizationPolicy;
 }
 
 // Object Types
@@ -372,6 +576,86 @@ export function getOntologyGraph(params?: {
   return api.get<GraphResponse>(`/ontology/graph?${qs}`);
 }
 
+export function listQuiverVisualFunctions(params?: {
+  page?: number;
+  per_page?: number;
+  search?: string;
+  include_shared?: boolean;
+}) {
+  const qs = new URLSearchParams();
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.per_page) qs.set('per_page', String(params.per_page));
+  if (params?.search) qs.set('search', params.search);
+  if (typeof params?.include_shared === 'boolean') {
+    qs.set('include_shared', params.include_shared ? 'true' : 'false');
+  }
+  return api.get<{ data: QuiverVisualFunction[]; total: number; page: number; per_page: number }>(
+    `/ontology/quiver/visual-functions?${qs}`,
+  );
+}
+
+export function getQuiverVisualFunction(id: string) {
+  return api.get<QuiverVisualFunction>(`/ontology/quiver/visual-functions/${id}`);
+}
+
+export function createQuiverVisualFunction(body: {
+  name: string;
+  description?: string;
+  primary_type_id: string;
+  secondary_type_id?: string | null;
+  join_field: string;
+  secondary_join_field?: string;
+  date_field: string;
+  metric_field: string;
+  group_field: string;
+  selected_group?: string | null;
+  chart_kind?: QuiverChartKind;
+  shared?: boolean;
+}) {
+  return api.post<QuiverVisualFunction>('/ontology/quiver/visual-functions', body);
+}
+
+export function updateQuiverVisualFunction(
+  id: string,
+  body: Partial<{
+    name: string;
+    description: string;
+    primary_type_id: string;
+    secondary_type_id: string | null;
+    join_field: string;
+    secondary_join_field: string;
+    date_field: string;
+    metric_field: string;
+    group_field: string;
+    selected_group: string | null;
+    chart_kind: QuiverChartKind;
+    shared: boolean;
+  }>,
+) {
+  return api.patch<QuiverVisualFunction>(`/ontology/quiver/visual-functions/${id}`, body);
+}
+
+export function deleteQuiverVisualFunction(id: string) {
+  return api.delete(`/ontology/quiver/visual-functions/${id}`);
+}
+
+export function getQuiverVegaSpec(body: {
+  name: string;
+  description?: string;
+  primary_type_id: string;
+  secondary_type_id?: string | null;
+  join_field: string;
+  secondary_join_field?: string;
+  date_field: string;
+  metric_field: string;
+  group_field: string;
+  selected_group?: string | null;
+  chart_kind?: QuiverChartKind;
+  shared?: boolean;
+}) {
+  return api.post<{ spec: Record<string, unknown> }>('/ontology/quiver/vega-spec', body);
+}
+
 // Action Types
 export function listActionTypes(params?: {
   object_type_id?: string;
@@ -415,8 +699,38 @@ export function validateAction(id: string, body: {
 export function executeAction(id: string, body: {
   target_object_id?: string;
   parameters?: Record<string, unknown>;
+  justification?: string;
 }) {
   return api.post<ExecuteActionResponse>(`/ontology/actions/${id}/execute`, body);
+}
+
+export function listActionWhatIfBranches(
+  id: string,
+  params?: { target_object_id?: string; page?: number; per_page?: number },
+) {
+  const qs = new URLSearchParams();
+  if (params?.target_object_id) qs.set('target_object_id', params.target_object_id);
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.per_page) qs.set('per_page', String(params.per_page));
+  return api.get<{ data: ActionWhatIfBranch[]; total: number; page: number; per_page: number }>(
+    `/ontology/actions/${id}/what-if?${qs}`,
+  );
+}
+
+export function createActionWhatIfBranch(
+  id: string,
+  body: {
+    target_object_id?: string;
+    parameters?: Record<string, unknown>;
+    name?: string;
+    description?: string;
+  },
+) {
+  return api.post<ActionWhatIfBranch>(`/ontology/actions/${id}/what-if`, body);
+}
+
+export function deleteActionWhatIfBranch(id: string, branchId: string) {
+  return api.delete(`/ontology/actions/${id}/what-if/${branchId}`);
 }
 
 export function listFunctionPackages(params?: {
@@ -536,6 +850,16 @@ export function getMachineryInsights(params?: { object_type_id?: string }) {
   );
 }
 
+export function getMachineryQueue(params?: { object_type_id?: string }) {
+  const qs = new URLSearchParams();
+  if (params?.object_type_id) qs.set('object_type_id', params.object_type_id);
+  return api.get<MachineryQueueResponse>(`/ontology/rules/machinery/queue?${qs}`);
+}
+
+export function updateMachineryQueueItem(id: string, body: { status: string }) {
+  return api.patch<MachineryQueueItem>(`/ontology/rules/machinery/queue/${id}`, body);
+}
+
 export function getObjectView(typeId: string, objectId: string) {
   return api.get<ObjectViewResponse>(`/ontology/types/${typeId}/objects/${objectId}/view`);
 }
@@ -569,6 +893,51 @@ export function createProperty(typeId: string, body: {
   unique_constraint?: boolean;
 }) {
   return api.post<Property>(`/ontology/types/${typeId}/properties`, body);
+}
+
+export function listSharedPropertyTypes(params?: {
+  page?: number;
+  per_page?: number;
+  search?: string;
+}) {
+  const qs = new URLSearchParams();
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.per_page) qs.set('per_page', String(params.per_page));
+  if (params?.search) qs.set('search', params.search);
+  return api.get<{ data: SharedPropertyType[]; total: number; page: number; per_page: number }>(
+    `/ontology/shared-property-types?${qs}`,
+  );
+}
+
+export function createSharedPropertyType(body: {
+  name: string;
+  display_name?: string;
+  description?: string;
+  property_type: string;
+  required?: boolean;
+  unique_constraint?: boolean;
+  time_dependent?: boolean;
+  default_value?: unknown;
+  validation_rules?: unknown;
+}) {
+  return api.post<SharedPropertyType>('/ontology/shared-property-types', body);
+}
+
+export function listTypeSharedPropertyTypes(typeId: string) {
+  return api
+    .get<{ data: SharedPropertyType[] }>(`/ontology/types/${typeId}/shared-property-types`)
+    .then((response) => response.data);
+}
+
+export function attachSharedPropertyType(typeId: string, sharedPropertyTypeId: string) {
+  return api.post<{ object_type_id: string; shared_property_type_id: string }>(
+    `/ontology/types/${typeId}/shared-property-types/${sharedPropertyTypeId}`,
+    {},
+  );
+}
+
+export function detachSharedPropertyType(typeId: string, sharedPropertyTypeId: string) {
+  return api.delete(`/ontology/types/${typeId}/shared-property-types/${sharedPropertyTypeId}`);
 }
 
 // Link Types
@@ -646,4 +1015,51 @@ export function createObject(typeId: string, properties: Record<string, unknown>
 
 export function deleteObject(typeId: string, objectId: string) {
   return api.delete(`/ontology/types/${typeId}/objects/${objectId}`);
+}
+
+export function listObjectSets() {
+  return api.get<{ data: ObjectSetDefinition[] }>('/ontology/object-sets');
+}
+
+export function createObjectSet(body: {
+  name: string;
+  description?: string;
+  base_object_type_id: string;
+  filters?: ObjectSetFilter[];
+  traversals?: ObjectSetTraversal[];
+  join?: ObjectSetJoin | null;
+  projections?: string[];
+  what_if_label?: string | null;
+  policy?: Partial<ObjectSetPolicy>;
+}) {
+  return api.post<ObjectSetDefinition>('/ontology/object-sets', body);
+}
+
+export function updateObjectSet(
+  id: string,
+  body: Partial<{
+    name: string;
+    description: string;
+    base_object_type_id: string;
+    filters: ObjectSetFilter[];
+    traversals: ObjectSetTraversal[];
+    join: ObjectSetJoin | null;
+    projections: string[];
+    what_if_label: string | null;
+    policy: ObjectSetPolicy;
+  }>,
+) {
+  return api.patch<ObjectSetDefinition>(`/ontology/object-sets/${id}`, body);
+}
+
+export function deleteObjectSet(id: string) {
+  return api.delete(`/ontology/object-sets/${id}`);
+}
+
+export function evaluateObjectSet(id: string, body?: { limit?: number }) {
+  return api.post<ObjectSetEvaluationResponse>(`/ontology/object-sets/${id}/evaluate`, body ?? {});
+}
+
+export function materializeObjectSet(id: string, body?: { limit?: number }) {
+  return api.post<ObjectSetEvaluationResponse>(`/ontology/object-sets/${id}/materialize`, body ?? {});
 }

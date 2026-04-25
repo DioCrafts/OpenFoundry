@@ -342,7 +342,10 @@ fn render_typescript_sdk(spec: &OpenApiSpec) -> Result<BTreeMap<PathBuf, String>
         render_typescript_readme(&spec.info.version),
     );
     files.insert(PathBuf::from("src/index.ts"), render_typescript_index(spec));
-    files.insert(PathBuf::from("src/react.ts"), render_typescript_react_helper());
+    files.insert(
+        PathBuf::from("src/react.ts"),
+        render_typescript_react_helper(),
+    );
     files.insert(
         PathBuf::from("src/react-shim.d.ts"),
         render_typescript_react_shim(),
@@ -719,7 +722,11 @@ fn render_typescript_index(spec: &OpenApiSpec) -> String {
             } else {
                 "query".to_string()
             };
-            let body_argument = if request_type.is_some() { "body" } else { "undefined" };
+            let body_argument = if request_type.is_some() {
+                "body"
+            } else {
+                "undefined"
+            };
 
             lines.push(format!(
                 "  async {method_name}({request_signature}): Promise<{response_type}> {{"
@@ -988,8 +995,8 @@ fn render_python_client(spec: &OpenApiSpec) -> String {
                 python_method_name(&method_name_for_operation(operation)),
                 &mut used_method_names,
             );
-            let request_type = request_type_for_operation(operation)
-                .map(|value| format!("models.{value}"));
+            let request_type =
+                request_type_for_operation(operation).map(|value| format!("models.{value}"));
             let response_type = format!("models.{}", response_type_for_operation(operation));
             let path_parameters = operation_path_parameters(operation);
             let query_parameters = operation_query_parameters(operation);
@@ -1017,9 +1024,15 @@ fn render_python_client(spec: &OpenApiSpec) -> String {
                         .join(", ")
                     + "}"
             };
-            let body_argument = if request_type.is_some() { "body" } else { "None" };
+            let body_argument = if request_type.is_some() {
+                "body"
+            } else {
+                "None"
+            };
 
-            lines.push(format!("    def {method_name}({signature}) -> {response_type}:"));
+            lines.push(format!(
+                "    def {method_name}({signature}) -> {response_type}:"
+            ));
             lines.push(format!(
                 "        payload = self._request({:?}, {:?}, {}, {}, {}, headers=headers)",
                 method.to_uppercase(),
@@ -1118,16 +1131,23 @@ fn render_java_client(spec: &OpenApiSpec) -> String {
     let mut used_method_names = BTreeMap::<String, usize>::new();
     for (path, methods) in &spec.paths {
         for (method, operation) in methods {
-            let method_name = unique_method_name(method_name_for_operation(operation), &mut used_method_names);
+            let method_name =
+                unique_method_name(method_name_for_operation(operation), &mut used_method_names);
             let path_parameters = operation_path_parameters(operation);
             let query_parameters = operation_query_parameters(operation);
             let request_type = request_type_for_operation(operation);
-            let signature = render_java_method_signature(&path_parameters, &query_parameters, request_type.is_some());
+            let signature = render_java_method_signature(
+                &path_parameters,
+                &query_parameters,
+                request_type.is_some(),
+            );
             lines.push(format!(
                 "    public String {method_name}({signature}) throws IOException, InterruptedException {{"
             ));
             if !path_parameters.is_empty() {
-                lines.push("        Map<String, Object> pathParams = new LinkedHashMap<>();".to_string());
+                lines.push(
+                    "        Map<String, Object> pathParams = new LinkedHashMap<>();".to_string(),
+                );
                 for parameter in &path_parameters {
                     let variable_name = render_java_variable_name(&parameter.name);
                     lines.push(format!(
@@ -1139,7 +1159,9 @@ fn render_java_client(spec: &OpenApiSpec) -> String {
                 lines.push("        Map<String, Object> pathParams = Map.of();".to_string());
             }
             if !query_parameters.is_empty() {
-                lines.push("        Map<String, Object> queryParams = new LinkedHashMap<>();".to_string());
+                lines.push(
+                    "        Map<String, Object> queryParams = new LinkedHashMap<>();".to_string(),
+                );
                 for parameter in &query_parameters {
                     let variable_name = render_java_variable_name(&parameter.name);
                     lines.push(format!(
@@ -1150,7 +1172,11 @@ fn render_java_client(spec: &OpenApiSpec) -> String {
             } else {
                 lines.push("        Map<String, Object> queryParams = Map.of();".to_string());
             }
-            let body_argument = if request_type.is_some() { "bodyJson" } else { "null" };
+            let body_argument = if request_type.is_some() {
+                "bodyJson"
+            } else {
+                "null"
+            };
             lines.push(format!(
                 "        return request({:?}, {:?}, pathParams, queryParams, {body_argument});",
                 method.to_uppercase(),
@@ -1773,7 +1799,8 @@ fn is_typescript_identifier(name: &str) -> bool {
         _ => return false,
     }
 
-    characters.all(|character| character.is_ascii_alphanumeric() || character == '_' || character == '$')
+    characters
+        .all(|character| character.is_ascii_alphanumeric() || character == '_' || character == '$')
 }
 
 fn is_object_schema(schema: &OpenApiSchema) -> bool {
@@ -1820,17 +1847,38 @@ fn augment_with_rest_overlays(spec: &mut OpenApiSpec) {
     let schemas = &mut spec.components.schemas;
 
     schemas.insert("UserResponse".to_string(), user_response_schema());
-    schemas.insert("UpdateUserRequest".to_string(), update_user_request_schema());
+    schemas.insert(
+        "UpdateUserRequest".to_string(),
+        update_user_request_schema(),
+    );
     schemas.insert("Permission".to_string(), permission_schema());
-    schemas.insert("CreatePermissionRequest".to_string(), create_permission_request_schema());
+    schemas.insert(
+        "CreatePermissionRequest".to_string(),
+        create_permission_request_schema(),
+    );
     schemas.insert("RoleResponse".to_string(), role_response_schema());
-    schemas.insert("CreateRoleRequest".to_string(), create_role_request_schema());
-    schemas.insert("UpdateRoleRequest".to_string(), update_role_request_schema());
+    schemas.insert(
+        "CreateRoleRequest".to_string(),
+        create_role_request_schema(),
+    );
+    schemas.insert(
+        "UpdateRoleRequest".to_string(),
+        update_role_request_schema(),
+    );
     schemas.insert("GroupResponse".to_string(), group_response_schema());
-    schemas.insert("CreateGroupRequest".to_string(), create_group_request_schema());
-    schemas.insert("UpdateGroupRequest".to_string(), update_group_request_schema());
+    schemas.insert(
+        "CreateGroupRequest".to_string(),
+        create_group_request_schema(),
+    );
+    schemas.insert(
+        "UpdateGroupRequest".to_string(),
+        update_group_request_schema(),
+    );
     schemas.insert("Policy".to_string(), policy_schema());
-    schemas.insert("UpsertPolicyRequest".to_string(), upsert_policy_request_schema());
+    schemas.insert(
+        "UpsertPolicyRequest".to_string(),
+        upsert_policy_request_schema(),
+    );
     schemas.insert(
         "PolicyEvaluationResult".to_string(),
         policy_evaluation_result_schema(),
@@ -2121,12 +2169,7 @@ fn augment_with_rest_overlays(spec: &mut OpenApiSpec) {
     );
 }
 
-fn insert_operation(
-    spec: &mut OpenApiSpec,
-    path: &str,
-    method: &str,
-    operation: OpenApiOperation,
-) {
+fn insert_operation(spec: &mut OpenApiSpec, path: &str, method: &str, operation: OpenApiOperation) {
     spec.paths
         .entry(path.to_string())
         .or_default()
@@ -2271,7 +2314,10 @@ fn any_value_schema() -> OpenApiSchema {
 
 fn list_response_schema(item_schema_name: &str) -> OpenApiSchema {
     object_schema(BTreeMap::from([
-        ("items".to_string(), array_schema(schema_ref(item_schema_name))),
+        (
+            "items".to_string(),
+            array_schema(schema_ref(item_schema_name)),
+        ),
         ("count".to_string(), integer_schema()),
     ]))
 }
@@ -2364,7 +2410,10 @@ fn group_response_schema() -> OpenApiSchema {
         ("description".to_string(), string_schema(None)),
         ("created_at".to_string(), string_schema(Some("date-time"))),
         ("member_count".to_string(), integer_schema()),
-        ("role_ids".to_string(), array_schema(string_schema(Some("uuid")))),
+        (
+            "role_ids".to_string(),
+            array_schema(string_schema(Some("uuid"))),
+        ),
         ("roles".to_string(), array_schema(string_schema(None))),
     ]))
 }
@@ -2373,14 +2422,20 @@ fn create_group_request_schema() -> OpenApiSchema {
     object_schema(BTreeMap::from([
         ("name".to_string(), string_schema(None)),
         ("description".to_string(), string_schema(None)),
-        ("role_ids".to_string(), array_schema(string_schema(Some("uuid")))),
+        (
+            "role_ids".to_string(),
+            array_schema(string_schema(Some("uuid"))),
+        ),
     ]))
 }
 
 fn update_group_request_schema() -> OpenApiSchema {
     object_schema(BTreeMap::from([
         ("description".to_string(), string_schema(None)),
-        ("role_ids".to_string(), array_schema(string_schema(Some("uuid")))),
+        (
+            "role_ids".to_string(),
+            array_schema(string_schema(Some("uuid"))),
+        ),
     ]))
 }
 
@@ -2518,7 +2573,10 @@ fn filesystem_entry_schema() -> OpenApiSchema {
         ("path".to_string(), string_schema(None)),
         ("storage_path".to_string(), string_schema(None)),
         ("size_bytes".to_string(), integer_schema()),
-        ("last_modified".to_string(), string_schema(Some("date-time"))),
+        (
+            "last_modified".to_string(),
+            string_schema(Some("date-time")),
+        ),
         ("content_type".to_string(), string_schema(None)),
         ("metadata".to_string(), any_value_schema()),
     ]))
@@ -2539,8 +2597,14 @@ fn filesystem_list_response_schema() -> OpenApiSchema {
         ("root".to_string(), string_schema(None)),
         ("current_version".to_string(), integer_schema()),
         ("active_branch".to_string(), string_schema(None)),
-        ("entries".to_string(), array_schema(schema_ref("FilesystemEntry"))),
-        ("items".to_string(), array_schema(schema_ref("FilesystemEntry"))),
+        (
+            "entries".to_string(),
+            array_schema(schema_ref("FilesystemEntry")),
+        ),
+        (
+            "items".to_string(),
+            array_schema(schema_ref("FilesystemEntry")),
+        ),
         (
             "breadcrumbs".to_string(),
             array_schema(schema_ref("FilesystemBreadcrumb")),

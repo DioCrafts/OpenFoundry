@@ -19,6 +19,8 @@ pub struct AppState {
     pub jwt_config: JwtConfig,
     pub http_client: reqwest::Client,
     pub dataset_service_url: String,
+    pub pipeline_service_url: String,
+    pub ontology_service_url: String,
     pub allowed_egress_hosts: Vec<String>,
     pub allow_private_network_egress: bool,
     pub agent_stale_after: chrono::Duration,
@@ -47,7 +49,7 @@ async fn main() {
         .await
         .expect("failed to run migrations");
 
-    let jwt_config = JwtConfig::new(&cfg.jwt_secret);
+    let jwt_config = JwtConfig::new(&cfg.jwt_secret).with_env_defaults();
     let http_client = reqwest::Client::builder()
         .timeout(Duration::from_secs(60))
         .build()
@@ -58,6 +60,8 @@ async fn main() {
         jwt_config: jwt_config.clone(),
         http_client,
         dataset_service_url: cfg.dataset_service_url.clone(),
+        pipeline_service_url: cfg.pipeline_service_url.clone(),
+        ontology_service_url: cfg.ontology_service_url.clone(),
         allowed_egress_hosts: cfg.allowed_egress_hosts.clone(),
         allow_private_network_egress: cfg.allow_private_network_egress,
         agent_stale_after: chrono::Duration::seconds(cfg.agent_stale_after_secs.max(15) as i64),
@@ -79,6 +83,10 @@ async fn main() {
 
     let protected = Router::new()
         .route(
+            "/api/v1/connectors/catalog",
+            get(handlers::catalog::get_connector_catalog),
+        )
+        .route(
             "/api/v1/connector-agents",
             post(handlers::agents::register_agent).get(handlers::agents::list_agents),
         )
@@ -97,6 +105,10 @@ async fn main() {
         .route(
             "/api/v1/connections/{id}",
             get(handlers::connections::get_connection),
+        )
+        .route(
+            "/api/v1/connections/{id}/capabilities",
+            get(handlers::catalog::get_connection_capabilities),
         )
         .route(
             "/api/v1/connections/{id}",
@@ -125,6 +137,14 @@ async fn main() {
         .route(
             "/api/v1/connections/{id}/virtual-tables/query",
             post(handlers::registrations::query_virtual_table),
+        )
+        .route(
+            "/api/v1/connections/{id}/hyperauto/erp/preview",
+            post(handlers::hyperauto::preview_erp_generation),
+        )
+        .route(
+            "/api/v1/connections/{id}/hyperauto/erp/generate",
+            post(handlers::hyperauto::generate_erp_assets),
         )
         .route(
             "/api/v1/connections/{id}/sync",

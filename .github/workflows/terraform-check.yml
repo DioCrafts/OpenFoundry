@@ -1,0 +1,31 @@
+name: CI — Terraform
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/terraform/**"
+      - ".github/workflows/terraform-check.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "infra/terraform/**"
+      - ".github/workflows/terraform-check.yml"
+
+jobs:
+  terraform:
+    name: Terraform Fmt & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive infra/terraform
+      - name: Validate CDN module
+        run: |
+          terraform -chdir=infra/terraform/modules/cdn init -backend=false
+          terraform -chdir=infra/terraform/modules/cdn validate
+      - name: Validate provider schema JSON
+        run: jq empty infra/terraform/providers/openfoundry/provider.schema.json

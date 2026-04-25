@@ -19,7 +19,7 @@ use reqwest::{
     multipart::{Form, Part},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use tokio::fs;
 use uuid::Uuid;
 use wasmtime::{Config, Engine, Instance, Module, Store, Val};
@@ -67,6 +67,13 @@ pub struct PythonExecutionResult {
 }
 
 #[derive(Debug)]
+pub struct LlmExecutionResult {
+    pub rows_affected: Option<u64>,
+    pub output: Value,
+    pub output_dataset_version: Option<i32>,
+}
+
+#[derive(Debug)]
 pub struct RemoteComputeExecutionResult {
     pub rows_affected: Option<u64>,
     pub output: Value,
@@ -89,6 +96,38 @@ struct PreparedInput {
     alias: String,
     metadata: DatasetInputMetadata,
     rows: Vec<Value>,
+}
+
+#[derive(Debug, Serialize)]
+struct ChatCompletionRequestPayload {
+    conversation_id: Option<Uuid>,
+    system_prompt: Option<String>,
+    user_message: String,
+    knowledge_base_id: Option<Uuid>,
+    preferred_provider_id: Option<Uuid>,
+    fallback_enabled: bool,
+    temperature: f32,
+    max_tokens: i32,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatCompletionResponsePayload {
+    provider_id: Uuid,
+    provider_name: String,
+    reply: String,
+    citations: Vec<Value>,
+    guardrail: ChatCompletionGuardrail,
+    cache: ChatCompletionCache,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatCompletionGuardrail {
+    blocked: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatCompletionCache {
+    hit: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -402,6 +441,144 @@ pub async fn execute_python_transform(
     })
 }
 
+pub async fn execute_llm_transform(
+    state: &AppState,
+    actor_id: Uuid,
+    node: &PipelineNode,
+    inputs: &[LoadedDataset],
+) -> Result<LlmExecutionResult, String> {
+    let prompt_template =
+        config_string(node, &["prompt", "user_prompt", "template"]).ok_or_else(|| {
+            "LLM transform has no 'prompt', 'user_prompt', or 'template' config".to_string()
+        })?;
+    let system_prompt = config_string(node, &["system_prompt"]).map(str::to_string);
+    let input_field = config_string(node, &["input_field"]);
+    let output_field = config_string(node, &["output_field"])
+        .unwrap_or("llm_response")
+        .to_string();
+    let response_format = config_string(node, &["response_format"])
+        .unwrap_or("text")
+        .to_ascii_lowercase();
+    let flatten_json_output = config_bool(node, &["flatten_json_output"], false);
+    let preserve_input = config_bool(node, &["preserve_input"], true);
+    let fallback_enabled = config_bool(node, &["fallback_enabled"], true);
+    let max_rows = config_usize(node, &["max_rows"], 25).max(1);
+    let max_tokens = config_i32(node, &["max_tokens"], 256).max(32);
+    let temperature = config_f32(node, &["temperature"], 0.2).clamp(0.0, 2.0);
+    let knowledge_base_id = config_uuid(node, &["knowledge_base_id"])?;
+    let preferred_provider_id = config_uuid(node, &["preferred_provider_id"])?;
+
+    let prepared_inputs = prepare_python_inputs(node, inputs).await?;
+    let mut output_rows = Vec::new();
+    let mut provider_names = Vec::new();
+    let mut provider_ids = Vec::new();
+    let mut blocked_count = 0usize;
+    let mut cache_hits = 0usize;
+    let mut citation_count = 0usize;
+
+    if prepared_inputs.is_empty() {
+        let user_message = render_llm_prompt(prompt_template, None, &json!({}), 0, input_field);
+        let response = request_llm_completion(
+            state,
+            actor_id,
+            system_prompt.clone(),
+            user_message,
+            knowledge_base_id,
+            preferred_provider_id,
+            fallback_enabled,
+            temperature,
+            max_tokens,
+        )
+        .await?;
+        blocked_count += usize::from(response.guardrail.blocked);
+        cache_hits += usize::from(response.cache.hit);
+        citation_count += response.citations.len();
+        provider_names.push(response.provider_name.clone());
+        provider_ids.push(response.provider_id);
+        output_rows.push(build_llm_output_row(
+            None,
+            &json!({}),
+            0,
+            &response,
+            &output_field,
+            &response_format,
+            flatten_json_output,
+            preserve_input,
+        )?);
+    } else {
+        'outer: for prepared_input in &prepared_inputs {
+            for (row_index, row) in prepared_input.rows.iter().enumerate() {
+                if output_rows.len() >= max_rows {
+                    break 'outer;
+                }
+
+                let user_message = render_llm_prompt(
+                    prompt_template,
+                    Some(prepared_input),
+                    row,
+                    row_index,
+                    input_field,
+                );
+                let response = request_llm_completion(
+                    state,
+                    actor_id,
+                    system_prompt.clone(),
+                    user_message,
+                    knowledge_base_id,
+                    preferred_provider_id,
+                    fallback_enabled,
+                    temperature,
+                    max_tokens,
+                )
+                .await?;
+                blocked_count += usize::from(response.guardrail.blocked);
+                cache_hits += usize::from(response.cache.hit);
+                citation_count += response.citations.len();
+                provider_names.push(response.provider_name.clone());
+                provider_ids.push(response.provider_id);
+                output_rows.push(build_llm_output_row(
+                    Some(prepared_input),
+                    row,
+                    row_index,
+                    &response,
+                    &output_field,
+                    &response_format,
+                    flatten_json_output,
+                    preserve_input,
+                )?);
+            }
+        }
+    }
+
+    provider_names.sort();
+    provider_names.dedup();
+    provider_ids.sort();
+    provider_ids.dedup();
+
+    let output_dataset_version = match node.output_dataset_id {
+        Some(dataset_id) => {
+            Some(upload_json_rows(state, actor_id, dataset_id, &node.id, &output_rows).await?)
+        }
+        None => None,
+    };
+
+    Ok(LlmExecutionResult {
+        rows_affected: Some(output_rows.len() as u64),
+        output: json!({
+            "rows": output_rows.len(),
+            "output_field": output_field,
+            "response_format": response_format,
+            "provider_names": provider_names,
+            "provider_ids": provider_ids,
+            "cache_hits": cache_hits,
+            "guardrail_blocked": blocked_count,
+            "citations": citation_count,
+            "sample_rows": output_rows.iter().take(10).cloned().collect::<Vec<_>>(),
+        }),
+        output_dataset_version,
+    })
+}
+
 pub async fn execute_passthrough_transform(
     state: &AppState,
     actor_id: Uuid,
@@ -514,6 +691,274 @@ pub async fn execute_remote_compute_transform(
     })
 }
 
+async fn request_llm_completion(
+    state: &AppState,
+    actor_id: Uuid,
+    system_prompt: Option<String>,
+    user_message: String,
+    knowledge_base_id: Option<Uuid>,
+    preferred_provider_id: Option<Uuid>,
+    fallback_enabled: bool,
+    temperature: f32,
+    max_tokens: i32,
+) -> Result<ChatCompletionResponsePayload, String> {
+    let token = issue_service_token(state, actor_id)?;
+    let url = format!(
+        "{}/api/v1/ai/chat/completions",
+        state.ai_service_url.trim_end_matches('/')
+    );
+    let request = ChatCompletionRequestPayload {
+        conversation_id: None,
+        system_prompt,
+        user_message,
+        knowledge_base_id,
+        preferred_provider_id,
+        fallback_enabled,
+        temperature,
+        max_tokens,
+    };
+
+    let response = state
+        .http_client
+        .post(url)
+        .bearer_auth(token)
+        .json(&request)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!(
+            "LLM transform request failed with HTTP {status}: {body}"
+        ));
+    }
+
+    serde_json::from_str::<ChatCompletionResponsePayload>(&body).map_err(|error| error.to_string())
+}
+
+fn render_llm_prompt(
+    template: &str,
+    prepared_input: Option<&PreparedInput>,
+    row: &Value,
+    row_index: usize,
+    input_field: Option<&str>,
+) -> String {
+    let row_json = serde_json::to_string_pretty(row).unwrap_or_else(|_| row.to_string());
+    let row_count = prepared_input.map(|input| input.rows.len()).unwrap_or(1);
+    let input_text = input_field
+        .and_then(|field| row.get(field))
+        .map(value_to_prompt_text)
+        .unwrap_or_else(|| value_to_prompt_text(row));
+    let replacements = vec![
+        ("{{input_json}}", row_json.clone()),
+        ("{{input_text}}", input_text),
+        (
+            "{{dataset_name}}",
+            prepared_input
+                .map(|input| input.metadata.name.clone())
+                .unwrap_or_default(),
+        ),
+        (
+            "{{dataset_id}}",
+            prepared_input
+                .map(|input| input.metadata.dataset_id.to_string())
+                .unwrap_or_default(),
+        ),
+        (
+            "{{dataset_alias}}",
+            prepared_input
+                .map(|input| input.alias.clone())
+                .unwrap_or_default(),
+        ),
+        ("{{row_index}}", row_index.to_string()),
+        ("{{row_count}}", row_count.to_string()),
+    ];
+
+    let mut rendered = template.to_string();
+    let mut replaced = 0usize;
+    for (token, value) in replacements {
+        if rendered.contains(token) {
+            rendered = rendered.replace(token, &value);
+            replaced += 1;
+        }
+    }
+
+    if rendered.contains("{{input_rows_json}}") {
+        let rows_json = prepared_input
+            .map(|input| serde_json::to_string(&input.rows).unwrap_or_else(|_| "[]".to_string()))
+            .unwrap_or_else(|| "[]".to_string());
+        rendered = rendered.replace("{{input_rows_json}}", &rows_json);
+        replaced += 1;
+    }
+
+    if replaced == 0 {
+        format!("{template}\n\nInput row:\n{row_json}")
+    } else {
+        rendered
+    }
+}
+
+fn build_llm_output_row(
+    prepared_input: Option<&PreparedInput>,
+    row: &Value,
+    row_index: usize,
+    response: &ChatCompletionResponsePayload,
+    output_field: &str,
+    response_format: &str,
+    flatten_json_output: bool,
+    preserve_input: bool,
+) -> Result<Value, String> {
+    let mut output = if preserve_input {
+        row.as_object().cloned().unwrap_or_default()
+    } else {
+        Map::new()
+    };
+
+    let should_parse_json = matches!(response_format, "json" | "json_object");
+    if should_parse_json {
+        match serde_json::from_str::<Value>(&response.reply) {
+            Ok(Value::Object(object)) if flatten_json_output => {
+                for (key, value) in object {
+                    output.insert(key, value);
+                }
+            }
+            Ok(value) => {
+                output.insert(output_field.to_string(), value);
+            }
+            Err(_) => {
+                output.insert(
+                    output_field.to_string(),
+                    Value::String(response.reply.clone()),
+                );
+                output.insert(format!("{output_field}_parse_error"), json!(true));
+            }
+        }
+    } else {
+        output.insert(
+            output_field.to_string(),
+            Value::String(response.reply.clone()),
+        );
+    }
+
+    if let Some(prepared_input) = prepared_input {
+        output
+            .entry("_source_dataset_id".to_string())
+            .or_insert_with(|| json!(prepared_input.metadata.dataset_id));
+        output
+            .entry("_source_dataset_name".to_string())
+            .or_insert_with(|| json!(prepared_input.metadata.name.clone()));
+        output
+            .entry("_source_dataset_alias".to_string())
+            .or_insert_with(|| json!(prepared_input.alias.clone()));
+    }
+    output.insert("_source_row_index".to_string(), json!(row_index));
+    output.insert(
+        "_llm".to_string(),
+        json!({
+            "provider_id": response.provider_id,
+            "provider_name": response.provider_name.clone(),
+            "cache_hit": response.cache.hit,
+            "guardrail_blocked": response.guardrail.blocked,
+            "citations": response.citations.len(),
+        }),
+    );
+
+    Ok(Value::Object(output))
+}
+
+fn config_string<'a>(node: &'a PipelineNode, keys: &[&str]) -> Option<&'a str> {
+    keys.iter().find_map(|key| {
+        node.config
+            .get(*key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    })
+}
+
+fn config_bool(node: &PipelineNode, keys: &[&str], default: bool) -> bool {
+    keys.iter()
+        .find_map(|key| match node.config.get(*key) {
+            Some(Value::Bool(value)) => Some(*value),
+            Some(Value::String(value)) => {
+                let normalized = value.trim().to_ascii_lowercase();
+                match normalized.as_str() {
+                    "true" | "1" | "yes" | "on" => Some(true),
+                    "false" | "0" | "no" | "off" => Some(false),
+                    _ => None,
+                }
+            }
+            Some(Value::Number(value)) => value.as_i64().map(|value| value != 0),
+            _ => None,
+        })
+        .unwrap_or(default)
+}
+
+fn config_usize(node: &PipelineNode, keys: &[&str], default: usize) -> usize {
+    keys.iter()
+        .find_map(|key| match node.config.get(*key) {
+            Some(Value::Number(value)) => value.as_u64().map(|value| value as usize),
+            Some(Value::String(value)) => value.trim().parse::<usize>().ok(),
+            _ => None,
+        })
+        .unwrap_or(default)
+}
+
+fn config_i32(node: &PipelineNode, keys: &[&str], default: i32) -> i32 {
+    keys.iter()
+        .find_map(|key| match node.config.get(*key) {
+            Some(Value::Number(value)) => value.as_i64().map(|value| value as i32),
+            Some(Value::String(value)) => value.trim().parse::<i32>().ok(),
+            _ => None,
+        })
+        .unwrap_or(default)
+}
+
+fn config_f32(node: &PipelineNode, keys: &[&str], default: f32) -> f32 {
+    keys.iter()
+        .find_map(|key| match node.config.get(*key) {
+            Some(Value::Number(value)) => value.as_f64().map(|value| value as f32),
+            Some(Value::String(value)) => value.trim().parse::<f32>().ok(),
+            _ => None,
+        })
+        .unwrap_or(default)
+}
+
+fn config_uuid(node: &PipelineNode, keys: &[&str]) -> Result<Option<Uuid>, String> {
+    for key in keys {
+        let Some(value) = node.config.get(*key) else {
+            continue;
+        };
+        match value {
+            Value::String(raw) if raw.trim().is_empty() => return Ok(None),
+            Value::String(raw) => {
+                return Uuid::parse_str(raw.trim())
+                    .map(Some)
+                    .map_err(|error| format!("invalid UUID in '{key}': {error}"));
+            }
+            Value::Null => return Ok(None),
+            other => {
+                return Err(format!(
+                    "config field '{key}' must be a UUID string, got {other}"
+                ));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+fn value_to_prompt_text(value: &Value) -> String {
+    match value {
+        Value::Null => String::new(),
+        Value::Bool(value) => value.to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::String(value) => value.clone(),
+        other => serde_json::to_string(other).unwrap_or_else(|_| other.to_string()),
+    }
+}
+
 fn build_remote_compute_request(
     node: &PipelineNode,
     prepared_inputs: Vec<PreparedInput>,
@@ -526,11 +971,7 @@ fn build_remote_compute_request(
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            format!(
-                "{default_job_type} transform has no 'endpoint' or 'url' config"
-            )
-        })?
+        .ok_or_else(|| format!("{default_job_type} transform has no 'endpoint' or 'url' config"))?
         .to_string();
     let job_type = node
         .config
@@ -583,7 +1024,9 @@ fn prepare_remote_compute_output(
     });
     if let Some(object) = output.as_object_mut() {
         if let Some(run_id) = payload.run_id {
-            object.entry("run_id".to_string()).or_insert_with(|| json!(run_id));
+            object
+                .entry("run_id".to_string())
+                .or_insert_with(|| json!(run_id));
         }
         if let Some(worker_id) = payload.worker_id {
             object
@@ -1035,7 +1478,7 @@ async fn cleanup_paths(paths: Vec<PathBuf>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn remote_compute_request_uses_node_config_and_inputs() {
         let node = PipelineNode {
@@ -1107,13 +1550,77 @@ mod tests {
             output_dataset_id: None,
         };
 
-        let error = build_remote_compute_request(
-            &node,
-            Vec::new(),
-            "external",
-        )
-        .expect_err("missing endpoint should fail");
+        let error = build_remote_compute_request(&node, Vec::new(), "external")
+            .expect_err("missing endpoint should fail");
 
         assert!(error.contains("endpoint"));
+    }
+
+    #[test]
+    fn llm_prompt_replaces_supported_placeholders() {
+        let prepared_input = PreparedInput {
+            alias: "orders".to_string(),
+            metadata: DatasetInputMetadata {
+                dataset_id: Uuid::nil(),
+                name: "orders".to_string(),
+                format: "json".to_string(),
+                version: 1,
+                row_count: 1,
+                size_bytes: 32,
+            },
+            rows: vec![json!({ "customer_id": "c-1", "text": "translate me" })],
+        };
+
+        let prompt = render_llm_prompt(
+            "Dataset {{dataset_name}} row {{row_index}} says {{input_text}}",
+            Some(&prepared_input),
+            &prepared_input.rows[0],
+            0,
+            Some("text"),
+        );
+
+        assert!(prompt.contains("orders"));
+        assert!(prompt.contains("row 0"));
+        assert!(prompt.contains("translate me"));
+    }
+
+    #[test]
+    fn llm_output_row_merges_json_reply_when_requested() {
+        let prepared_input = PreparedInput {
+            alias: "reviews".to_string(),
+            metadata: DatasetInputMetadata {
+                dataset_id: Uuid::nil(),
+                name: "reviews".to_string(),
+                format: "json".to_string(),
+                version: 1,
+                row_count: 1,
+                size_bytes: 32,
+            },
+            rows: vec![json!({ "review_id": 7 })],
+        };
+        let response = ChatCompletionResponsePayload {
+            provider_id: Uuid::nil(),
+            provider_name: "OpenFoundry AI".to_string(),
+            reply: r#"{"sentiment":"positive","score":0.98}"#.to_string(),
+            citations: Vec::new(),
+            guardrail: ChatCompletionGuardrail { blocked: false },
+            cache: ChatCompletionCache { hit: false },
+        };
+
+        let row = build_llm_output_row(
+            Some(&prepared_input),
+            &prepared_input.rows[0],
+            0,
+            &response,
+            "llm_response",
+            "json",
+            true,
+            true,
+        )
+        .expect("output row should build");
+
+        assert_eq!(row["review_id"], json!(7));
+        assert_eq!(row["sentiment"], json!("positive"));
+        assert_eq!(row["_llm"]["provider_name"], json!("OpenFoundry AI"));
     }
 }

@@ -47,7 +47,8 @@ async fn main() {
 
     let jwt_config = JwtConfig::new(&cfg.jwt_secret)
         .with_access_ttl(cfg.jwt_access_ttl_secs)
-        .with_refresh_ttl(cfg.jwt_refresh_ttl_secs);
+        .with_refresh_ttl(cfg.jwt_refresh_ttl_secs)
+        .with_env_defaults();
 
     let state = AppState {
         db: pool,
@@ -90,6 +91,10 @@ async fn main() {
             get(handlers::control_panel::get_upgrade_readiness),
         )
         .route(
+            "/api/v1/control-panel/identity-provider-mappings/preview",
+            post(handlers::control_panel::preview_identity_provider_mapping),
+        )
+        .route(
             "/api/v2/admin/control-panel",
             get(handlers::control_panel::get_control_panel)
                 .put(handlers::control_panel::update_control_panel),
@@ -97,6 +102,10 @@ async fn main() {
         .route(
             "/api/v2/admin/control-panel/upgrade-readiness",
             get(handlers::control_panel::get_upgrade_readiness),
+        )
+        .route(
+            "/api/v2/admin/control-panel/identity-provider-mappings/preview",
+            post(handlers::control_panel::preview_identity_provider_mapping),
         )
         .route("/api/v1/users/me", get(handlers::user_mgmt::me))
         .route("/api/v2/admin/users/me", get(handlers::user_mgmt::me))
@@ -135,7 +144,10 @@ async fn main() {
             get(handlers::role_mgmt::list_roles).post(handlers::role_mgmt::create_role),
         )
         .route("/api/v1/roles/{id}", put(handlers::role_mgmt::update_role))
-        .route("/api/v2/admin/roles/{id}", put(handlers::role_mgmt::update_role))
+        .route(
+            "/api/v2/admin/roles/{id}",
+            put(handlers::role_mgmt::update_role),
+        )
         .route(
             "/api/v1/permissions",
             get(handlers::permission_mgmt::list_permissions)
@@ -184,7 +196,28 @@ async fn main() {
         )
         .route(
             "/api/v2/admin/policies/{id}",
-            patch(handlers::policy_mgmt::update_policy).delete(handlers::policy_mgmt::delete_policy),
+            patch(handlers::policy_mgmt::update_policy)
+                .delete(handlers::policy_mgmt::delete_policy),
+        )
+        .route(
+            "/api/v1/restricted-views",
+            get(handlers::restricted_views::list_restricted_views)
+                .post(handlers::restricted_views::create_restricted_view),
+        )
+        .route(
+            "/api/v2/admin/restricted-views",
+            get(handlers::restricted_views::list_restricted_views)
+                .post(handlers::restricted_views::create_restricted_view),
+        )
+        .route(
+            "/api/v1/restricted-views/{id}",
+            put(handlers::restricted_views::update_restricted_view)
+                .delete(handlers::restricted_views::delete_restricted_view),
+        )
+        .route(
+            "/api/v2/admin/restricted-views/{id}",
+            patch(handlers::restricted_views::update_restricted_view)
+                .delete(handlers::restricted_views::delete_restricted_view),
         )
         .route(
             "/api/v1/api-keys",

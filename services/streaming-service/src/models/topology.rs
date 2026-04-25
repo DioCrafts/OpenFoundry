@@ -160,13 +160,38 @@ pub struct TopologyRun {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopologyRuntimePreview {
+    pub metrics: TopologyRunMetrics,
+    pub aggregate_windows: Vec<WindowAggregate>,
+    pub backpressure_snapshot: BackpressureSnapshot,
+    pub state_snapshot: StateStoreSnapshot,
+    pub backlog_events: i32,
+    pub generated_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct TopologyRuntimeSnapshot {
     pub topology: TopologyDefinition,
     pub latest_run: Option<TopologyRun>,
+    pub preview: Option<TopologyRuntimePreview>,
     pub connector_statuses: Vec<ConnectorCatalogEntry>,
     pub latest_events: Vec<LiveTailEvent>,
     pub latest_matches: Vec<CepMatch>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReplayTopologyRequest {
+    pub stream_ids: Option<Vec<Uuid>>,
+    pub from_sequence_no: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ReplayTopologyResponse {
+    pub topology_id: Uuid,
+    pub stream_ids: Vec<Uuid>,
+    pub replay_from_sequence_no: Option<i64>,
+    pub restored_event_count: i64,
 }
 
 #[derive(Debug, Clone, FromRow)]

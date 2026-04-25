@@ -111,6 +111,8 @@ export interface LineageImpactItem {
   label: string;
   distance: number;
   marking: string;
+  effective_marking: string;
+  requires_acknowledgement: boolean;
   metadata: Record<string, unknown>;
   path: LineagePathHop[];
 }
@@ -123,6 +125,9 @@ export interface LineageBuildCandidate {
   distance: number;
   triggerable: boolean;
   marking: string;
+  effective_marking: string;
+  requires_acknowledgement: boolean;
+  blocked_reason: string | null;
   metadata: Record<string, unknown>;
 }
 
@@ -146,6 +151,7 @@ export interface LineageBuildTriggerResult {
 export interface LineageBuildResult {
   root: LineageNode;
   dry_run: boolean;
+  acknowledged_sensitive_lineage: boolean;
   propagated_marking: string;
   candidates: LineageBuildCandidate[];
   triggered: LineageBuildTriggerResult[];
@@ -206,7 +212,7 @@ export function deletePipeline(id: string) {
 }
 
 // Execution
-export function triggerRun(pipelineId: string, body?: { from_node_id?: string; context?: Record<string, unknown> }) {
+export function triggerRun(pipelineId: string, body?: { from_node_id?: string; context?: Record<string, unknown>; skip_unchanged?: boolean }) {
   return api.post<PipelineRun>(`/pipelines/${pipelineId}/run`, body ?? {});
 }
 
@@ -217,7 +223,7 @@ export function listRuns(pipelineId: string, params?: { page?: number; per_page?
   return api.get<{ data: PipelineRun[] }>(`/pipelines/${pipelineId}/runs?${qs}`);
 }
 
-export function retryPipelineRun(pipelineId: string, runId: string, body?: { from_node_id?: string }) {
+export function retryPipelineRun(pipelineId: string, runId: string, body?: { from_node_id?: string; skip_unchanged?: boolean }) {
   return api.post<PipelineRun>(`/pipelines/${pipelineId}/runs/${runId}/retry`, body ?? {});
 }
 
@@ -241,6 +247,7 @@ export function getDatasetLineageImpact(datasetId: string) {
 export function triggerLineageBuilds(datasetId: string, body?: {
   include_workflows?: boolean;
   dry_run?: boolean;
+  acknowledge_sensitive_lineage?: boolean;
   max_depth?: number;
   context?: Record<string, unknown>;
 }) {

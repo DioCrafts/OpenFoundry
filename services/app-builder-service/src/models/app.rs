@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, types::Json};
@@ -139,6 +141,63 @@ impl Default for QuiverEmbedSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WorkshopScenarioPreset {
+    #[serde(default)]
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub parameters: BTreeMap<String, String>,
+    #[serde(default)]
+    pub prompt_template: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WorkshopInteractiveSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub subtitle: Option<String>,
+    #[serde(default)]
+    pub briefing_template: Option<String>,
+    #[serde(default)]
+    pub primary_scenario_widget_id: Option<String>,
+    #[serde(default)]
+    pub primary_agent_widget_id: Option<String>,
+    #[serde(default)]
+    pub suggested_questions: Vec<String>,
+    #[serde(default)]
+    pub scenario_presets: Vec<WorkshopScenarioPreset>,
+}
+
+impl Default for WorkshopInteractiveSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            title: Some("Interactive Workshop".to_string()),
+            subtitle: Some(
+                "Coordinate scenario presets, decision briefs, and AI copilots from one runtime surface."
+                    .to_string(),
+            ),
+            briefing_template: Some(
+                "Current scenario context:\n{{demand_multiplier}} demand multiplier\n{{service_level}} service level\nUse these assumptions to brief the operator."
+                    .to_string(),
+            ),
+            primary_scenario_widget_id: None,
+            primary_agent_widget_id: None,
+            suggested_questions: vec![
+                "What changed versus the baseline scenario?".to_string(),
+                "Which mitigations should the team prioritize first?".to_string(),
+            ],
+            scenario_presets: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppSettings {
     #[serde(default)]
     pub home_page_id: Option<String>,
@@ -155,6 +214,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub consumer_mode: ConsumerModeSettings,
     #[serde(default)]
+    pub interactive_workshop: WorkshopInteractiveSettings,
+    #[serde(default)]
     pub slate: SlateSettings,
 }
 
@@ -168,6 +229,7 @@ impl Default for AppSettings {
             custom_css: None,
             builder_experience: default_builder_experience(),
             consumer_mode: ConsumerModeSettings::default(),
+            interactive_workshop: WorkshopInteractiveSettings::default(),
             slate: SlateSettings::default(),
         }
     }

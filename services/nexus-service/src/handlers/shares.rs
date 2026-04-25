@@ -268,36 +268,34 @@ pub async fn update_share(
         .transpose()
         .map_err(|cause| internal_error(cause.to_string()))?
         .ok_or_else(|| bad_request("consumer peer not found"))?;
-    let provider_space = if let Some(space_id) =
-        request.provider_space_id.or(current.provider_space_id)
-    {
-        Some(
-            load_space_row(&state.db, space_id)
-                .await
-                .map_err(|cause| db_error(&cause))?
-                .map(crate::models::space::NexusSpace::try_from)
-                .transpose()
-                .map_err(|cause| internal_error(cause.to_string()))?
-                .ok_or_else(|| bad_request("provider space not found"))?,
-        )
-    } else {
-        None
-    };
-    let consumer_space = if let Some(space_id) =
-        request.consumer_space_id.or(current.consumer_space_id)
-    {
-        Some(
-            load_space_row(&state.db, space_id)
-                .await
-                .map_err(|cause| db_error(&cause))?
-                .map(crate::models::space::NexusSpace::try_from)
-                .transpose()
-                .map_err(|cause| internal_error(cause.to_string()))?
-                .ok_or_else(|| bad_request("consumer space not found"))?,
-        )
-    } else {
-        None
-    };
+    let provider_space =
+        if let Some(space_id) = request.provider_space_id.or(current.provider_space_id) {
+            Some(
+                load_space_row(&state.db, space_id)
+                    .await
+                    .map_err(|cause| db_error(&cause))?
+                    .map(crate::models::space::NexusSpace::try_from)
+                    .transpose()
+                    .map_err(|cause| internal_error(cause.to_string()))?
+                    .ok_or_else(|| bad_request("provider space not found"))?,
+            )
+        } else {
+            None
+        };
+    let consumer_space =
+        if let Some(space_id) = request.consumer_space_id.or(current.consumer_space_id) {
+            Some(
+                load_space_row(&state.db, space_id)
+                    .await
+                    .map_err(|cause| db_error(&cause))?
+                    .map(crate::models::space::NexusSpace::try_from)
+                    .transpose()
+                    .map_err(|cause| internal_error(cause.to_string()))?
+                    .ok_or_else(|| bad_request("consumer space not found"))?,
+            )
+        } else {
+            None
+        };
     let now = Utc::now();
     let next_dataset_name = request
         .dataset_name

@@ -15,6 +15,27 @@ pub struct AppBrandingSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityProviderRuleMatchType {
+    EmailDomain,
+    ClaimEquals,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdentityProviderOrganizationRule {
+    pub name: String,
+    pub match_type: IdentityProviderRuleMatchType,
+    pub claim: Option<String>,
+    pub match_value: String,
+    pub organization_id: Uuid,
+    pub workspace: Option<String>,
+    pub classification_clearance: Option<String>,
+    #[serde(default)]
+    pub roles: Vec<String>,
+    pub tenant_tier: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IdentityProviderMapping {
     pub provider_slug: String,
     pub default_organization_id: Option<Uuid>,
@@ -26,6 +47,8 @@ pub struct IdentityProviderMapping {
     pub role_claim: Option<String>,
     pub default_roles: Vec<String>,
     pub allowed_email_domains: Vec<String>,
+    #[serde(default)]
+    pub organization_rules: Vec<IdentityProviderOrganizationRule>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,7 +115,39 @@ pub struct UpgradeReadinessResponse {
     pub release_channel: String,
     pub readiness: String,
     pub checks: Vec<UpgradeReadinessCheck>,
+    pub blockers: Vec<String>,
+    pub recommended_actions: Vec<String>,
+    pub next_stage: Option<UpgradeAssistantStage>,
+    pub completed_stage_count: usize,
+    pub total_stage_count: usize,
+    pub preflight_ready_count: usize,
+    pub preflight_total_count: usize,
+    pub completed_rollout_percentage: u32,
     pub generated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct IdentityProviderMappingPreviewRequest {
+    pub provider_slug: String,
+    pub email: String,
+    #[serde(default)]
+    pub raw_claims: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdentityProviderMappingPreviewResponse {
+    pub provider_slug: String,
+    pub email: String,
+    pub mapping_found: bool,
+    pub matched_rule_name: Option<String>,
+    pub organization_id: Option<Uuid>,
+    pub workspace: Option<String>,
+    pub classification_clearance: Option<String>,
+    pub role_names: Vec<String>,
+    pub tenant_tier: Option<String>,
+    pub resource_policy_name: Option<String>,
+    pub quota: Option<ResourceQuotaSettings>,
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -182,10 +237,8 @@ impl TryFrom<ControlPanelRow> for ControlPanelSettings {
                 .map_err(|cause| format!("invalid restricted_operations: {cause}"))?,
             identity_provider_mappings: serde_json::from_value(row.identity_provider_mappings)
                 .map_err(|cause| format!("invalid identity_provider_mappings: {cause}"))?,
-            resource_management_policies: serde_json::from_value(
-                row.resource_management_policies,
-            )
-            .map_err(|cause| format!("invalid resource_management_policies: {cause}"))?,
+            resource_management_policies: serde_json::from_value(row.resource_management_policies)
+                .map_err(|cause| format!("invalid resource_management_policies: {cause}"))?,
             upgrade_assistant: serde_json::from_value(row.upgrade_assistant)
                 .map_err(|cause| format!("invalid upgrade_assistant: {cause}"))?,
             updated_by: row.updated_by,

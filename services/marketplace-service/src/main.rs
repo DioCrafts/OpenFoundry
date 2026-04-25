@@ -6,6 +6,7 @@ mod models;
 use auth_middleware::jwt::JwtConfig;
 use axum::{Router, extract::FromRef, middleware, routing::get};
 use sqlx::postgres::PgPoolOptions;
+use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Clone)]
@@ -41,7 +42,7 @@ async fn main() {
         .await
         .expect("failed to run migrations");
 
-    let jwt_config = JwtConfig::new(&cfg.jwt_secret);
+    let jwt_config = JwtConfig::new(&cfg.jwt_secret).with_env_defaults();
     let http_client = reqwest::Client::builder()
         .build()
         .expect("failed to build marketplace HTTP client");
@@ -51,6 +52,21 @@ async fn main() {
         http_client,
         app_builder_service_url: cfg.app_builder_service_url.clone(),
     };
+    let reconciler_state = state.clone();
+    let reconciler_interval = cfg.devops_reconciler_interval_seconds.max(30);
+
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(Duration::from_secs(reconciler_interval));
+        ticker.tick().await;
+        loop {
+            if let Err(error) =
+                handlers::devops::reconcile_auto_upgrade_fleets(reconciler_state.clone()).await
+            {
+                tracing::warn!("marketplace devops reconciler failed: {error}");
+            }
+            ticker.tick().await;
+        }
+    });
 
     let public = Router::new().route("/health", get(|| async { "ok" }));
 
@@ -86,6 +102,28 @@ async fn main() {
         .route(
             "/api/v1/marketplace/installs",
             get(handlers::install::list_installs).post(handlers::install::create_install),
+        )
+        .route(
+            "/api/v1/marketplace/devops/fleets",
+            get(handlers::devops::list_fleets).post(handlers::devops::create_fleet),
+        )
+        .route(
+            "/api/v1/marketplace/devops/fleets/{id}/sync",
+            axum::routing::post(handlers::devops::sync_fleet),
+        )
+        .route(
+            "/api/v1/marketplace/devops/fleets/{id}/promotion-gates",
+            get(handlers::devops::list_promotion_gates)
+                .post(handlers::devops::create_promotion_gate),
+        )
+        .route(
+            "/api/v1/marketplace/devops/promotion-gates/{id}",
+            axum::routing::patch(handlers::devops::update_promotion_gate),
+        )
+        .route(
+            "/api/v1/marketplace/devops/branches",
+            get(handlers::devops::list_enrollment_branches)
+                .post(handlers::devops::create_enrollment_branch),
         )
         .layer(middleware::from_fn_with_state(
             jwt_config,

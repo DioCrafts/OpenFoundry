@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -31,6 +33,20 @@ pub struct GraphEdge {
     pub metadata: Value,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GraphSummary {
+    pub scope: String,
+    pub node_kinds: BTreeMap<String, usize>,
+    pub edge_kinds: BTreeMap<String, usize>,
+    pub object_types: BTreeMap<String, usize>,
+    pub markings: BTreeMap<String, usize>,
+    pub root_neighbor_count: usize,
+    pub max_hops_reached: usize,
+    pub boundary_crossings: usize,
+    pub sensitive_objects: usize,
+    pub sensitive_markings: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct GraphResponse {
     pub mode: String,
@@ -39,6 +55,7 @@ pub struct GraphResponse {
     pub depth: usize,
     pub total_nodes: usize,
     pub total_edges: usize,
+    pub summary: GraphSummary,
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
 }

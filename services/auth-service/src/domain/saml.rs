@@ -6,10 +6,7 @@ use serde_json::{Map, Value, json};
 use url::Url;
 use uuid::Uuid;
 
-use crate::{
-    domain::oauth,
-    models::sso::SsoProvider,
-};
+use crate::{domain::oauth, models::sso::SsoProvider};
 
 #[derive(Debug, Clone)]
 pub struct SamlMetadataDefaults {
@@ -42,10 +39,7 @@ pub async fn resolve_metadata_defaults(metadata_url: &str) -> Result<SamlMetadat
 
 pub fn parse_metadata_defaults(xml: &str) -> SamlMetadataDefaults {
     SamlMetadataDefaults {
-        entity_id: capture_first(
-            xml,
-            r#"entityID\s*=\s*"([^"]+)""#,
-        ),
+        entity_id: capture_first(xml, r#"entityID\s*=\s*"([^"]+)""#),
         sso_url: capture_first(
             xml,
             r#"<[^>]*SingleSignOnService[^>]*Location\s*=\s*"([^"]+)""#,
@@ -92,18 +86,12 @@ pub fn parse_saml_response(
         .map_err(|error| error.to_string())?;
     let xml = String::from_utf8(decoded).map_err(|error| error.to_string())?;
 
-    if xml.contains("StatusCode")
-        && xml.contains("Responder")
-        || xml.contains("Requester")
-    {
+    if xml.contains("StatusCode") && xml.contains("Responder") || xml.contains("Requester") {
         return Err("saml response returned a non-success status".to_string());
     }
 
-    let subject = capture_first(
-        &xml,
-        r#"<[^>]*NameID[^>]*>([^<]+)</[^>]*NameID>"#,
-    )
-    .ok_or_else(|| "saml response is missing NameID".to_string())?;
+    let subject = capture_first(&xml, r#"<[^>]*NameID[^>]*>([^<]+)</[^>]*NameID>"#)
+        .ok_or_else(|| "saml response is missing NameID".to_string())?;
 
     let mut attributes = extract_attributes(&xml);
     attributes.insert("NameID".to_string(), Value::String(subject.clone()));
@@ -175,7 +163,11 @@ fn capture_first(input: &str, pattern: &str) -> Option<String> {
     Regex::new(pattern)
         .ok()
         .and_then(|regex| regex.captures(input))
-        .and_then(|captures| captures.get(1).map(|value| value.as_str().trim().to_string()))
+        .and_then(|captures| {
+            captures
+                .get(1)
+                .map(|value| value.as_str().trim().to_string())
+        })
         .filter(|value| !value.is_empty())
 }
 
@@ -204,7 +196,10 @@ mod tests {
             metadata.entity_id.as_deref(),
             Some("https://idp.example.com/metadata")
         );
-        assert_eq!(metadata.sso_url.as_deref(), Some("https://idp.example.com/sso"));
+        assert_eq!(
+            metadata.sso_url.as_deref(),
+            Some("https://idp.example.com/sso")
+        );
         assert_eq!(metadata.certificate.as_deref(), Some("ABC123"));
     }
 

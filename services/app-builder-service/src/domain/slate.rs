@@ -109,7 +109,10 @@ pub fn apply_slate_round_trip(
     if let Some(framework) = request.framework.filter(|value| !value.trim().is_empty()) {
         app.settings.slate.framework = framework;
     }
-    if let Some(package_name) = request.package_name.filter(|value| !value.trim().is_empty()) {
+    if let Some(package_name) = request
+        .package_name
+        .filter(|value| !value.trim().is_empty())
+    {
         app.settings.slate.package_name = package_name;
     }
     if let Some(entry_file) = request.entry_file.filter(|value| !value.trim().is_empty()) {
@@ -244,7 +247,10 @@ fn with_upserted_workshop_manifest(
         content: render_workshop_manifest(app),
     };
 
-    if let Some(existing) = files.iter_mut().find(|file| file.path == WORKSHOP_MANIFEST_PATH) {
+    if let Some(existing) = files
+        .iter_mut()
+        .find(|file| file.path == WORKSHOP_MANIFEST_PATH)
+    {
         *existing = manifest;
     } else {
         files.push(manifest);
@@ -278,8 +284,13 @@ fn normalize_files(files: Vec<SlatePackageFile>) -> Result<Vec<SlatePackageFile>
     Ok(normalized)
 }
 
-fn extract_manifest(files: &[SlatePackageFile]) -> Result<Option<WorkshopRoundTripManifest>, String> {
-    let Some(file) = files.iter().find(|candidate| candidate.path == WORKSHOP_MANIFEST_PATH) else {
+fn extract_manifest(
+    files: &[SlatePackageFile],
+) -> Result<Option<WorkshopRoundTripManifest>, String> {
+    let Some(file) = files
+        .iter()
+        .find(|candidate| candidate.path == WORKSHOP_MANIFEST_PATH)
+    else {
         return Ok(None);
     };
 
@@ -340,7 +351,9 @@ fn render_app_tsx(app: &App, sdk_import: &str) -> String {
         .portal_subtitle
         .as_deref()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or("Compose a custom app shell while keeping OpenFoundry as the operational backend.");
+        .unwrap_or(
+            "Compose a custom app shell while keeping OpenFoundry as the operational backend.",
+        );
 
     let template = r#"import React from 'react';
 import { useOpenFoundry, useOpenFoundryQuery } from '__SDK_IMPORT__';
@@ -453,11 +466,7 @@ fn component_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{
-        app::AppSettings,
-        page::AppPage,
-        theme::AppTheme,
-    };
+    use crate::models::{app::AppSettings, page::AppPage, theme::AppTheme};
     use chrono::Utc;
     use uuid::Uuid;
 
@@ -486,10 +495,12 @@ mod tests {
         assert_eq!(package.framework, "react");
         assert!(package.files.iter().any(|file| file.path == "src/App.tsx"));
         assert!(package.files.iter().any(|file| file.path == "package.json"));
-        assert!(package
-            .files
-            .iter()
-            .any(|file| file.path == WORKSHOP_MANIFEST_PATH));
+        assert!(
+            package
+                .files
+                .iter()
+                .any(|file| file.path == WORKSHOP_MANIFEST_PATH)
+        );
     }
 
     #[test]
@@ -518,21 +529,31 @@ mod tests {
 
         assert!(response.app.settings.slate.workspace.enabled);
         assert_eq!(
-            response.app.settings.slate.workspace.repository_id.as_deref(),
+            response
+                .app
+                .settings
+                .slate
+                .workspace
+                .repository_id
+                .as_deref(),
             Some("repo-123")
         );
-        assert!(response
-            .app
-            .settings
-            .slate
-            .workspace
-            .files
-            .iter()
-            .any(|file| file.path == "src/App.tsx"));
-        assert!(response
-            .slate_package
-            .files
-            .iter()
-            .any(|file| file.path == WORKSHOP_MANIFEST_PATH));
+        assert!(
+            response
+                .app
+                .settings
+                .slate
+                .workspace
+                .files
+                .iter()
+                .any(|file| file.path == "src/App.tsx")
+        );
+        assert!(
+            response
+                .slate_package
+                .files
+                .iter()
+                .any(|file| file.path == WORKSHOP_MANIFEST_PATH)
+        );
     }
 }

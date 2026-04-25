@@ -296,8 +296,7 @@ pub async fn create_document(
 
     let document_id = Uuid::now_v7();
     let knowledge_base: KnowledgeBase = knowledge_base_row.into();
-    let provider =
-        resolve_embedding_provider(&state, &knowledge_base.embedding_provider).await?;
+    let provider = resolve_embedding_provider(&state, &knowledge_base.embedding_provider).await?;
     let chunks = if let Some(provider) = provider.as_ref() {
         let max_chars = if knowledge_base.chunking_strategy == "fine" {
             320
@@ -324,7 +323,11 @@ pub async fn create_document(
         }
         chunks
     } else {
-        rag::indexer::index_document(document_id, &body.content, &knowledge_base.chunking_strategy)
+        rag::indexer::index_document(
+            document_id,
+            &body.content,
+            &knowledge_base.chunking_strategy,
+        )
     };
 
     let row = query_as::<_, KnowledgeDocumentRow>(
@@ -429,8 +432,12 @@ pub async fn search_knowledge_base(
         None => rag::embedder::embed_text(&body.query),
     };
     let documents = rows.into_iter().map(Into::into).collect::<Vec<_>>();
-    let results =
-        rag::retriever::search_with_embedding(&query_embedding, &documents, body.top_k, body.min_score);
+    let results = rag::retriever::search_with_embedding(
+        &query_embedding,
+        &documents,
+        body.top_k,
+        body.min_score,
+    );
 
     Ok(Json(SearchKnowledgeBaseResponse {
         knowledge_base_id,

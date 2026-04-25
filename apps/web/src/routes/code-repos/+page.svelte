@@ -23,6 +23,7 @@
 		listFiles,
 		listMergeRequests,
 		listRepositories,
+		mergeMergeRequest,
 		searchFiles,
 		triggerCiRun,
 		updateMergeRequest,
@@ -118,6 +119,9 @@
 
 	const busy = $derived(loading || busyAction.length > 0);
 	const branchOptions = $derived(branches.map((branch) => branch.name));
+	const currentRepository = $derived(
+		repositories.find((repository) => repository.id === selectedRepositoryId) ?? null,
+	);
 
 	onMount(() => {
 		void refreshAll();
@@ -134,7 +138,7 @@
 			object_store_backend: 'gitoxide-pack',
 			package_kind: 'widget',
 			tags_text: 'widgets, ui, marketplace',
-			settings_text: JSON.stringify({ default_path: 'src/lib.rs', ci_required: true }, null, 2),
+			settings_text: JSON.stringify({ default_path: 'src/lib.rs', ci_required: true, allow_direct_commits_on_protected: false }, null, 2),
 		};
 	}
 
@@ -185,6 +189,10 @@
 		return value.split(',').map((entry) => entry.trim()).filter(Boolean);
 	}
 
+	function preferredCommitBranch(defaultBranch: string, nextBranches: BranchDefinition[]) {
+		return nextBranches.find((branch) => !branch.protected)?.name ?? defaultBranch;
+	}
+
 	function parseJson<T>(value: string): T {
 		return JSON.parse(value) as T;
 	}
@@ -223,6 +231,45 @@
 
 	function updateCommentDraft(patch: Partial<CommentDraft>) {
 		commentDraft = { ...commentDraft, ...patch };
+	}
+
+	function repositoryCiRequired(repository: RepositoryDefinition | null) {
+		return repository?.settings?.['ci_required'] !== false;
+	}
+
+	function latestCiRunForBranch(branchName: string) {
+		return ciRuns.find((run) => run.branch_name === branchName) ?? null;
+	}
+
+	function targetBranch(branchName: string) {
+		return branches.find((branch) => branch.name === branchName) ?? null;
+	}
+
+	function mergeBlockers(detail: MergeRequestDetailModel | null) {
+		if (!detail) return [];
+		const blockers: string[] = [];
+		const target = targetBranch(detail.merge_request.target_branch);
+		const latestSourceCi = latestCiRunForBranch(detail.merge_request.source_branch);
+		const requiredApprovals = detail.merge_request.approvals_required;
+		if (target?.protected && detail.approval_count < requiredApprovals) {
+			blockers.push(`Protected branch requires ${requiredApprovals} approval(s); only ${detail.approval_count} recorded.`);
+		}
+		if (repositoryCiRequired(currentRepository)) {
+			if (!latestSourceCi) {
+				blockers.push(`Branch ${detail.merge_request.source_branch} has no CI run on record.`);
+			} else if (latestSourceCi.commit_sha !== targetBranch(detail.merge_request.source_branch)?.head_sha) {
+				blockers.push(`Latest CI does not cover the current head of ${detail.merge_request.source_branch}.`);
+			} else if (latestSourceCi.status !== 'passed') {
+				blockers.push(`Latest CI on ${detail.merge_request.source_branch} is ${latestSourceCi.status}.`);
+			}
+		}
+		if (detail.merge_request.status === 'closed') {
+			blockers.push('Closed merge requests cannot be merged until reopened.');
+		}
+		if (detail.merge_request.status === 'merged') {
+			blockers.push('This merge request is already merged.');
+		}
+		return blockers;
 	}
 
 	async function refreshAll(preferredRepositoryId?: string, preferredMergeRequestId?: string) {
@@ -277,6 +324,7 @@
 		ciRuns = ciRunsResponse.items;
 		diffPatch = diffResponse.patch;
 		mergeRequests = mergeRequestsResponse.items;
+		commitDraft = createEmptyCommitDraft(preferredCommitBranch(defaultBranch, branches));
 		selectedFilePath = files[0]?.path ?? '';
 		commentDraft = createEmptyCommentDraft(selectedFilePath || 'src/lib.rs');
 		searchResults = [];
@@ -415,7 +463,7 @@
 				deletions: Number(commitDraft.deletions),
 			});
 			await loadRepositoryContext(selectedRepositoryId, selectedMergeRequestId || undefined, false);
-			notifications.success(`Created commit ${commitDraft.title}`);
+			notifications.success(`Created commit ${commitDraft.title} and queued branch CI`);
 		} catch (error) {
 			uiError = error instanceof Error ? error.message : 'Unable to create commit';
 			notifications.error(uiError);
@@ -509,6 +557,43 @@
 		}
 	}
 
+	async function updateReviewerState(reviewerName: string, approved: boolean, state: string) {
+		if (!mergeRequestDetail) return;
+		busyAction = 'mr-review';
+		try {
+			const reviewers = mergeRequestDetail.merge_request.reviewers.map((reviewer) =>
+				reviewer.reviewer === reviewerName
+					? { ...reviewer, approved, state }
+					: reviewer,
+			);
+			await updateMergeRequest(mergeRequestDetail.merge_request.id, { reviewers });
+			await loadRepositoryContext(selectedRepositoryId, selectedMergeRequestId, false);
+			notifications.success(`Updated review state for ${reviewerName}`);
+		} catch (error) {
+			uiError = error instanceof Error ? error.message : 'Unable to update reviewer state';
+			notifications.error(uiError);
+		} finally {
+			busyAction = '';
+		}
+	}
+
+	async function mergeSelectedMergeRequest() {
+		if (!selectedMergeRequestId || !mergeRequestDetail) return;
+		busyAction = 'merge-mr';
+		try {
+			const result = await mergeMergeRequest(selectedMergeRequestId, {
+				merged_by: commentDraft.author || mergeRequestDetail.merge_request.author,
+			});
+			await loadRepositoryContext(selectedRepositoryId, selectedMergeRequestId, false);
+			notifications.success(`Merged into ${result.target_branch} at ${result.merge_commit_sha.slice(0, 8)}`);
+		} catch (error) {
+			uiError = error instanceof Error ? error.message : 'Unable to merge merge request';
+			notifications.error(uiError);
+		} finally {
+			busyAction = '';
+		}
+	}
+
 	async function createCommentAction() {
 		if (!selectedMergeRequestId) {
 			notifications.warning('Select a merge request before adding comments');
@@ -544,8 +629,8 @@
 		<div class="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
 			<div class="max-w-3xl">
 				<p class="text-xs font-semibold uppercase tracking-[0.28em] text-sky-300">Milestone 4.4</p>
-				<h1 class="mt-3 text-3xl font-semibold tracking-tight">Code repos, merge workflows, CI triggers, and indexed package search</h1>
-				<p class="mt-3 text-sm leading-6 text-stone-300">Operate repository metadata, branch and commit flows, diff inspection, and review threads from a single surface that mirrors the new code-repo backend.</p>
+				<h1 class="mt-3 text-3xl font-semibold tracking-tight">Code repos, protected merges, CI gates, and indexed package search</h1>
+				<p class="mt-3 text-sm leading-6 text-stone-300">Operate repository metadata, branch and commit flows, diff inspection, review threads, and real merge enforcement from a single surface that mirrors the upgraded code-repo backend.</p>
 			</div>
 			<div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
 				<div class="rounded-2xl bg-white/10 px-4 py-3 backdrop-blur">
@@ -603,7 +688,7 @@
 
 	<div class="grid gap-6 xl:grid-cols-[0.92fr_1.08fr]">
 		<BranchManager branches={branches} draft={branchDraft} {busy} onDraftChange={updateBranchDraft} onCreateBranch={createBranchAction} />
-		<CommitHistory commits={commits} ciRuns={ciRuns} draft={commitDraft} {busy} onDraftChange={updateCommitDraft} onCreateCommit={createCommitAction} onTriggerCi={triggerCiAction} />
+		<CommitHistory branches={branches} commits={commits} ciRuns={ciRuns} draft={commitDraft} {busy} onDraftChange={updateCommitDraft} onCreateCommit={createCommitAction} onTriggerCi={triggerCiAction} />
 	</div>
 
 	<div class="grid gap-6 xl:grid-cols-[0.92fr_1.08fr]">
@@ -617,6 +702,18 @@
 			onDraftChange={updateMergeRequestDraft}
 			onCreateMergeRequest={createMergeRequestAction}
 		/>
-		<MergeRequestDetail detail={mergeRequestDetail} draft={commentDraft} {busy} onDraftChange={updateCommentDraft} onCreateComment={createCommentAction} onStatusChange={changeMergeRequestStatus} />
+		<MergeRequestDetail
+			detail={mergeRequestDetail}
+			draft={commentDraft}
+			{busy}
+			mergeBlockers={mergeBlockers(mergeRequestDetail)}
+			latestSourceCi={mergeRequestDetail ? latestCiRunForBranch(mergeRequestDetail.merge_request.source_branch) : null}
+			targetBranchProtected={mergeRequestDetail ? Boolean(targetBranch(mergeRequestDetail.merge_request.target_branch)?.protected ?? (mergeRequestDetail.merge_request.target_branch === currentRepository?.default_branch)) : false}
+			onDraftChange={updateCommentDraft}
+			onCreateComment={createCommentAction}
+			onStatusChange={changeMergeRequestStatus}
+			onReviewerStateChange={updateReviewerState}
+			onMerge={mergeSelectedMergeRequest}
+		/>
 	</div>
 </div>

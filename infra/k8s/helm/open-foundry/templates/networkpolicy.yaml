@@ -1,5 +1,11 @@
 {{- range $serviceName, $service := .Values.services }}
 {{- if and $service.enabled $.Values.global.networkPolicy.enabled }}
+{{- $allowSameNamespace := $.Values.global.networkPolicy.allowSameNamespaceTraffic }}
+{{- $allowedIngressCidrs := $.Values.global.deploymentFabric.geoRestrictions.allowedIngressCidrs | default (list) }}
+{{- $additionalEgressCidrs := $.Values.global.networkPolicy.additionalEgressCidrs | default (list) }}
+{{- $geoEgressCidrs := $.Values.global.deploymentFabric.geoRestrictions.allowedEgressCidrs | default (list) }}
+{{- $airGapEgressCidrs := $.Values.global.deploymentFabric.airGap.allowedEgressCidrs | default (list) }}
+{{- $allEgressCidrs := concat $additionalEgressCidrs $geoEgressCidrs $airGapEgressCidrs }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -15,11 +21,39 @@ spec:
     - Ingress
     - Egress
   ingress:
-    - ports:
+    - from:
+{{- if $allowSameNamespace }}
+        - podSelector: {}
+{{- end }}
+{{- range $allowedIngressCidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+{{- end }}
+      ports:
         - protocol: TCP
           port: {{ $service.port }}
   egress:
+{{- if $allowSameNamespace }}
+    - to:
+        - podSelector: {}
+{{- end }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+{{- range $allEgressCidrs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . | quote }}
+{{- end }}
+{{- if not (and $.Values.global.deploymentFabric.airGap.enabled $.Values.global.deploymentFabric.airGap.disablePublicEgress) }}
     - {}
+{{- end }}
 ---
 {{- end }}
 {{- end }}

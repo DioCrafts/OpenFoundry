@@ -168,6 +168,24 @@ async fn fetch_source_payload(
 ) -> Result<SyncPayload, String> {
     let agent_url = agent_registry::resolve_agent_url(state, &connection.config).await?;
     match connection.connector_type.as_str() {
+        "bigquery" => {
+            connectors::bigquery::fetch_dataset(
+                state,
+                &connection.config,
+                &job.table_name,
+                agent_url.as_deref(),
+            )
+            .await
+        }
+        "kafka" => {
+            connectors::kafka::fetch_dataset(
+                state,
+                &connection.config,
+                &job.table_name,
+                agent_url.as_deref(),
+            )
+            .await
+        }
         "postgresql" => {
             connectors::postgres::fetch_dataset(&connection.config, &job.table_name).await
         }
@@ -193,6 +211,15 @@ async fn fetch_source_payload(
         }
         "sap" => {
             connectors::sap::fetch_dataset(
+                state,
+                &connection.config,
+                &job.table_name,
+                agent_url.as_deref(),
+            )
+            .await
+        }
+        "snowflake" => {
+            connectors::snowflake::fetch_dataset(
                 state,
                 &connection.config,
                 &job.table_name,

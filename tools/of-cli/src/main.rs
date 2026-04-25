@@ -260,12 +260,8 @@ async fn main() -> Result<()> {
             DocsCommand::ValidateSdkPython { input, output } => {
                 validate_python_sdk(&input, &output)
             }
-            DocsCommand::GenerateSdkJava { input, output } => {
-                generate_java_sdk(&input, &output)
-            }
-            DocsCommand::ValidateSdkJava { input, output } => {
-                validate_java_sdk(&input, &output)
-            }
+            DocsCommand::GenerateSdkJava { input, output } => generate_java_sdk(&input, &output),
+            DocsCommand::ValidateSdkJava { input, output } => validate_java_sdk(&input, &output),
         },
         Command::Bench { command } => match command {
             BenchCommand::Run { scenario, output } => {

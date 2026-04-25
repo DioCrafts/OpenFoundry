@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::models::compliance_report::ComplianceStandard;
+
 use crate::models::data_classification::ClassificationLevel;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,6 +22,9 @@ pub struct GovernanceTemplate {
     pub name: String,
     pub summary: String,
     pub standards: Vec<String>,
+    pub default_report_standard: ComplianceStandard,
+    pub checkpoint_prompts: Vec<String>,
+    pub sds_remediations: Vec<String>,
     pub policies: Vec<GovernanceTemplatePolicy>,
 }
 

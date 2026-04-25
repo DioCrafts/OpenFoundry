@@ -30,8 +30,8 @@ pub async fn generate_report(
 ) -> ServiceResult<ComplianceReport> {
     let events = security::filter_events_for_claims(
         load_events(&state.db)
-        .await
-        .map_err(|cause| db_error(&cause))?,
+            .await
+            .map_err(|cause| db_error(&cause))?,
         &claims,
     );
     let policies = load_policies(&state.db)
@@ -81,8 +81,8 @@ pub async fn export_subject_data(
 
     let events = security::filter_events_for_claims(
         load_events(&state.db)
-        .await
-        .map_err(|cause| db_error(&cause))?,
+            .await
+            .map_err(|cause| db_error(&cause))?,
         &claims,
     );
     Ok(Json(gdpr::export_payload(&request, &events)))
@@ -101,8 +101,8 @@ pub async fn erase_subject_data(
 
     let events = security::filter_events_for_claims(
         load_events(&state.db)
-        .await
-        .map_err(|cause| db_error(&cause))?,
+            .await
+            .map_err(|cause| db_error(&cause))?,
         &claims,
     );
     let response = gdpr::erase_response(&request, &events);

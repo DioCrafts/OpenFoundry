@@ -39,6 +39,11 @@ export interface NotificationSocketEvent {
   data?: UserNotification[];
 }
 
+export interface NotificationSocketTicket {
+  ticket: string;
+  expires_in: number;
+}
+
 export function listNotifications(params?: { status?: string; limit?: number }) {
   const query = new URLSearchParams();
   if (params?.status) query.set('status', params.status);
@@ -61,6 +66,10 @@ export function getNotificationPreferences() {
 
 export function updateNotificationPreferences(body: Partial<Omit<NotificationPreference, 'user_id' | 'updated_at'>>) {
   return api.put<NotificationPreference>('/notifications/preferences', body);
+}
+
+export function issueNotificationSocketTicket() {
+  return api.post<NotificationSocketTicket>('/notifications/ws-ticket', {});
 }
 
 export function sendNotification(body: {

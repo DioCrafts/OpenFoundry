@@ -50,6 +50,43 @@ export interface WorkflowRun {
   finished_at: string | null;
 }
 
+export interface WorkflowActionProposal {
+  kind: string;
+  action_id: string;
+  target_object_id: string | null;
+  parameters: Record<string, unknown>;
+  justification: string | null;
+  summary: string;
+  reasoning: unknown;
+  preview: unknown;
+  what_if_branch: Record<string, unknown> | null;
+  auto_apply_on_approval: boolean;
+  execution_identity: string;
+}
+
+export interface WorkflowApprovalReview {
+  decision: string;
+  decided_by: string;
+  comment: string | null;
+  payload: Record<string, unknown>;
+  decided_at: string;
+}
+
+export interface WorkflowProposalExecution {
+  status: string;
+  response: unknown;
+  error: string | null;
+  updated_at: string;
+}
+
+export interface WorkflowApprovalPayload {
+  request_context?: Record<string, unknown>;
+  proposal?: WorkflowActionProposal;
+  decision_review?: WorkflowApprovalReview;
+  proposal_execution?: WorkflowProposalExecution;
+  [key: string]: unknown;
+}
+
 export interface WorkflowApproval {
   id: string;
   workflow_id: string;
@@ -60,7 +97,7 @@ export interface WorkflowApproval {
   assigned_to: string | null;
   status: string;
   decision: string | null;
-  payload: Record<string, unknown>;
+  payload: WorkflowApprovalPayload;
   requested_at: string;
   decided_at: string | null;
   decided_by: string | null;

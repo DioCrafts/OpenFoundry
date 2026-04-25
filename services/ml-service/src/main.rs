@@ -44,7 +44,7 @@ async fn main() {
         .await
         .expect("failed to run migrations");
 
-    let jwt_config = JwtConfig::new(&cfg.jwt_secret);
+    let jwt_config = JwtConfig::new(&cfg.jwt_secret).with_env_defaults();
     let state = AppState {
         db: pool,
         jwt_config: jwt_config.clone(),
@@ -62,6 +62,10 @@ async fn main() {
         .route(
             "/api/v1/ml/experiments/{id}",
             axum::routing::patch(handlers::experiments::update_experiment),
+        )
+        .route(
+            "/api/v1/ml/experiments/{id}/asset-lineage",
+            get(handlers::experiments::get_experiment_asset_lineage),
         )
         .route(
             "/api/v1/ml/experiments/{id}/runs",

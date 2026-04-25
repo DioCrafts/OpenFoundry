@@ -184,9 +184,9 @@ fn embed(content: &str) -> Vec<f32> {
         .filter(|token| !token.is_empty())
         .enumerate()
     {
-        let hash = token
-            .bytes()
-            .fold(0_u64, |acc, byte| acc.wrapping_mul(33).wrapping_add(byte as u64));
+        let hash = token.bytes().fold(0_u64, |acc, byte| {
+            acc.wrapping_mul(33).wrapping_add(byte as u64)
+        });
         vector[index % vector_len] += (hash % 997) as f32 / 997.0;
     }
 

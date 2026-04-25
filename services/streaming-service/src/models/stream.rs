@@ -89,6 +89,7 @@ pub struct PushStreamEventsRequest {
 pub struct PushStreamEventsResponse {
     pub stream_id: Uuid,
     pub accepted_events: usize,
+    pub dead_lettered_events: usize,
     pub first_sequence_no: Option<i64>,
     pub last_sequence_no: Option<i64>,
 }

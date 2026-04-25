@@ -3,14 +3,20 @@
   import { page as pageStore } from '$app/stores';
   import {
     applyRule,
+    attachSharedPropertyType,
     createActionType,
+    createActionWhatIfBranch,
     createFunctionPackage,
     createObject,
     createRule,
+    createSharedPropertyType,
     deleteActionType,
+    deleteActionWhatIfBranch,
     deleteObject,
+    detachSharedPropertyType,
     executeAction,
     getMachineryInsights,
+    getMachineryQueue,
     getObjectView,
     getObjectType,
     listActionTypes,
@@ -19,24 +25,32 @@
     listObjects,
     listProperties,
     listRules,
+    listActionWhatIfBranches,
+    listSharedPropertyTypes,
+    listTypeSharedPropertyTypes,
     simulateFunctionPackage,
     simulateObject,
     simulateRule,
+    updateMachineryQueueItem,
     validateAction,
+    type ActionAuthorizationPolicy,
     type ActionInputField,
     type ActionOperationKind,
     type ActionType,
+    type ActionWhatIfBranch,
     type ExecuteActionResponse,
     type FunctionCapabilities,
     type FunctionPackage,
     type LinkType,
     type MachineryInsight,
+    type MachineryQueueResponse,
     type ObjectInstance,
     type ObjectSimulationResponse,
     type ObjectViewResponse,
     type ObjectType,
     type OntologyRule,
     type Property,
+    type SharedPropertyType,
     type ValidateActionResponse,
   } from '$lib/api/ontology';
 
@@ -155,31 +169,105 @@
     },
   };
 
+  const propertyTypeOptions = [
+    'string',
+    'integer',
+    'float',
+    'boolean',
+    'date',
+    'timestamp',
+    'json',
+    'array',
+    'reference',
+    'geo_point',
+    'media_reference',
+  ];
+
+  const functionSourceTemplates = {
+    typescript: `export default async function handler(context) {
+  const target = context.targetObject;
+  const related = await context.sdk.ontology.search({
+    query: target?.properties?.name ?? 'high risk case',
+    kind: 'object_instance',
+    limit: 5,
+  });
+
+  return {
+    output: {
+      inspectedObjectId: target?.id ?? null,
+      related,
+      capabilities: context.capabilities,
+    },
+  };
+}`,
+    python: `def handler(context):
+    target = context.get("target_object")
+    related = context["sdk"].ontology.search(
+        query=(target or {}).get("properties", {}).get("name", "high risk case"),
+        kind="object_instance",
+        limit=5,
+    )
+
+    summary = None
+    if context["capabilities"].get("allow_ai"):
+        summary = context["llm"].complete(
+            user_message=f"Summarize object {(target or {}).get('id', 'n/a')} in one sentence.",
+            max_tokens=128,
+        )
+
+    return {
+        "output": {
+            "inspectedObjectId": (target or {}).get("id"),
+            "related": related,
+            "summary": summary,
+            "capabilities": context["capabilities"],
+        }
+    }
+}`,
+  } as const;
+
   let objectType = $state<ObjectType | null>(null);
   let properties = $state<Property[]>([]);
+  let sharedPropertyCatalog = $state<SharedPropertyType[]>([]);
+  let attachedSharedPropertyTypes = $state<SharedPropertyType[]>([]);
   let linkTypes = $state<LinkType[]>([]);
   let objects = $state<ObjectInstance[]>([]);
   let actions = $state<ActionType[]>([]);
   let loading = $state(true);
   let error = $state('');
+  const attachableSharedPropertyTypes = $derived(
+    sharedPropertyCatalog.filter(
+      (candidate) => !attachedSharedPropertyTypes.some((attached) => attached.id === candidate.id),
+    ),
+  );
 
   let actionFormError = $state('');
   let actionFormSuccess = $state('');
   let objectError = $state('');
   let runtimeError = $state('');
+  let sharedPropertyFormError = $state('');
+  let sharedPropertyFormSuccess = $state('');
 
   let creatingAction = $state(false);
   let creatingObject = $state(false);
   let validatingAction = $state(false);
   let executingAction = $state(false);
+  let creatingSharedPropertyType = $state(false);
+  let creatingWhatIfBranch = $state(false);
+  let attachingSharedPropertyType = $state(false);
+  let detachingSharedPropertyTypeId = $state('');
+  let deletingWhatIfBranchId = $state('');
 
   let selectedActionId = $state('');
   let selectedTargetObjectId = $state('');
+  let selectedSharedPropertyTypeId = $state('');
   let validation = $state<ValidateActionResponse | null>(null);
   let execution = $state<ExecuteActionResponse | null>(null);
+  let actionWhatIfBranches = $state<ActionWhatIfBranch[]>([]);
   let functionPackages = $state<FunctionPackage[]>([]);
   let rules = $state<OntologyRule[]>([]);
   let machineryInsights = $state<MachineryInsight[]>([]);
+  let machineryQueue = $state<MachineryQueueResponse | null>(null);
   let objectView = $state<ObjectViewResponse | null>(null);
   let simulation = $state<ObjectSimulationResponse | null>(null);
 
@@ -198,12 +286,13 @@
   let ruleFormSuccess = $state('');
   let ruleRuntimeError = $state('');
   let ruleRuntimeResult = $state<Record<string, unknown> | null>(null);
+  let updatingMachineryQueueItemId = $state('');
 
   let functionName = $state('');
   let functionDisplayName = $state('');
   let functionDescription = $state('');
-  let functionRuntime = $state('typescript');
-  let functionEntrypoint = $state('default');
+  let functionRuntime = $state<'typescript' | 'python'>('typescript');
+  let functionEntrypoint = $state<'default' | 'handler'>('default');
   let functionCapabilitiesText = $state(
     JSON.stringify(
       {
@@ -218,22 +307,7 @@
       2,
     ),
   );
-  let functionSourceText = $state(`export default async function handler(context) {
-  const target = context.targetObject;
-  const related = await context.sdk.ontology.search({
-    query: target?.properties?.name ?? 'high risk case',
-    kind: 'object_instance',
-    limit: 5,
-  });
-
-  return {
-    output: {
-      inspectedObjectId: target?.id ?? null,
-      related,
-      capabilities: context.capabilities,
-    },
-  };
-}`);
+  let functionSourceText = $state<string>(functionSourceTemplates.typescript);
   let selectedFunctionPackageId = $state('');
 
   let ruleName = $state('');
@@ -255,7 +329,14 @@
     JSON.stringify(
       {
         object_patch: { priority: 'high' },
-        schedule: { property_name: 'next_review_at', offset_hours: 24 },
+        schedule: {
+          property_name: 'next_review_at',
+          offset_hours: 24,
+          priority_score: 70,
+          estimated_duration_minutes: 30,
+          required_capability: 'case_manager',
+          constraint_tags: ['renewal', 'ops'],
+        },
         alert: { severity: 'high', title: 'Escalate review' },
       },
       null,
@@ -271,14 +352,66 @@
   let actionOperationKind = $state<ActionOperationKind>('update_object');
   let actionConfirmationRequired = $state(false);
   let actionPermissionKey = $state('');
+  let actionAuthorizationPolicyText = $state(JSON.stringify({}, null, 2));
   let actionInputSchemaText = $state(JSON.stringify(actionTemplates.update_object.inputSchema, null, 2));
   let actionConfigText = $state(JSON.stringify(actionTemplates.update_object.config, null, 2));
 
   let objectPropertiesText = $state('{}');
   let actionParametersText = $state('{}');
+  let actionJustification = $state('');
+  let whatIfBranchName = $state('');
+  let whatIfBranchDescription = $state('');
+  let sharedPropertyName = $state('');
+  let sharedPropertyDisplayName = $state('');
+  let sharedPropertyDescription = $state('');
+  let sharedPropertyType = $state('string');
+  let sharedPropertyRequired = $state(false);
+  let sharedPropertyUniqueConstraint = $state(false);
+  let sharedPropertyTimeDependent = $state(false);
 
   function formatJson(value: unknown): string {
     return JSON.stringify(value ?? null, null, 2);
+  }
+
+  function formatTimestamp(value: string | null | undefined) {
+    return value ? new Date(value).toLocaleString() : 'n/a';
+  }
+
+  function countEntries(entries: Record<string, number> | undefined) {
+    return Object.entries(entries ?? {}).sort((left, right) => right[1] - left[1]);
+  }
+
+  function formatScope(scope: string | undefined) {
+    return (scope ?? 'local').replaceAll('_', ' ');
+  }
+
+  function pressureToneClass(pressure: string | undefined) {
+    switch (pressure) {
+      case 'high':
+        return 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300';
+      case 'medium':
+        return 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300';
+      default:
+        return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300';
+    }
+  }
+
+  async function handleMachineryQueueTransition(id: string, status: string) {
+    updatingMachineryQueueItemId = id;
+    runtimeError = '';
+
+    try {
+      await updateMachineryQueueItem(id, { status });
+      if (objectTypeId) {
+        machineryQueue = await getMachineryQueue({ object_type_id: objectTypeId });
+        const response = await getMachineryInsights({ object_type_id: objectTypeId });
+        machineryInsights = response.data;
+      }
+    } catch (cause) {
+      runtimeError = cause instanceof Error ? cause.message : 'Failed to update machinery queue item';
+    } finally {
+      updatingMachineryQueueItemId = '';
+    }
   }
 
   function parseJsonValue(source: string, label: string, fallback: unknown): unknown {
@@ -318,6 +451,21 @@
     actionConfigText = formatJson(actionTemplates[kind].config);
   }
 
+  function applyFunctionRuntimeTemplate(runtime: string) {
+    const nextRuntime = runtime === 'python' ? 'python' : 'typescript';
+    functionRuntime = nextRuntime;
+    functionEntrypoint = nextRuntime === 'typescript' ? 'default' : 'handler';
+    functionSourceText = functionSourceTemplates[nextRuntime];
+  }
+
+  function hasAuthorizationPolicy(policy: ActionAuthorizationPolicy | undefined | null) {
+    return Object.entries(policy ?? {}).some(([, value]) => {
+      if (Array.isArray(value)) return value.length > 0;
+      if (value && typeof value === 'object') return Object.keys(value as Record<string, unknown>).length > 0;
+      return value !== undefined && value !== null && value !== false && value !== '';
+    });
+  }
+
   function syncSelections(nextActions: ActionType[], nextObjects: ObjectInstance[]) {
     if (!nextActions.some((action) => action.id === selectedActionId)) {
       selectedActionId = nextActions[0]?.id ?? '';
@@ -330,6 +478,29 @@
     if (!selectedTargetObjectId && nextObjects[0]) {
       selectedTargetObjectId = nextObjects[0].id;
     }
+  }
+
+  async function loadActionWhatIfHistory(actionId = selectedActionId) {
+    if (!actionId) {
+      actionWhatIfBranches = [];
+      return;
+    }
+
+    try {
+      const response = await listActionWhatIfBranches(actionId, { page: 1, per_page: 20 });
+      actionWhatIfBranches = response.data;
+    } catch (cause) {
+      runtimeError = cause instanceof Error ? cause.message : 'Failed to load what-if branches';
+      actionWhatIfBranches = [];
+    }
+  }
+
+  async function handleSelectAction(id: string) {
+    selectedActionId = id;
+    runtimeError = '';
+    validation = null;
+    execution = null;
+    await loadActionWhatIfHistory(id);
   }
 
   async function loadObjectInspector(objectId: string) {
@@ -363,33 +534,54 @@
       const [
         nextType,
         nextProperties,
+        nextSharedPropertyCatalog,
+        nextAttachedSharedPropertyTypes,
         nextLinkTypes,
         nextObjects,
         nextActions,
         nextFunctionPackages,
         nextRules,
         nextMachineryInsights,
+        nextMachineryQueue,
       ] = await Promise.all([
         getObjectType(objectTypeId),
         listProperties(objectTypeId),
+        listSharedPropertyTypes({ page: 1, per_page: 100 }),
+        listTypeSharedPropertyTypes(objectTypeId),
         listLinkTypes({ object_type_id: objectTypeId, page: 1, per_page: 100 }),
         listObjects(objectTypeId, { page: 1, per_page: 50 }),
         listActionTypes({ object_type_id: objectTypeId, page: 1, per_page: 100 }),
         listFunctionPackages({ page: 1, per_page: 100 }),
         listRules({ object_type_id: objectTypeId, page: 1, per_page: 100 }),
         getMachineryInsights({ object_type_id: objectTypeId }),
+        getMachineryQueue({ object_type_id: objectTypeId }),
       ]);
 
       objectType = nextType;
       properties = nextProperties;
+      sharedPropertyCatalog = nextSharedPropertyCatalog.data;
+      attachedSharedPropertyTypes = nextAttachedSharedPropertyTypes;
       linkTypes = nextLinkTypes.data;
       objects = nextObjects.data;
       actions = nextActions.data;
       functionPackages = nextFunctionPackages.data;
       rules = nextRules.data;
       machineryInsights = nextMachineryInsights.data;
+      machineryQueue = nextMachineryQueue;
+      const nextAttachableSharedPropertyTypes = nextSharedPropertyCatalog.data.filter(
+        (candidate) =>
+          !nextAttachedSharedPropertyTypes.some((attached) => attached.id === candidate.id),
+      );
+      if (
+        !nextAttachableSharedPropertyTypes.some(
+          (candidate) => candidate.id === selectedSharedPropertyTypeId,
+        )
+      ) {
+        selectedSharedPropertyTypeId = nextAttachableSharedPropertyTypes[0]?.id ?? '';
+      }
       syncSelections(nextActions.data, nextObjects.data);
       selectedFunctionPackageId = nextFunctionPackages.data[0]?.id ?? '';
+      await loadActionWhatIfHistory(selectedActionId);
       if (selectedTargetObjectId) {
         await loadObjectInspector(selectedTargetObjectId);
       } else {
@@ -399,6 +591,95 @@
       error = cause instanceof Error ? cause.message : 'Failed to load ontology details';
     } finally {
       loading = false;
+    }
+  }
+
+  async function handleCreateSharedPropertyType(event: Event) {
+    event.preventDefault();
+    if (!objectTypeId) {
+      return;
+    }
+
+    creatingSharedPropertyType = true;
+    sharedPropertyFormError = '';
+    sharedPropertyFormSuccess = '';
+
+    try {
+      if (!sharedPropertyName.trim()) {
+        throw new Error('Shared property type name is required');
+      }
+
+      const created = await createSharedPropertyType({
+        name: sharedPropertyName.trim(),
+        display_name: sharedPropertyDisplayName.trim() || undefined,
+        description: sharedPropertyDescription.trim() || undefined,
+        property_type: sharedPropertyType,
+        required: sharedPropertyRequired,
+        unique_constraint: sharedPropertyUniqueConstraint,
+        time_dependent: sharedPropertyTimeDependent,
+      });
+
+      await attachSharedPropertyType(objectTypeId, created.id);
+      sharedPropertyFormSuccess = `Created and attached ${created.display_name}.`;
+      sharedPropertyName = '';
+      sharedPropertyDisplayName = '';
+      sharedPropertyDescription = '';
+      sharedPropertyType = 'string';
+      sharedPropertyRequired = false;
+      sharedPropertyUniqueConstraint = false;
+      sharedPropertyTimeDependent = false;
+      await load();
+    } catch (cause) {
+      sharedPropertyFormError =
+        cause instanceof Error ? cause.message : 'Failed to create shared property type';
+    } finally {
+      creatingSharedPropertyType = false;
+    }
+  }
+
+  async function handleAttachSharedPropertyType() {
+    if (!objectTypeId) {
+      return;
+    }
+    if (!selectedSharedPropertyTypeId) {
+      sharedPropertyFormError = 'Select a shared property type to attach';
+      return;
+    }
+
+    attachingSharedPropertyType = true;
+    sharedPropertyFormError = '';
+    sharedPropertyFormSuccess = '';
+
+    try {
+      await attachSharedPropertyType(objectTypeId, selectedSharedPropertyTypeId);
+      sharedPropertyFormSuccess = 'Attached shared property type to this object type.';
+      await load();
+    } catch (cause) {
+      sharedPropertyFormError =
+        cause instanceof Error ? cause.message : 'Failed to attach shared property type';
+    } finally {
+      attachingSharedPropertyType = false;
+    }
+  }
+
+  async function handleDetachSharedPropertyType(id: string) {
+    if (!objectTypeId || !confirm('Detach this shared property type from the object type?')) {
+      return;
+    }
+
+    detachingSharedPropertyTypeId = id;
+    sharedPropertyFormError = '';
+    sharedPropertyFormSuccess = '';
+
+    try {
+      await detachSharedPropertyType(objectTypeId, id);
+      sharedPropertyFormSuccess = 'Detached shared property type.';
+      await load();
+    } catch (cause) {
+      sharedPropertyFormError =
+        cause instanceof Error ? cause.message : 'Failed to detach shared property type';
+    } finally {
+      detachingSharedPropertyTypeId = '';
     }
   }
 
@@ -461,6 +742,10 @@
 
       const inputSchema = parseJsonArray<ActionInputField>(actionInputSchemaText, 'Action input schema');
       const config = parseJsonValue(actionConfigText, 'Action config', {});
+      const authorizationPolicy = parseJsonObject(
+        actionAuthorizationPolicyText,
+        'Action authorization policy',
+      ) as ActionAuthorizationPolicy;
       const created = await createActionType({
         name: actionName.trim(),
         display_name: actionDisplayName.trim() || undefined,
@@ -471,6 +756,7 @@
         config,
         confirmation_required: actionConfirmationRequired,
         permission_key: actionPermissionKey.trim() || undefined,
+        authorization_policy: authorizationPolicy,
       });
 
       selectedActionId = created.id;
@@ -499,10 +785,61 @@
         selectedActionId = '';
         validation = null;
         execution = null;
+        actionWhatIfBranches = [];
       }
       await load();
     } catch (cause) {
       actionFormError = cause instanceof Error ? cause.message : 'Failed to delete action type';
+    }
+  }
+
+  async function handleCreateWhatIfBranch() {
+    const action = getSelectedAction();
+    if (!action) {
+      runtimeError = 'Select an action first';
+      return;
+    }
+
+    creatingWhatIfBranch = true;
+    runtimeError = '';
+
+    try {
+      const branch = await createActionWhatIfBranch(action.id, {
+        ...buildInvocationBody(action),
+        name: whatIfBranchName.trim() || undefined,
+        description: whatIfBranchDescription.trim() || undefined,
+      });
+      whatIfBranchName = '';
+      whatIfBranchDescription = '';
+      validation = {
+        valid: true,
+        errors: [],
+        preview: branch.preview,
+      };
+      await loadActionWhatIfHistory(action.id);
+    } catch (cause) {
+      runtimeError = cause instanceof Error ? cause.message : 'Failed to create what-if branch';
+    } finally {
+      creatingWhatIfBranch = false;
+    }
+  }
+
+  async function handleDeleteWhatIfBranch(branchId: string) {
+    const action = getSelectedAction();
+    if (!action || !confirm('Delete this what-if branch?')) {
+      return;
+    }
+
+    deletingWhatIfBranchId = branchId;
+    runtimeError = '';
+
+    try {
+      await deleteActionWhatIfBranch(action.id, branchId);
+      await loadActionWhatIfHistory(action.id);
+    } catch (cause) {
+      runtimeError = cause instanceof Error ? cause.message : 'Failed to delete what-if branch';
+    } finally {
+      deletingWhatIfBranchId = '';
     }
   }
 
@@ -548,7 +885,10 @@
     runtimeError = '';
 
     try {
-      execution = await executeAction(action.id, buildInvocationBody(action));
+      execution = await executeAction(action.id, {
+        ...buildInvocationBody(action),
+        justification: actionJustification.trim() || undefined,
+      });
       await load();
     } catch (cause) {
       runtimeError = cause instanceof Error ? cause.message : 'Failed to execute action';
@@ -751,6 +1091,10 @@
           <div class="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">{properties.length}</div>
         </div>
         <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+          <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Shared Property Types</div>
+          <div class="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">{attachedSharedPropertyTypes.length}</div>
+        </div>
+        <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
           <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Objects</div>
           <div class="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">{objects.length}</div>
         </div>
@@ -766,7 +1110,7 @@
         <div class="flex items-center justify-between gap-3">
           <div>
             <h2 class="text-lg font-semibold text-slate-950 dark:text-slate-50">Properties</h2>
-            <p class="mt-1 text-sm text-slate-500">These definitions drive input validation for update actions.</p>
+            <p class="mt-1 text-sm text-slate-500">Direct definitions and reusable shared property types both flow into the effective schema used for object validation.</p>
           </div>
           <a href="/ontology/graph" class="rounded-full border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
             Open graph view
@@ -799,6 +1143,173 @@
             {/each}
           </div>
         {/if}
+
+        <div class="mt-6 border-t border-slate-200 pt-6 dark:border-slate-800">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <h3 class="text-base font-semibold text-slate-950 dark:text-slate-50">Shared Property Types</h3>
+              <p class="mt-1 text-sm text-slate-500">Reusable property contracts that can be attached across multiple object types without duplicating schema definitions.</p>
+            </div>
+            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{attachedSharedPropertyTypes.length} attached</span>
+          </div>
+
+          {#if sharedPropertyFormError}
+            <div class="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
+              {sharedPropertyFormError}
+            </div>
+          {/if}
+
+          {#if sharedPropertyFormSuccess}
+            <div class="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300">
+              {sharedPropertyFormSuccess}
+            </div>
+          {/if}
+
+          {#if attachedSharedPropertyTypes.length === 0}
+            <div class="mt-4 rounded-2xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-500 dark:border-slate-700">
+              No shared property types are attached yet.
+            </div>
+          {:else}
+            <div class="mt-4 space-y-3">
+              {#each attachedSharedPropertyTypes as sharedProperty (sharedProperty.id)}
+                <div class="rounded-2xl border border-slate-200 px-4 py-3 dark:border-slate-800">
+                  <div class="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div class="flex flex-wrap items-center gap-2">
+                        <h4 class="font-medium text-slate-900 dark:text-slate-100">{sharedProperty.display_name}</h4>
+                        <span class="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{sharedProperty.name}</span>
+                        <span class="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">{sharedProperty.property_type}</span>
+                        {#if sharedProperty.required}
+                          <span class="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">required</span>
+                        {/if}
+                        {#if sharedProperty.unique_constraint}
+                          <span class="rounded-full bg-fuchsia-50 px-2 py-0.5 text-xs text-fuchsia-700 dark:bg-fuchsia-950/40 dark:text-fuchsia-300">unique</span>
+                        {/if}
+                        {#if sharedProperty.time_dependent}
+                          <span class="rounded-full bg-sky-50 px-2 py-0.5 text-xs text-sky-700 dark:bg-sky-950/40 dark:text-sky-300">time-dependent</span>
+                        {/if}
+                      </div>
+                      {#if sharedProperty.description}
+                        <p class="mt-2 text-sm text-slate-500">{sharedProperty.description}</p>
+                      {/if}
+                    </div>
+                    <button
+                      type="button"
+                      class="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                      disabled={detachingSharedPropertyTypeId === sharedProperty.id}
+                      onclick={() => void handleDetachSharedPropertyType(sharedProperty.id)}
+                    >
+                      {detachingSharedPropertyTypeId === sharedProperty.id ? 'Detaching...' : 'Detach'}
+                    </button>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
+
+          <div class="mt-4 grid gap-3 rounded-2xl border border-slate-200 p-4 dark:border-slate-800 lg:grid-cols-[1fr_auto]">
+            <div>
+              <label for="attach-shared-property-type" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Attach existing shared property type</label>
+              <select
+                id="attach-shared-property-type"
+                bind:value={selectedSharedPropertyTypeId}
+                class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                disabled={attachableSharedPropertyTypes.length === 0}
+              >
+                {#if attachableSharedPropertyTypes.length === 0}
+                  <option value="">No reusable property types available</option>
+                {:else}
+                  {#each attachableSharedPropertyTypes as sharedProperty (sharedProperty.id)}
+                    <option value={sharedProperty.id}>
+                      {sharedProperty.display_name} ({sharedProperty.property_type})
+                    </option>
+                  {/each}
+                {/if}
+              </select>
+            </div>
+            <div class="flex items-end">
+              <button
+                type="button"
+                class="rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
+                disabled={attachingSharedPropertyType || attachableSharedPropertyTypes.length === 0}
+                onclick={() => void handleAttachSharedPropertyType()}
+              >
+                {attachingSharedPropertyType ? 'Attaching...' : 'Attach existing'}
+              </button>
+            </div>
+          </div>
+
+          <form class="mt-4 space-y-4 rounded-2xl border border-slate-200 p-4 dark:border-slate-800" onsubmit={handleCreateSharedPropertyType}>
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <h4 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Create reusable property type</h4>
+                <p class="mt-1 text-sm text-slate-500">This creates a shared property definition and immediately attaches it to the current object type.</p>
+              </div>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-2">
+              <div>
+                <label for="shared-property-name" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Name</label>
+                <input
+                  id="shared-property-name"
+                  bind:value={sharedPropertyName}
+                  class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 font-mono text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  placeholder="status"
+                />
+              </div>
+              <div>
+                <label for="shared-property-display-name" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Display name</label>
+                <input
+                  id="shared-property-display-name"
+                  bind:value={sharedPropertyDisplayName}
+                  class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  placeholder="Status"
+                />
+              </div>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-[1fr_auto]">
+              <div>
+                <label for="shared-property-description" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Description</label>
+                <input
+                  id="shared-property-description"
+                  bind:value={sharedPropertyDescription}
+                  class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  placeholder="Reusable lifecycle status across operational types"
+                />
+              </div>
+              <div>
+                <label for="shared-property-type" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Type</label>
+                <select id="shared-property-type" bind:value={sharedPropertyType} class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100">
+                  {#each propertyTypeOptions as option}
+                    <option value={option}>{option}</option>
+                  {/each}
+                </select>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap gap-4 text-sm text-slate-600 dark:text-slate-300">
+              <label class="inline-flex items-center gap-2">
+                <input bind:checked={sharedPropertyRequired} type="checkbox" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-700" />
+                Required
+              </label>
+              <label class="inline-flex items-center gap-2">
+                <input bind:checked={sharedPropertyUniqueConstraint} type="checkbox" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-700" />
+                Unique
+              </label>
+              <label class="inline-flex items-center gap-2">
+                <input bind:checked={sharedPropertyTimeDependent} type="checkbox" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-700" />
+                Time-dependent
+              </label>
+            </div>
+
+            <div class="flex justify-end">
+              <button type="submit" disabled={creatingSharedPropertyType} class="rounded-full bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+                {creatingSharedPropertyType ? 'Creating...' : 'Create and attach'}
+              </button>
+            </div>
+          </form>
+        </div>
       </section>
 
       <section class="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -901,8 +1412,20 @@
               <textarea id="function-package-capabilities" bind:value={functionCapabilitiesText} rows={10} class="w-full rounded-2xl border border-slate-300 bg-slate-950 px-4 py-3 font-mono text-xs text-slate-100 dark:border-slate-700" spellcheck="false"></textarea>
             </div>
             <div>
-              <label for="function-package-source" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Source</label>
+              <div class="mb-1 flex items-center justify-between gap-3">
+                <label for="function-package-source" class="block text-sm font-medium text-slate-700 dark:text-slate-200">Source</label>
+                <button
+                  type="button"
+                  class="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  onclick={() => applyFunctionRuntimeTemplate(functionRuntime)}
+                >
+                  Load {functionRuntime} template
+                </button>
+              </div>
               <textarea id="function-package-source" bind:value={functionSourceText} rows={10} class="w-full rounded-2xl border border-slate-300 bg-slate-950 px-4 py-3 font-mono text-xs text-slate-100 dark:border-slate-700" spellcheck="false"></textarea>
+              <p class="mt-2 text-xs text-slate-500">
+                Both runtimes expose `context.sdk.ontology`, `context.sdk.ai`, and `context.llm.complete(...)`. Python packages can now use `def handler(context): ...` or `def default(context): ...`.
+              </p>
             </div>
           </div>
 
@@ -1026,15 +1549,124 @@
         <div class="mt-6 grid gap-3 md:grid-cols-2">
           {#each machineryInsights as insight (insight.rule_id)}
             <div class="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
-              <div class="font-medium text-slate-900 dark:text-slate-100">{insight.display_name}</div>
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="font-medium text-slate-900 dark:text-slate-100">{insight.display_name}</div>
+                <span class={`rounded-full px-3 py-1 text-[11px] font-medium uppercase tracking-[0.18em] ${pressureToneClass(insight.dynamic_pressure)}`}>
+                  {insight.dynamic_pressure}
+                </span>
+              </div>
               <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-500">
                 <span>Runs: {insight.total_runs}</span>
                 <span>Matched: {insight.matched_runs}</span>
                 <span>Pending schedules: {insight.pending_schedules}</span>
+                <span>Overdue: {insight.overdue_schedules}</span>
+                <span>Avg lead: {insight.avg_schedule_lead_hours?.toFixed(1) ?? 'n/a'}h</span>
                 <span>Mode: {insight.evaluation_mode}</span>
               </div>
             </div>
           {/each}
+        </div>
+
+        <div class="mt-6 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 class="font-medium text-slate-900 dark:text-slate-100">Machinery queue</h3>
+              <p class="mt-1 text-sm text-slate-500">
+                Dynamic scheduling recommendations across pending rule schedules, capabilities, and due dates.
+              </p>
+            </div>
+            {#if machineryQueue}
+              <span class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                {machineryQueue.recommendation.strategy}
+              </span>
+            {/if}
+          </div>
+
+          {#if machineryQueue}
+            <div class="mt-4 grid gap-3 md:grid-cols-4">
+              <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Queue depth</div>
+                <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">{machineryQueue.recommendation.queue_depth}</div>
+              </div>
+              <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Overdue</div>
+                <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">{machineryQueue.recommendation.overdue_count}</div>
+              </div>
+              <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Estimated load</div>
+                <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">{machineryQueue.recommendation.total_estimated_minutes}m</div>
+              </div>
+              <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Next due</div>
+                <div class="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  {machineryQueue.recommendation.next_due_at ? formatTimestamp(machineryQueue.recommendation.next_due_at) : 'n/a'}
+                </div>
+              </div>
+            </div>
+
+            {#if machineryQueue.recommendation.capability_load.length > 0}
+              <div class="mt-4">
+                <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Capability load</p>
+                <div class="mt-2 flex flex-wrap gap-2">
+                  {#each machineryQueue.recommendation.capability_load as capability}
+                    <span class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                      {capability.capability} · {capability.pending_count} items · {capability.total_estimated_minutes}m
+                    </span>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+
+            {#if machineryQueue.data.length === 0}
+              <div class="mt-4 rounded-2xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700">
+                No pending Machinery queue items yet.
+              </div>
+            {:else}
+              <div class="mt-4 space-y-3">
+                {#each machineryQueue.data as item, index (item.id)}
+                  <div class="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div class="flex flex-wrap items-center gap-2">
+                          <div class="font-medium text-slate-900 dark:text-slate-100">{item.rule_display_name}</div>
+                          <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                            rank {machineryQueue.recommendation.recommended_order.indexOf(item.id) >= 0 ? machineryQueue.recommendation.recommended_order.indexOf(item.id) + 1 : index + 1}
+                          </span>
+                          <span class={`rounded-full px-2 py-0.5 text-[11px] ${item.status === 'pending' && new Date(item.scheduled_for) < new Date() ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
+                            {item.status}
+                          </span>
+                        </div>
+                        <div class="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
+                          <span>Due: {formatTimestamp(item.scheduled_for)}</span>
+                          <span>Priority: {item.priority_score}</span>
+                          <span>ETA: {item.estimated_duration_minutes}m</span>
+                          <span>Capability: {item.required_capability ?? 'general'}</span>
+                        </div>
+                      </div>
+                      <div class="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          class="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                          disabled={updatingMachineryQueueItemId === item.id}
+                          onclick={() => void handleMachineryQueueTransition(item.id, 'in_progress')}
+                        >
+                          Start
+                        </button>
+                        <button
+                          type="button"
+                          class="rounded-full bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+                          disabled={updatingMachineryQueueItemId === item.id}
+                          onclick={() => void handleMachineryQueueTransition(item.id, 'completed')}
+                        >
+                          Complete
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          {/if}
         </div>
 
         <div class="mt-6 space-y-3">
@@ -1243,7 +1875,7 @@
             {actionTemplates[actionOperationKind].notes}
           </div>
 
-          <div class="grid gap-4 lg:grid-cols-2">
+          <div class="grid gap-4 xl:grid-cols-3">
             <div>
               <div class="mb-1 flex items-center justify-between gap-3">
                 <label class="block text-sm font-medium text-slate-700 dark:text-slate-200" for="action-input-schema">Input schema JSON</label>
@@ -1273,6 +1905,19 @@
                 spellcheck="false"
               ></textarea>
             </div>
+            <div>
+              <label class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200" for="action-authorization-policy">Authorization policy JSON</label>
+              <textarea
+                id="action-authorization-policy"
+                bind:value={actionAuthorizationPolicyText}
+                rows={12}
+                class="w-full rounded-2xl border border-slate-300 bg-slate-950 px-4 py-3 font-mono text-xs text-slate-100 dark:border-slate-700"
+                spellcheck="false"
+              ></textarea>
+              <p class="mt-2 text-xs text-slate-500">
+                Supports `required_permission_keys`, `any_role`, `all_roles`, `attribute_equals`, `allowed_markings`, `minimum_clearance` and `deny_guest_sessions`.
+              </p>
+            </div>
           </div>
 
           <div class="flex items-center justify-end gap-3">
@@ -1298,15 +1943,18 @@
                   <button
                     type="button"
                     class="text-left"
-                    onclick={() => {
-                      selectedActionId = action.id;
-                      runtimeError = '';
-                    }}
+                    onclick={() => void handleSelectAction(action.id)}
                   >
                     <div class="font-medium text-slate-900 dark:text-slate-100">{action.display_name}</div>
                     <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                       <span class="font-mono">{action.name}</span>
                       <span class="rounded-full bg-slate-100 px-2 py-0.5 text-slate-700 dark:bg-slate-800 dark:text-slate-300">{action.operation_kind}</span>
+                      {#if action.permission_key}
+                        <span class="rounded-full bg-sky-50 px-2 py-0.5 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300">{action.permission_key}</span>
+                      {/if}
+                      {#if hasAuthorizationPolicy(action.authorization_policy)}
+                        <span class="rounded-full bg-violet-50 px-2 py-0.5 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">policy</span>
+                      {/if}
                       {#if action.confirmation_required}
                         <span class="rounded-full bg-amber-50 px-2 py-0.5 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">confirm</span>
                       {/if}
@@ -1358,6 +2006,7 @@
             <select
               id="selected-action"
               bind:value={selectedActionId}
+              onchange={() => void handleSelectAction(selectedActionId)}
               class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
             >
               <option value="">Select an action</option>
@@ -1366,6 +2015,32 @@
               {/each}
             </select>
           </div>
+
+          {#if getSelectedAction()}
+            <div class="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+              <div class="flex items-center justify-between gap-3">
+                <h3 class="font-medium text-slate-900 dark:text-slate-100">Authorization policy</h3>
+                {#if hasAuthorizationPolicy(getSelectedAction()?.authorization_policy)}
+                  <span class="rounded-full bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">granular policy</span>
+                {:else}
+                  <span class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">default access</span>
+                {/if}
+              </div>
+              <div class="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
+                {#if getSelectedAction()?.permission_key}
+                  <span class="rounded-full bg-sky-50 px-2 py-1 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300">
+                    permission: {getSelectedAction()?.permission_key}
+                  </span>
+                {/if}
+                {#if getSelectedAction()?.confirmation_required}
+                  <span class="rounded-full bg-amber-50 px-2 py-1 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                    confirmation required
+                  </span>
+                {/if}
+              </div>
+              <pre class="mt-3 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">{formatJson(getSelectedAction()?.authorization_policy ?? {})}</pre>
+            </div>
+          {/if}
 
           <div>
             <label class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200" for="selected-target-object">Target object</label>
@@ -1402,6 +2077,17 @@
             ></textarea>
           </div>
 
+          <div>
+            <label class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200" for="action-justification">Execution justification</label>
+            <textarea
+              id="action-justification"
+              bind:value={actionJustification}
+              rows={3}
+              class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              placeholder="Required for confirmation-gated actions and useful for audit trails."
+            ></textarea>
+          </div>
+
           <div class="flex flex-wrap items-center gap-3">
             <button
               type="button"
@@ -1419,6 +2105,47 @@
             >
               {executingAction ? 'Executing...' : 'Execute'}
             </button>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <h3 class="font-medium text-slate-900 dark:text-slate-100">What-if branch</h3>
+                <p class="mt-1 text-sm text-slate-500">Persist a preview branch for the selected action and target without mutating live ontology data.</p>
+              </div>
+            </div>
+
+            <div class="mt-4 grid gap-4 md:grid-cols-2">
+              <div>
+                <label class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200" for="what-if-branch-name">Branch name</label>
+                <input
+                  id="what-if-branch-name"
+                  bind:value={whatIfBranchName}
+                  class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  placeholder="High-risk customer escalation"
+                />
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200" for="what-if-branch-description">Description</label>
+                <input
+                  id="what-if-branch-description"
+                  bind:value={whatIfBranchDescription}
+                  class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  placeholder="Dry-run before applying to customer operations"
+                />
+              </div>
+            </div>
+
+            <div class="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                disabled={!selectedActionId || creatingWhatIfBranch}
+                class="rounded-full bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50"
+                onclick={handleCreateWhatIfBranch}
+              >
+                {creatingWhatIfBranch ? 'Saving branch...' : 'Save what-if branch'}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1491,6 +2218,73 @@
               </div>
             </div>
           {/if}
+
+          <div class="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="font-medium text-slate-900 dark:text-slate-100">Saved what-if branches</h3>
+              <span class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{actionWhatIfBranches.length} branches</span>
+            </div>
+
+            {#if actionWhatIfBranches.length === 0}
+              <div class="mt-4 rounded-2xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-500 dark:border-slate-700">
+                No what-if branches have been saved for this action yet.
+              </div>
+            {:else}
+              <div class="mt-4 space-y-3">
+                {#each actionWhatIfBranches as branch (branch.id)}
+                  <div class="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div class="flex flex-wrap items-center gap-2">
+                          <h4 class="font-medium text-slate-900 dark:text-slate-100">{branch.name}</h4>
+                          {#if branch.deleted}
+                            <span class="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">delete branch</span>
+                          {/if}
+                          {#if branch.target_object_id}
+                            <span class="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{branch.target_object_id}</span>
+                          {/if}
+                        </div>
+                        <p class="mt-1 text-xs text-slate-500">{new Date(branch.created_at).toLocaleString()}</p>
+                        {#if branch.description}
+                          <p class="mt-2 text-sm text-slate-500">{branch.description}</p>
+                        {/if}
+                      </div>
+                      <button
+                        type="button"
+                        class="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                        disabled={deletingWhatIfBranchId === branch.id}
+                        onclick={() => void handleDeleteWhatIfBranch(branch.id)}
+                      >
+                        {deletingWhatIfBranchId === branch.id ? 'Deleting...' : 'Delete'}
+                      </button>
+                    </div>
+
+                    <details class="mt-3 rounded-2xl bg-slate-50 px-4 py-3 dark:bg-slate-950/40">
+                      <summary class="cursor-pointer text-sm font-medium text-slate-900 dark:text-slate-100">Branch payload</summary>
+                      <div class="mt-3 grid gap-3">
+                        <div>
+                          <p class="mb-2 text-xs font-medium uppercase tracking-[0.2em] text-slate-500">Preview</p>
+                          <pre class="overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">{formatJson(branch.preview)}</pre>
+                        </div>
+                        {#if branch.before_object}
+                          <div>
+                            <p class="mb-2 text-xs font-medium uppercase tracking-[0.2em] text-slate-500">Before</p>
+                            <pre class="overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">{formatJson(branch.before_object)}</pre>
+                          </div>
+                        {/if}
+                        {#if branch.after_object}
+                          <div>
+                            <p class="mb-2 text-xs font-medium uppercase tracking-[0.2em] text-slate-500">After</p>
+                            <pre class="overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">{formatJson(branch.after_object)}</pre>
+                          </div>
+                        {/if}
+                      </div>
+                    </details>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
         </div>
       </div>
     </section>
@@ -1537,11 +2331,97 @@
             <div class="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
               <div class="flex items-center justify-between gap-3">
                 <h3 class="font-medium text-slate-900 dark:text-slate-100">Simulation result</h3>
-                {#if simulation.deleted}
-                  <span class="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">predicted delete</span>
-                {/if}
+                <div class="flex flex-wrap gap-2">
+                  <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                    {formatScope(simulation.impact_summary.scope)}
+                  </span>
+                  {#if simulation.deleted}
+                    <span class="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">predicted delete</span>
+                  {/if}
+                </div>
               </div>
-              <pre class="mt-3 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">{formatJson(simulation)}</pre>
+              <div class="mt-3 grid gap-3 md:grid-cols-3">
+                <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                  <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Impacted objects</div>
+                  <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">
+                    {simulation.impact_summary.impacted_object_count}
+                  </div>
+                </div>
+                <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                  <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Direct neighbors</div>
+                  <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">
+                    {simulation.impact_summary.direct_neighbors}
+                  </div>
+                </div>
+                <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                  <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Sensitive objects</div>
+                  <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">
+                    {simulation.impact_summary.sensitive_objects}
+                  </div>
+                </div>
+                <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                  <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Boundary crossings</div>
+                  <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">
+                    {simulation.impact_summary.boundary_crossings}
+                  </div>
+                </div>
+                <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                  <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Matching rules</div>
+                  <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">
+                    {simulation.impact_summary.matching_rules}
+                  </div>
+                </div>
+                <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                  <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Max hops</div>
+                  <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">
+                    {simulation.impact_summary.max_hops_reached}
+                  </div>
+                </div>
+              </div>
+
+              {#if simulation.impact_summary.impacted_types.length > 0}
+                <div class="mt-4">
+                  <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Types in blast radius</p>
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    {#each simulation.impact_summary.impacted_types as impactedType}
+                      <span class="rounded-full bg-cyan-50 px-3 py-1 text-xs font-medium text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300">
+                        {impactedType}
+                      </span>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+
+              {#if simulation.impact_summary.changed_properties.length > 0}
+                <div class="mt-4">
+                  <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Changed properties</p>
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    {#each simulation.impact_summary.changed_properties as propertyName}
+                      <span class="rounded-full bg-slate-100 px-3 py-1 font-mono text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                        {propertyName}
+                      </span>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+
+              {#if simulation.impact_summary.sensitive_markings.length > 0}
+                <div class="mt-4">
+                  <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Sensitive markings</p>
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    {#each simulation.impact_summary.sensitive_markings as marking}
+                      <span class="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                        {marking}
+                      </span>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+
+              <details class="mt-4 rounded-2xl border border-slate-200 px-4 py-3 dark:border-slate-800">
+                <summary class="cursor-pointer font-medium text-slate-900 dark:text-slate-100">Raw simulation payload</summary>
+                <pre class="mt-3 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">{formatJson(simulation)}</pre>
+              </details>
             </div>
           {/if}
         </div>
@@ -1559,6 +2439,73 @@
                   <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">{String(value)}</div>
                 </div>
               {/each}
+            </div>
+
+            <div class="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 class="font-medium text-slate-900 dark:text-slate-100">Graph impact summary</h3>
+                  <p class="mt-1 text-sm text-slate-500">
+                    Vertex now classifies this neighborhood by blast radius, sensitivity and boundary crossings.
+                  </p>
+                </div>
+                <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                  {formatScope(objectView.graph.summary.scope)}
+                </span>
+              </div>
+
+              <div class="mt-4 grid gap-3 md:grid-cols-4">
+                <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                  <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Direct neighbors</div>
+                  <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">
+                    {objectView.graph.summary.root_neighbor_count}
+                  </div>
+                </div>
+                <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                  <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Max hops</div>
+                  <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">
+                    {objectView.graph.summary.max_hops_reached}
+                  </div>
+                </div>
+                <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                  <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Sensitive objects</div>
+                  <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">
+                    {objectView.graph.summary.sensitive_objects}
+                  </div>
+                </div>
+                <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                  <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Boundary crossings</div>
+                  <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">
+                    {objectView.graph.summary.boundary_crossings}
+                  </div>
+                </div>
+              </div>
+
+              {#if countEntries(objectView.graph.summary.object_types).length > 0}
+                <div class="mt-4">
+                  <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Types in neighborhood</p>
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    {#each countEntries(objectView.graph.summary.object_types) as [label, count]}
+                      <span class="rounded-full bg-cyan-50 px-3 py-1 text-xs font-medium text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300">
+                        {label} · {count}
+                      </span>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+
+              {#if objectView.graph.summary.sensitive_markings.length > 0}
+                <div class="mt-4">
+                  <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Sensitive markings</p>
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    {#each objectView.graph.summary.sensitive_markings as marking}
+                      <span class="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                        {marking}
+                      </span>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
             </div>
 
             <details class="rounded-2xl border border-slate-200 px-4 py-3 dark:border-slate-800">
@@ -1587,9 +2534,7 @@
                     <button
                       type="button"
                       class={`rounded-full px-3 py-1 text-xs font-medium ${selectedActionId === action.id ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200'}`}
-                      onclick={() => {
-                        selectedActionId = action.id;
-                      }}
+                      onclick={() => void handleSelectAction(action.id)}
                     >
                       {action.display_name}
                     </button>

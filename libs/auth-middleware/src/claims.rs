@@ -17,6 +17,12 @@ pub struct SessionScope {
     pub workspace: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub classification_clearance: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_markings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub restricted_view_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub consumer_mode: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guest_email: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -32,6 +38,12 @@ pub struct Claims {
     pub iat: i64,
     /// Expiration (epoch seconds).
     pub exp: i64,
+    /// Optional issuer, validated when configured by runtime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iss: Option<String>,
+    /// Optional audience, validated when configured by runtime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aud: Option<String>,
     /// Token ID — unique per token for revocation.
     pub jti: Uuid,
     /// User email.
@@ -125,6 +137,40 @@ impl Claims {
             })
     }
 
+    /// Effective allowed markings for the current claims, preferring scoped-session restrictions.
+    pub fn allowed_markings(&self) -> Vec<String> {
+        if let Some(scope) = self.session_scope.as_ref() {
+            if !scope.allowed_markings.is_empty() {
+                return scope.allowed_markings.clone();
+            }
+        }
+
+        match self.classification_clearance() {
+            Some("pii") => vec![
+                "public".to_string(),
+                "confidential".to_string(),
+                "pii".to_string(),
+            ],
+            Some("confidential") => vec!["public".to_string(), "confidential".to_string()],
+            Some("public") => vec!["public".to_string()],
+            _ if self.has_role("admin") => vec![
+                "public".to_string(),
+                "confidential".to_string(),
+                "pii".to_string(),
+            ],
+            _ => vec!["public".to_string()],
+        }
+    }
+
+    /// Whether the effective scope permits the requested marking.
+    pub fn allows_marking(&self, marking: &str) -> bool {
+        self.has_role("admin")
+            || self
+                .allowed_markings()
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(marking))
+    }
+
     /// Whether the session scope permits an HTTP method.
     pub fn allows_http_method(&self, method: &str) -> bool {
         let Some(scope) = self.session_scope.as_ref() else {
@@ -134,8 +180,7 @@ impl Claims {
             return true;
         }
         scope.allowed_methods.iter().any(|candidate| {
-            candidate.eq_ignore_ascii_case(method)
-                || candidate.eq_ignore_ascii_case("*")
+            candidate.eq_ignore_ascii_case(method) || candidate.eq_ignore_ascii_case("*")
         })
     }
 
@@ -162,7 +207,10 @@ impl Claims {
             return true;
         }
         subject_id.is_some_and(|candidate| {
-            scope.allowed_subject_ids.iter().any(|value| value == candidate)
+            scope
+                .allowed_subject_ids
+                .iter()
+                .any(|value| value == candidate)
         })
     }
 
@@ -174,6 +222,39 @@ impl Claims {
             }
         }
         self.org_id.into_iter().collect()
+    }
+
+    /// Whether the subject may access the requested organization boundary.
+    pub fn allows_org_id(&self, org_id: Option<Uuid>) -> bool {
+        if self.has_role("admin") {
+            return true;
+        }
+
+        let allowed = self.allowed_org_ids();
+        if allowed.is_empty() {
+            return true;
+        }
+
+        match org_id {
+            Some(candidate) => allowed.contains(&candidate),
+            None => !self.is_guest_session(),
+        }
+    }
+
+    /// Restricted view allowlist propagated by the scoped session, if any.
+    pub fn restricted_view_ids(&self) -> Vec<Uuid> {
+        self.session_scope
+            .as_ref()
+            .map(|scope| scope.restricted_view_ids.clone())
+            .unwrap_or_default()
+    }
+
+    /// Whether the session is in external consumer mode.
+    pub fn consumer_mode_enabled(&self) -> bool {
+        self.session_scope
+            .as_ref()
+            .map(|scope| scope.consumer_mode)
+            .unwrap_or(false)
     }
 
     /// Fetch an attribute if present.
@@ -203,6 +284,8 @@ mod tests {
             sub: Uuid::nil(),
             iat: 0,
             exp: i64::MAX,
+            iss: None,
+            aud: None,
             jti: Uuid::nil(),
             email: "guest@example.com".to_string(),
             name: "Guest".to_string(),
@@ -223,6 +306,9 @@ mod tests {
                 allowed_org_ids: vec![Uuid::nil()],
                 workspace: Some("shared".to_string()),
                 classification_clearance: Some("public".to_string()),
+                allowed_markings: vec!["public".to_string()],
+                restricted_view_ids: vec![Uuid::nil()],
+                consumer_mode: true,
                 guest_email: Some("guest@example.com".to_string()),
                 guest_display_name: Some("Guest".to_string()),
             }),
@@ -243,8 +329,13 @@ mod tests {
     fn session_scope_limits_subjects_and_prefers_scope_clearance() {
         let claims = scoped_claims();
         assert_eq!(claims.classification_clearance(), Some("public"));
+        assert!(claims.allows_marking("public"));
+        assert!(!claims.allows_marking("confidential"));
         assert!(claims.allows_subject_id(Some("subject-1")));
         assert!(!claims.allows_subject_id(Some("subject-2")));
         assert_eq!(claims.allowed_org_ids(), vec![Uuid::nil()]);
+        assert!(claims.allows_org_id(Some(Uuid::nil())));
+        assert_eq!(claims.restricted_view_ids(), vec![Uuid::nil()]);
+        assert!(claims.consumer_mode_enabled());
     }
 }

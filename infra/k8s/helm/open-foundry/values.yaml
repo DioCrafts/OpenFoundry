@@ -8,6 +8,8 @@ serviceAccount:
 
 global:
   imagePullPolicy: IfNotPresent
+  imageRegistry: ""
+  imagePullSecrets: []
   existingSecret: open-foundry-env
   publicWebOrigin: https://openfoundry.example.com
   labels:
@@ -59,6 +61,59 @@ global:
     tls: []
   networkPolicy:
     enabled: true
+    allowSameNamespaceTraffic: true
+    additionalEgressCidrs: []
+  deploymentFabric:
+    cloud: kubernetes
+    environment: shared
+    cell: core
+    region: global
+    multiCloud:
+      enabled: false
+      activeProvider: ""
+      workloadIdentity:
+        awsRoleArn: ""
+        gcpServiceAccount: ""
+        azureClientId: ""
+      providers: []
+    airGap:
+      enabled: false
+      privateRegistry: ""
+      releaseBundle: ""
+      disablePublicEgress: false
+      mirrorRegistries: []
+      allowedEgressCidrs: []
+    geoRestrictions:
+      enabled: false
+      allowedCountries: []
+      allowedIngressCidrs: []
+      allowedEgressCidrs: []
+      ingressAnnotations: {}
+      requiredNodeLabels: {}
+      residencyLabel: ""
+
+apollo:
+  enabled: false
+  schedule: "*/15 * * * *"
+  actionMode: observe
+  image:
+    repository: curlimages/curl
+    tag: "8.8.0"
+  gatewayUrl: ""
+  readinessPath: /api/v1/control-panel/upgrade-readiness
+  fleetsPath: /api/v1/marketplace/devops/fleets
+  reconcileFleetIds: []
+  promoteWebhookPath: ""
+  tokenSecretName: open-foundry-apollo
+  tokenSecretKey: token
+  env: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
 
 services:
   gateway:

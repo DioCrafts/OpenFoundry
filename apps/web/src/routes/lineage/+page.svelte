@@ -22,6 +22,7 @@
   let selectedNode = $state<LineageNode | null>(null);
   let impact = $state<LineageImpactAnalysis | null>(null);
   let buildResult = $state<LineageBuildResult | null>(null);
+  let acknowledgeSensitiveLineage = $state(false);
 
   let cy = $state<Core | null>(null);
 
@@ -61,6 +62,7 @@
   async function loadImpact(datasetId: string) {
     impactLoading = true;
     buildResult = null;
+    acknowledgeSensitiveLineage = false;
     try {
       impact = await getDatasetLineageImpact(datasetId);
     } catch (cause) {
@@ -78,6 +80,7 @@
       buildResult = await triggerLineageBuilds(selectedNode.id, {
         include_workflows: true,
         dry_run: false,
+        acknowledge_sensitive_lineage: acknowledgeSensitiveLineage,
         context: {
           initiated_from: 'lineage-explorer',
         },
@@ -187,6 +190,10 @@
     return graph?.nodes.filter((node) => node.kind === kind).length ?? 0;
   }
 
+  function sensitiveCandidateCount() {
+    return impact?.build_candidates.filter((candidate) => candidate.requires_acknowledgement).length ?? 0;
+  }
+
   onMount(() => {
     void loadGraph();
     return () => cy?.destroy();
@@ -280,7 +287,7 @@
             <button onclick={() => selectedNode?.id && void loadImpact(selectedNode.id)} disabled={impactLoading} class="rounded-xl border border-slate-200 px-4 py-2 hover:bg-slate-50 disabled:opacity-50 dark:border-gray-700 dark:hover:bg-gray-800">
               {impactLoading ? 'Refreshing impact...' : 'Refresh impact'}
             </button>
-            <button onclick={() => void triggerBuilds()} disabled={building || impactLoading} class="rounded-xl bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50">
+            <button onclick={() => void triggerBuilds()} disabled={building || impactLoading || (sensitiveCandidateCount() > 0 && !acknowledgeSensitiveLineage)} class="rounded-xl bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50">
               {building ? 'Triggering builds...' : 'Trigger downstream builds'}
             </button>
           </div>
@@ -304,6 +311,13 @@
                 </div>
               </div>
 
+              {#if sensitiveCandidateCount() > 0}
+                <label class="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+                  <input type="checkbox" checked={acknowledgeSensitiveLineage} onchange={(event) => acknowledgeSensitiveLineage = (event.currentTarget as HTMLInputElement).checked} class="mt-1 h-4 w-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500" />
+                  <span>{sensitiveCandidateCount()} downstream build candidate(s) inherit confidential or PII lineage. Confirm acknowledgment before dispatching rebuilds.</span>
+                </label>
+              {/if}
+
               <div class="rounded-xl bg-slate-50 p-4 dark:bg-gray-950">
                 <div class="text-xs uppercase tracking-[0.22em] text-gray-400">Build candidates</div>
                 <div class="mt-3 space-y-3">
@@ -316,12 +330,19 @@
                           <div>
                             <div class="font-medium">{candidate.label}</div>
                             <div class="mt-1 text-xs uppercase tracking-[0.18em] text-gray-400">{candidate.kind} · distance {candidate.distance}</div>
+                            <div class="mt-1 text-xs text-gray-500">Node marking {candidate.marking} · Effective path marking {candidate.effective_marking}</div>
+                            {#if candidate.requires_acknowledgement}
+                              <div class="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300">Sensitive lineage acknowledgment required</div>
+                            {/if}
+                            {#if candidate.blocked_reason}
+                              <div class="mt-2 text-xs text-rose-600 dark:text-rose-300">{candidate.blocked_reason}</div>
+                            {/if}
                           </div>
                           <div class="text-right">
                             <div class={`text-sm font-medium ${candidate.triggerable ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-500'}`}>
                               {candidate.status ?? 'unknown'}
                             </div>
-                            <div class="text-xs text-gray-400">{candidate.marking}</div>
+                            <div class="text-xs text-gray-400">{candidate.effective_marking}</div>
                           </div>
                         </div>
                       </div>
@@ -340,7 +361,7 @@
                       {#each impact.upstream.slice(0, 6) as item}
                         <div class="rounded-xl border border-slate-200 px-3 py-3 dark:border-gray-800">
                           <div class="font-medium">{item.label}</div>
-                          <div class="mt-1 text-xs uppercase tracking-[0.18em] text-gray-400">{item.kind} · distance {item.distance} · {item.marking}</div>
+                          <div class="mt-1 text-xs uppercase tracking-[0.18em] text-gray-400">{item.kind} · distance {item.distance} · node {item.marking} · path {item.effective_marking}</div>
                         </div>
                       {/each}
                     {/if}
@@ -356,7 +377,7 @@
                       {#each impact.downstream.slice(0, 6) as item}
                         <div class="rounded-xl border border-slate-200 px-3 py-3 dark:border-gray-800">
                           <div class="font-medium">{item.label}</div>
-                          <div class="mt-1 text-xs uppercase tracking-[0.18em] text-gray-400">{item.kind} · distance {item.distance} · {item.marking}</div>
+                          <div class="mt-1 text-xs uppercase tracking-[0.18em] text-gray-400">{item.kind} · distance {item.distance} · node {item.marking} · path {item.effective_marking}</div>
                         </div>
                       {/each}
                     {/if}

@@ -1,5 +1,7 @@
 pub mod abac;
+pub mod access;
 pub mod api_keys;
+pub mod idp_mapping;
 pub mod jwt;
 pub mod mfa;
 pub mod oauth;

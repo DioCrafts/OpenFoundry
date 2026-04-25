@@ -16,9 +16,7 @@ use crate::{
     },
 };
 
-pub async fn list_spaces(
-    State(state): State<AppState>,
-) -> ServiceResult<ListResponse<NexusSpace>> {
+pub async fn list_spaces(State(state): State<AppState>) -> ServiceResult<ListResponse<NexusSpace>> {
     let items = load_spaces(&state.db)
         .await
         .map_err(|cause| db_error(&cause))?;
@@ -124,16 +122,10 @@ pub async fn update_space(
     .bind(request.description.unwrap_or(current.description))
     .bind(owner_peer_id)
     .bind(request.region.unwrap_or(current.region))
+    .bind(serde_json::to_value(member_peer_ids).map_err(|cause| internal_error(cause.to_string()))?)
     .bind(
-        serde_json::to_value(member_peer_ids).map_err(|cause| internal_error(cause.to_string()))?,
-    )
-    .bind(
-        serde_json::to_value(
-            request
-                .governance_tags
-                .unwrap_or(current.governance_tags),
-        )
-        .map_err(|cause| internal_error(cause.to_string()))?,
+        serde_json::to_value(request.governance_tags.unwrap_or(current.governance_tags))
+            .map_err(|cause| internal_error(cause.to_string()))?,
     )
     .bind(request.status.unwrap_or(current.status))
     .bind(now)
@@ -178,7 +170,9 @@ async fn validate_space_request(
         .iter()
         .all(|peer_id| peers.iter().any(|peer| &peer.id == peer_id))
     {
-        return Err(bad_request("member_peer_ids contains unknown peer references"));
+        return Err(bad_request(
+            "member_peer_ids contains unknown peer references",
+        ));
     }
 
     Ok(())

@@ -8,9 +8,9 @@ pub fn embed_text(content: &str) -> Vec<f32> {
         .filter(|token| !token.is_empty())
         .enumerate()
     {
-        let token_value = token
-            .bytes()
-            .fold(0u32, |accumulator, byte| accumulator.wrapping_add(byte as u32));
+        let token_value = token.bytes().fold(0u32, |accumulator, byte| {
+            accumulator.wrapping_add(byte as u32)
+        });
         vector[index % vector_len] += (token_value % 997) as f32 / 997.0;
     }
 

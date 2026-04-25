@@ -22,6 +22,7 @@ pub fn catalog_entry(stream: &StreamDefinition) -> ConnectorCatalogEntry {
     }
 }
 
+#[allow(dead_code)]
 pub fn sample_events(stream: &StreamDefinition, topology_id: Uuid) -> Vec<LiveTailEvent> {
     let now = Utc::now();
     vec![LiveTailEvent {

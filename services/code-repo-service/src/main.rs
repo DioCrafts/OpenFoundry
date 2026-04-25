@@ -41,7 +41,7 @@ async fn main() {
         .await
         .expect("failed to run migrations");
 
-    let jwt_config = JwtConfig::new(&cfg.jwt_secret);
+    let jwt_config = JwtConfig::new(&cfg.jwt_secret).with_env_defaults();
     let state = AppState {
         db: pool,
         jwt_config: jwt_config.clone(),
@@ -110,6 +110,10 @@ async fn main() {
             "/api/v1/code-repos/merge-requests/{id}",
             get(handlers::merge_requests::get_merge_request)
                 .patch(handlers::merge_requests::update_merge_request),
+        )
+        .route(
+            "/api/v1/code-repos/merge-requests/{id}/merge",
+            axum::routing::post(handlers::merge_requests::merge_merge_request),
         )
         .route(
             "/api/v1/code-repos/merge-requests/{id}/comments",

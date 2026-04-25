@@ -44,13 +44,18 @@ pub fn execute_training(
             .total_cmp(&left.trial.objective_metric.value)
     });
 
-    let trials = outcomes.iter().map(|outcome| outcome.trial.clone()).collect();
+    let trials = outcomes
+        .iter()
+        .map(|outcome| outcome.trial.clone())
+        .collect();
     let best = outcomes.first();
 
     Ok(TrainingExecution {
         trials,
         best_hyperparameters: best.map(|outcome| outcome.trial.hyperparameters.clone()),
-        best_metrics: best.map(|outcome| outcome.metrics.clone()).unwrap_or_default(),
+        best_metrics: best
+            .map(|outcome| outcome.metrics.clone())
+            .unwrap_or_default(),
         best_schema: best.map(|outcome| outcome.schema.clone()),
     })
 }

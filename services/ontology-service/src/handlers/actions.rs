@@ -19,7 +19,7 @@ use uuid::Uuid;
 use crate::{
     AppState,
     domain::{
-        access::ensure_object_access,
+        access::{clearance_rank, ensure_object_access, marking_rank, validate_marking},
         function_runtime::{
             ResolvedInlineFunction, execute_inline_function, resolve_inline_function_config,
         },
@@ -28,10 +28,12 @@ use crate::{
     },
     models::{
         action_type::{
-            ActionInputField, ActionOperationKind, ActionType, ActionTypeRow,
-            CreateActionTypeRequest, ExecuteActionRequest, ExecuteActionResponse,
+            ActionAuthorizationPolicy, ActionInputField, ActionOperationKind, ActionType,
+            ActionTypeRow, ActionWhatIfBranch, CreateActionTypeRequest,
+            CreateActionWhatIfBranchRequest, ExecuteActionRequest, ExecuteActionResponse,
             ExecuteBatchActionRequest, ExecuteBatchActionResponse, ListActionTypesQuery,
-            ListActionTypesResponse, UpdateActionTypeRequest, ValidateActionRequest,
+            ListActionTypesResponse, ListActionWhatIfBranchesQuery,
+            ListActionWhatIfBranchesResponse, UpdateActionTypeRequest, ValidateActionRequest,
             ValidateActionResponse,
         },
         link_type::LinkType,
@@ -159,7 +161,46 @@ fn forbidden(message: impl Into<String>) -> Response {
         .into_response()
 }
 
-fn ensure_action_permission(claims: &Claims, action: &ActionType) -> Result<(), String> {
+fn validate_action_authorization_policy(policy: &ActionAuthorizationPolicy) -> Result<(), String> {
+    for permission_key in &policy.required_permission_keys {
+        if permission_key.trim().is_empty() {
+            return Err(
+                "authorization_policy.required_permission_keys cannot contain empty values"
+                    .to_string(),
+            );
+        }
+    }
+    for role in &policy.any_role {
+        if role.trim().is_empty() {
+            return Err("authorization_policy.any_role cannot contain empty values".to_string());
+        }
+    }
+    for role in &policy.all_roles {
+        if role.trim().is_empty() {
+            return Err("authorization_policy.all_roles cannot contain empty values".to_string());
+        }
+    }
+    for key in policy.attribute_equals.keys() {
+        if key.trim().is_empty() {
+            return Err(
+                "authorization_policy.attribute_equals cannot contain empty keys".to_string(),
+            );
+        }
+    }
+    for marking in &policy.allowed_markings {
+        validate_marking(marking)?;
+    }
+    if let Some(minimum_clearance) = policy.minimum_clearance.as_deref() {
+        validate_marking(minimum_clearance)?;
+    }
+
+    Ok(())
+}
+
+pub(crate) fn ensure_action_actor_permission(
+    claims: &Claims,
+    action: &ActionType,
+) -> Result<(), String> {
     if let Some(permission_key) = action.permission_key.as_deref() {
         if !claims.has_permission_key(permission_key) {
             return Err(format!(
@@ -169,7 +210,99 @@ fn ensure_action_permission(claims: &Claims, action: &ActionType) -> Result<(), 
         }
     }
 
+    for permission_key in &action.authorization_policy.required_permission_keys {
+        if !claims.has_permission_key(permission_key) {
+            return Err(format!(
+                "forbidden: missing permission '{}'",
+                permission_key
+            ));
+        }
+    }
+
+    if !action.authorization_policy.any_role.is_empty()
+        && !action
+            .authorization_policy
+            .any_role
+            .iter()
+            .any(|role| claims.has_role(role))
+    {
+        return Err(format!(
+            "forbidden: requires one of roles [{}]",
+            action.authorization_policy.any_role.join(", ")
+        ));
+    }
+
+    for role in &action.authorization_policy.all_roles {
+        if !claims.has_role(role) {
+            return Err(format!("forbidden: missing role '{}'", role));
+        }
+    }
+
+    for (attribute_key, expected_value) in &action.authorization_policy.attribute_equals {
+        match claims.attribute(attribute_key) {
+            Some(actual_value) if actual_value == expected_value => {}
+            Some(_) => {
+                return Err(format!(
+                    "forbidden: attribute '{}' does not satisfy the action policy",
+                    attribute_key
+                ));
+            }
+            None => {
+                return Err(format!(
+                    "forbidden: missing required attribute '{}'",
+                    attribute_key
+                ));
+            }
+        }
+    }
+
+    if action.authorization_policy.deny_guest_sessions && claims.is_guest_session() {
+        return Err("forbidden: guest sessions may not execute this action".to_string());
+    }
+
+    if let Some(minimum_clearance) = action.authorization_policy.minimum_clearance.as_deref() {
+        let required_clearance = marking_rank(minimum_clearance).ok_or_else(|| {
+            format!(
+                "forbidden: invalid action minimum_clearance '{}'",
+                minimum_clearance
+            )
+        })?;
+        if clearance_rank(claims) < required_clearance {
+            return Err(format!(
+                "forbidden: action requires '{}' classification clearance",
+                minimum_clearance
+            ));
+        }
+    }
+
     Ok(())
+}
+
+pub(crate) fn ensure_action_target_permission(
+    action: &ActionType,
+    target: Option<&ObjectInstance>,
+) -> Result<(), String> {
+    if action.authorization_policy.allowed_markings.is_empty() {
+        return Ok(());
+    }
+
+    let Some(target) = target else {
+        return Err("target object is required by the action authorization policy".to_string());
+    };
+
+    if action
+        .authorization_policy
+        .allowed_markings
+        .iter()
+        .any(|marking| marking.eq_ignore_ascii_case(&target.marking))
+    {
+        Ok(())
+    } else {
+        Err(format!(
+            "forbidden: target marking '{}' is not allowed for this action",
+            target.marking
+        ))
+    }
 }
 
 fn ensure_confirmation_justification(
@@ -177,7 +310,10 @@ fn ensure_confirmation_justification(
     justification: Option<&str>,
 ) -> Result<(), String> {
     if action.confirmation_required
-        && justification.map(str::trim).filter(|value| !value.is_empty()).is_none()
+        && justification
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none()
     {
         return Err("justification is required for confirmation_required actions".to_string());
     }
@@ -195,7 +331,8 @@ async fn load_action_row(
 ) -> Result<Option<ActionTypeRow>, sqlx::Error> {
     sqlx::query_as::<_, ActionTypeRow>(
         r#"SELECT id, name, display_name, description, object_type_id, operation_kind, input_schema,
-		          config, confirmation_required, permission_key, owner_id, created_at, updated_at
+		          config, confirmation_required, permission_key, authorization_policy, owner_id,
+		          created_at, updated_at
 		   FROM action_types WHERE id = $1"#,
     )
     .bind(action_id)
@@ -487,7 +624,10 @@ fn derive_function_effects(
         return Ok((Some(response.clone()), None, None, false));
     };
 
-    let output = object.get("output").filter(|value| !value.is_null()).cloned();
+    let output = object
+        .get("output")
+        .filter(|value| !value.is_null())
+        .cloned();
     let object_patch = object
         .get("object_patch")
         .filter(|value| !value.is_null())
@@ -528,6 +668,7 @@ async fn validate_action_definition(
     operation_kind_raw: &str,
     input_schema: &[ActionInputField],
     config: &Value,
+    authorization_policy: &ActionAuthorizationPolicy,
 ) -> Result<ActionOperationKind, String> {
     if !ensure_object_type_exists(state, object_type_id)
         .await
@@ -537,6 +678,7 @@ async fn validate_action_definition(
     }
 
     ensure_input_schema(input_schema)?;
+    validate_action_authorization_policy(authorization_policy)?;
     let operation_kind = parse_operation_kind(operation_kind_raw)?;
     let input_names = input_schema
         .iter()
@@ -583,9 +725,8 @@ async fn validate_action_definition(
                         }
                     }
                     (None, Some(value)) => {
-                        validate_property_value(property_type, value).map_err(|error| {
-                            format!("{}: {}", mapping.property_name, error)
-                        })?;
+                        validate_property_value(property_type, value)
+                            .map_err(|error| format!("{}: {}", mapping.property_name, error))?;
                     }
                     _ => {
                         return Err(
@@ -601,9 +742,10 @@ async fn validate_action_definition(
                     .as_object()
                     .ok_or_else(|| "static_patch must be a JSON object".to_string())?;
                 for (property_name, value) in values {
-                    let property_type = property_types
-                        .get(property_name.as_str())
-                        .ok_or_else(|| format!("unknown property '{property_name}' in static_patch"))?;
+                    let property_type =
+                        property_types.get(property_name.as_str()).ok_or_else(|| {
+                            format!("unknown property '{property_name}' in static_patch")
+                        })?;
                     validate_property_value(property_type, value)
                         .map_err(|error| format!("{}: {}", property_name, error))?;
                 }
@@ -657,7 +799,10 @@ async fn validate_action_definition(
             }
         }
         ActionOperationKind::InvokeFunction => {
-            if resolve_inline_function_config(state, config).await?.is_none() {
+            if resolve_inline_function_config(state, config)
+                .await?
+                .is_none()
+            {
                 validate_http_invocation_config(config)?;
             }
         }
@@ -704,6 +849,7 @@ async fn plan_action(
             let target =
                 load_and_authorize_target(state, claims, target_object_id, action.object_type_id)
                     .await?;
+            ensure_action_target_permission(action, Some(&target)).map_err(|e| vec![e])?;
 
             let cfg: UpdateObjectActionConfig = serde_json::from_value(action.config.clone())
                 .map_err(|e| vec![format!("invalid action config: {e}")])?;
@@ -740,9 +886,12 @@ async fn plan_action(
             if let Some(static_patch) = cfg.static_patch {
                 if let Some(values) = static_patch.as_object() {
                     for (property_name, value) in values {
-                        let property_type = property_types.get(property_name.as_str()).ok_or_else(|| {
-                            vec![format!("unknown property '{property_name}' in static_patch")]
-                        })?;
+                        let property_type =
+                            property_types.get(property_name.as_str()).ok_or_else(|| {
+                                vec![format!(
+                                    "unknown property '{property_name}' in static_patch"
+                                )]
+                            })?;
                         validate_property_value(property_type, value)
                             .map_err(|e| vec![format!("{}: {}", property_name, e)])?;
                         patch.insert(property_name.to_string(), value.clone());
@@ -759,6 +908,7 @@ async fn plan_action(
             let target =
                 load_and_authorize_target(state, claims, target_object_id, action.object_type_id)
                     .await?;
+            ensure_action_target_permission(action, Some(&target)).map_err(|e| vec![e])?;
 
             let cfg: CreateLinkActionConfig = serde_json::from_value(action.config.clone())
                 .map_err(|e| vec![format!("invalid action config: {e}")])?;
@@ -809,17 +959,24 @@ async fn plan_action(
             let target =
                 load_and_authorize_target(state, claims, target_object_id, action.object_type_id)
                     .await?;
+            ensure_action_target_permission(action, Some(&target)).map_err(|e| vec![e])?;
 
             Ok(ActionPlan::DeleteObject { target })
         }
         ActionOperationKind::InvokeFunction => {
             let target = match request.target_object_id {
                 Some(target_object_id) => Some(
-                    load_and_authorize_target(state, claims, target_object_id, action.object_type_id)
-                        .await?,
+                    load_and_authorize_target(
+                        state,
+                        claims,
+                        target_object_id,
+                        action.object_type_id,
+                    )
+                    .await?,
                 ),
                 None => None,
             };
+            ensure_action_target_permission(action, target.as_ref()).map_err(|e| vec![e])?;
             let payload = build_http_payload(action, target.as_ref(), &parameters);
             let invocation = match resolve_inline_function_config(state, &action.config).await {
                 Ok(Some(config)) => FunctionInvocation::Inline(config),
@@ -839,11 +996,17 @@ async fn plan_action(
         ActionOperationKind::InvokeWebhook => {
             let target = match request.target_object_id {
                 Some(target_object_id) => Some(
-                    load_and_authorize_target(state, claims, target_object_id, action.object_type_id)
-                        .await?,
+                    load_and_authorize_target(
+                        state,
+                        claims,
+                        target_object_id,
+                        action.object_type_id,
+                    )
+                    .await?,
                 ),
                 None => None,
             };
+            ensure_action_target_permission(action, target.as_ref()).map_err(|e| vec![e])?;
             let payload = build_http_payload(action, target.as_ref(), &parameters);
             let invocation =
                 validate_http_invocation_config(&action.config).map_err(|e| vec![e])?;
@@ -930,6 +1093,55 @@ fn plan_preview(plan: &ActionPlan) -> Value {
     }
 }
 
+fn target_snapshot_from_plan(plan: &ActionPlan) -> Option<ObjectInstance> {
+    match plan {
+        ActionPlan::UpdateObject { target, .. }
+        | ActionPlan::CreateLink { target, .. }
+        | ActionPlan::DeleteObject { target }
+        | ActionPlan::InvokeFunction {
+            target: Some(target),
+            ..
+        }
+        | ActionPlan::InvokeWebhook {
+            target: Some(target),
+            ..
+        } => Some(target.clone()),
+        _ => None,
+    }
+}
+
+async fn simulate_target_after_preview(
+    state: &AppState,
+    target: &ObjectInstance,
+    preview: &Value,
+) -> Result<Option<Value>, String> {
+    if preview
+        .get("kind")
+        .and_then(Value::as_str)
+        .is_some_and(|kind| kind == "delete_object")
+    {
+        return Ok(None);
+    }
+
+    let mut merged = target.properties.as_object().cloned().unwrap_or_default();
+    if let Some(patch) = preview.get("patch").and_then(Value::as_object) {
+        for (key, value) in patch {
+            merged.insert(key.clone(), value.clone());
+        }
+    }
+
+    let definitions = load_effective_properties(&state.db, target.object_type_id)
+        .await
+        .map_err(|error| format!("failed to load property definitions: {error}"))?;
+    let normalized = validate_object_properties(&definitions, &Value::Object(merged))
+        .map_err(|error| format!("invalid simulated action branch: {error}"))?;
+
+    let mut simulated = target.clone();
+    simulated.properties = normalized;
+    simulated.updated_at = chrono::Utc::now();
+    Ok(Some(json!(simulated)))
+}
+
 fn issue_service_token(state: &AppState, claims: &Claims) -> Result<String, String> {
     let service_claims = build_access_claims(
         &state.jwt_config,
@@ -985,6 +1197,7 @@ async fn emit_action_audit_event(
         "operation_kind": &action.operation_kind,
         "object_type_id": action.object_type_id,
         "permission_key": &action.permission_key,
+        "authorization_policy": &action.authorization_policy,
         "target_object_id": target_object_id,
         "justification": justification,
         "parameters": parameters,
@@ -1166,14 +1379,22 @@ async fn execute_plan(
             };
 
             let object = match object_patch {
-                Some(patch) => Some(json!(apply_object_patch(state, target_object, &patch).await?)),
+                Some(patch) => Some(json!(
+                    apply_object_patch(state, target_object, &patch).await?
+                )),
                 None => None,
             };
 
             let link = match link_instruction {
                 Some(instruction) => Some(json!(
-                    create_link_from_instruction(state, claims, claims.sub, target_object, &instruction)
-                        .await?
+                    create_link_from_instruction(
+                        state,
+                        claims,
+                        claims.sub,
+                        target_object,
+                        &instruction
+                    )
+                    .await?
                 )),
                 None => None,
             };
@@ -1219,10 +1440,10 @@ pub(crate) async fn preview_action_for_simulation(
         .await
         .map_err(|error| format!("failed to load action type: {error}"))?
         .ok_or_else(|| "action type was not found".to_string())?;
-    let action =
-        ActionType::try_from(row).map_err(|error| format!("failed to decode action type: {error}"))?;
+    let action = ActionType::try_from(row)
+        .map_err(|error| format!("failed to decode action type: {error}"))?;
 
-    ensure_action_permission(claims, &action)?;
+    ensure_action_actor_permission(claims, &action)?;
     let plan = plan_action(
         state,
         claims,
@@ -1251,6 +1472,7 @@ pub async fn create_action_type(
     let description = body.description.unwrap_or_default();
     let input_schema = body.input_schema.unwrap_or_default();
     let config = body.config.unwrap_or(Value::Null);
+    let authorization_policy = body.authorization_policy.unwrap_or_default();
 
     if let Err(error) = validate_action_definition(
         &state,
@@ -1258,6 +1480,7 @@ pub async fn create_action_type(
         &body.operation_kind,
         &input_schema,
         &config,
+        &authorization_policy,
     )
     .await
     {
@@ -1267,11 +1490,11 @@ pub async fn create_action_type(
     let result = sqlx::query_as::<_, ActionTypeRow>(
         r#"INSERT INTO action_types (
 		       id, name, display_name, description, object_type_id, operation_kind,
-		       input_schema, config, confirmation_required, permission_key, owner_id
+		       input_schema, config, confirmation_required, permission_key, authorization_policy, owner_id
 		   )
-		   VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11)
+		   VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11::jsonb, $12)
 		   RETURNING id, name, display_name, description, object_type_id, operation_kind,
-		             input_schema, config, confirmation_required, permission_key, owner_id,
+		             input_schema, config, confirmation_required, permission_key, authorization_policy, owner_id,
 		             created_at, updated_at"#,
     )
     .bind(Uuid::now_v7())
@@ -1284,6 +1507,7 @@ pub async fn create_action_type(
     .bind(config)
     .bind(body.confirmation_required.unwrap_or(false))
     .bind(body.permission_key)
+    .bind(serde_json::to_value(&authorization_policy).unwrap_or_else(|_| json!({})))
     .bind(claims.sub)
     .fetch_one(&state.db)
     .await;
@@ -1320,7 +1544,7 @@ pub async fn list_action_types(
 
     let rows = sqlx::query_as::<_, ActionTypeRow>(
         r#"SELECT id, name, display_name, description, object_type_id, operation_kind,
-		          input_schema, config, confirmation_required, permission_key, owner_id,
+		          input_schema, config, confirmation_required, permission_key, authorization_policy, owner_id,
 		          created_at, updated_at
 		   FROM action_types
 		   WHERE ($1::uuid IS NULL OR object_type_id = $1)
@@ -1391,6 +1615,9 @@ pub async fn update_action_type(
         .unwrap_or(existing.operation_kind.clone());
     let input_schema = body.input_schema.unwrap_or(existing.input_schema.clone());
     let config = body.config.unwrap_or(existing.config.clone());
+    let authorization_policy = body
+        .authorization_policy
+        .unwrap_or(existing.authorization_policy.clone());
 
     if let Err(error) = validate_action_definition(
         &state,
@@ -1398,6 +1625,7 @@ pub async fn update_action_type(
         &operation_kind,
         &input_schema,
         &config,
+        &authorization_policy,
     )
     .await
     {
@@ -1414,10 +1642,11 @@ pub async fn update_action_type(
 		       config = $6::jsonb,
 		       confirmation_required = COALESCE($7, confirmation_required),
 		       permission_key = $8,
+		       authorization_policy = $9::jsonb,
 		       updated_at = NOW()
 		   WHERE id = $1
 		   RETURNING id, name, display_name, description, object_type_id, operation_kind,
-		             input_schema, config, confirmation_required, permission_key, owner_id,
+		             input_schema, config, confirmation_required, permission_key, authorization_policy, owner_id,
 		             created_at, updated_at"#,
     )
     .bind(id)
@@ -1428,6 +1657,7 @@ pub async fn update_action_type(
     .bind(config)
     .bind(body.confirmation_required)
     .bind(permission_key)
+    .bind(serde_json::to_value(&authorization_policy).unwrap_or_else(|_| json!({})))
     .fetch_optional(&state.db)
     .await;
 
@@ -1475,7 +1705,7 @@ pub async fn validate_action(
         Err(e) => return db_error(format!("failed to decode action type: {e}")),
     };
 
-    if let Err(error) = ensure_action_permission(&claims, &action) {
+    if let Err(error) = ensure_action_actor_permission(&claims, &action) {
         return forbidden(error);
     }
 
@@ -1519,7 +1749,7 @@ pub async fn execute_action(
         Err(e) => return db_error(format!("failed to decode action type: {e}")),
     };
 
-    if let Err(error) = ensure_action_permission(&claims, &action) {
+    if let Err(error) = ensure_action_actor_permission(&claims, &action) {
         if let Err(audit_error) = emit_action_audit_event(
             &state,
             &claims,
@@ -1607,20 +1837,17 @@ pub async fn execute_action(
         }
     };
 
-    let target_snapshot = match &plan {
-        ActionPlan::UpdateObject { target, .. }
-        | ActionPlan::CreateLink { target, .. }
-        | ActionPlan::DeleteObject { target }
-        | ActionPlan::InvokeFunction {
-            target: Some(target), ..
-        }
-        | ActionPlan::InvokeWebhook {
-            target: Some(target), ..
-        } => Some(target.clone()),
-        _ => None,
-    };
+    let target_snapshot = target_snapshot_from_plan(&plan);
 
-    match execute_plan(&state, &claims, &action, body.justification.as_deref(), plan).await {
+    match execute_plan(
+        &state,
+        &claims,
+        &action,
+        body.justification.as_deref(),
+        plan,
+    )
+    .await
+    {
         Ok(executed) => {
             let audit_result = json!({
                 "deleted": executed.deleted,
@@ -1704,7 +1931,7 @@ pub async fn execute_action_batch(
         Err(e) => return db_error(format!("failed to decode action type: {e}")),
     };
 
-    if let Err(error) = ensure_action_permission(&claims, &action) {
+    if let Err(error) = ensure_action_actor_permission(&claims, &action) {
         if let Err(audit_error) = emit_action_audit_event(
             &state,
             &claims,
@@ -1760,18 +1987,7 @@ pub async fn execute_action_batch(
 
         match plan_action(&state, &claims, &action, &validation_request).await {
             Ok(plan) => {
-                let target_snapshot = match &plan {
-                    ActionPlan::UpdateObject { target, .. }
-                    | ActionPlan::CreateLink { target, .. }
-                    | ActionPlan::DeleteObject { target }
-                    | ActionPlan::InvokeFunction {
-                        target: Some(target), ..
-                    }
-                    | ActionPlan::InvokeWebhook {
-                        target: Some(target), ..
-                    } => Some(target.clone()),
-                    _ => None,
-                };
+                let target_snapshot = target_snapshot_from_plan(&plan);
 
                 match execute_plan(
                     &state,
@@ -1780,7 +1996,8 @@ pub async fn execute_action_batch(
                     body.justification.as_deref(),
                     plan,
                 )
-                .await {
+                .await
+                {
                     Ok(executed) => {
                         succeeded += 1;
                         let audit_result = json!({
@@ -1885,4 +2102,169 @@ pub async fn execute_action_batch(
         results,
     })
     .into_response()
+}
+
+pub async fn create_action_what_if_branch(
+    AuthUser(claims): AuthUser,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<CreateActionWhatIfBranchRequest>,
+) -> impl IntoResponse {
+    let Some(row) = (match load_action_row(&state, id).await {
+        Ok(row) => row,
+        Err(error) => return db_error(format!("failed to load action type: {error}")),
+    }) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let action = match ActionType::try_from(row) {
+        Ok(action_type) => action_type,
+        Err(error) => return db_error(format!("failed to decode action type: {error}")),
+    };
+
+    if let Err(error) = ensure_action_actor_permission(&claims, &action) {
+        return forbidden(error);
+    }
+
+    let validation_request = ValidateActionRequest {
+        target_object_id: body.target_object_id,
+        parameters: body.parameters.clone(),
+    };
+    let plan = match plan_action(&state, &claims, &action, &validation_request).await {
+        Ok(plan) => plan,
+        Err(errors) => {
+            let payload = Json(json!({ "error": "action validation failed", "details": errors }));
+            return if all_forbidden(&errors) {
+                (StatusCode::FORBIDDEN, payload).into_response()
+            } else {
+                (StatusCode::BAD_REQUEST, payload).into_response()
+            };
+        }
+    };
+
+    let preview = plan_preview(&plan);
+    let target_snapshot = target_snapshot_from_plan(&plan);
+    let before_object = target_snapshot.clone().map(|target| json!(target));
+    let after_object = match target_snapshot.as_ref() {
+        Some(target) => match simulate_target_after_preview(&state, target, &preview).await {
+            Ok(after) => after,
+            Err(error) => return invalid_action(error),
+        },
+        None => None,
+    };
+    let deleted = after_object.is_none() && target_snapshot.is_some();
+    let branch_name = body.name.unwrap_or_else(|| {
+        format!(
+            "{} what-if {}",
+            action.display_name,
+            chrono::Utc::now().format("%Y-%m-%d %H:%M:%S")
+        )
+    });
+
+    match sqlx::query_as::<_, ActionWhatIfBranch>(
+        r#"INSERT INTO action_what_if_branches (
+               id, action_id, target_object_id, name, description, parameters, preview,
+               before_object, after_object, deleted, owner_id
+           )
+           VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11)
+           RETURNING id, action_id, target_object_id, name, description, parameters, preview,
+                     before_object, after_object, deleted, owner_id, created_at, updated_at"#,
+    )
+    .bind(Uuid::now_v7())
+    .bind(action.id)
+    .bind(body.target_object_id)
+    .bind(branch_name)
+    .bind(body.description.unwrap_or_default())
+    .bind(body.parameters)
+    .bind(preview)
+    .bind(before_object)
+    .bind(after_object)
+    .bind(deleted)
+    .bind(claims.sub)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(branch) => (StatusCode::CREATED, Json(json!(branch))).into_response(),
+        Err(error) => db_error(format!("failed to create action what-if branch: {error}")),
+    }
+}
+
+pub async fn list_action_what_if_branches(
+    AuthUser(claims): AuthUser,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Query(params): Query<ListActionWhatIfBranchesQuery>,
+) -> impl IntoResponse {
+    let page = params.page.unwrap_or(1).max(1);
+    let per_page = params.per_page.unwrap_or(20).clamp(1, 100);
+    let offset = (page - 1) * per_page;
+    let show_all = claims.has_role("admin");
+
+    let total = sqlx::query_scalar::<_, i64>(
+        r#"SELECT COUNT(*)
+           FROM action_what_if_branches
+           WHERE action_id = $1
+             AND ($2::uuid IS NULL OR target_object_id = $2)
+             AND ($3 OR owner_id = $4)"#,
+    )
+    .bind(id)
+    .bind(params.target_object_id)
+    .bind(show_all)
+    .bind(claims.sub)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
+
+    let data = sqlx::query_as::<_, ActionWhatIfBranch>(
+        r#"SELECT id, action_id, target_object_id, name, description, parameters, preview,
+                  before_object, after_object, deleted, owner_id, created_at, updated_at
+           FROM action_what_if_branches
+           WHERE action_id = $1
+             AND ($2::uuid IS NULL OR target_object_id = $2)
+             AND ($3 OR owner_id = $4)
+           ORDER BY created_at DESC
+           LIMIT $5 OFFSET $6"#,
+    )
+    .bind(id)
+    .bind(params.target_object_id)
+    .bind(show_all)
+    .bind(claims.sub)
+    .bind(per_page)
+    .bind(offset)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    Json(ListActionWhatIfBranchesResponse {
+        data,
+        total,
+        page,
+        per_page,
+    })
+    .into_response()
+}
+
+pub async fn delete_action_what_if_branch(
+    AuthUser(claims): AuthUser,
+    State(state): State<AppState>,
+    Path((id, branch_id)): Path<(Uuid, Uuid)>,
+) -> impl IntoResponse {
+    let result = sqlx::query(
+        r#"DELETE FROM action_what_if_branches
+           WHERE id = $1
+             AND action_id = $2
+             AND ($3 OR owner_id = $4)"#,
+    )
+    .bind(branch_id)
+    .bind(id)
+    .bind(claims.has_role("admin"))
+    .bind(claims.sub)
+    .execute(&state.db)
+    .await;
+
+    match result {
+        Ok(result) if result.rows_affected() > 0 => StatusCode::NO_CONTENT.into_response(),
+        Ok(_) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => db_error(format!("failed to delete what-if branch: {error}")),
+    }
 }

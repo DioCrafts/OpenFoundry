@@ -46,6 +46,28 @@ export interface StreamDefinition {
 	updated_at: string;
 }
 
+export interface PushStreamEventsResponse {
+	stream_id: string;
+	accepted_events: number;
+	dead_lettered_events: number;
+	first_sequence_no: number | null;
+	last_sequence_no: number | null;
+}
+
+export interface StreamingDeadLetter {
+	id: string;
+	stream_id: string;
+	payload: Record<string, unknown>;
+	event_time: string;
+	reason: string;
+	validation_errors: string[];
+	status: string;
+	replay_count: number;
+	last_replayed_at: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
 export interface WindowDefinition {
 	id: string;
 	name: string;
@@ -200,12 +222,29 @@ export interface TopologyRun {
 	updated_at: string;
 }
 
+export interface TopologyRuntimePreview {
+	metrics: TopologyRunMetrics;
+	aggregate_windows: WindowAggregate[];
+	backpressure_snapshot: BackpressureSnapshot;
+	state_snapshot: StateStoreSnapshot;
+	backlog_events: number;
+	generated_at: string;
+}
+
 export interface TopologyRuntimeSnapshot {
 	topology: TopologyDefinition;
 	latest_run: TopologyRun | null;
+	preview: TopologyRuntimePreview | null;
 	connector_statuses: ConnectorCatalogEntry[];
 	latest_events: LiveTailEvent[];
 	latest_matches: CepMatch[];
+}
+
+export interface ReplayTopologyResponse {
+	topology_id: string;
+	stream_ids: string[];
+	replay_from_sequence_no: number | null;
+	restored_event_count: number;
 }
 
 export interface LiveTailResponse {
@@ -241,6 +280,29 @@ export function updateStream(id: string, body: {
 	retention_hours?: number;
 }) {
 	return api.patch<StreamDefinition>(`/streaming/streams/${id}`, body);
+}
+
+export function pushStreamEvents(id: string, body: {
+	events: Array<{
+		payload: Record<string, unknown>;
+		event_time?: string;
+	}>;
+}) {
+	return api.post<PushStreamEventsResponse>(`/streaming/streams/${id}/events`, body);
+}
+
+export function listDeadLetters(streamId: string) {
+	return api.get<ListResponse<StreamingDeadLetter>>(`/streaming/streams/${streamId}/dead-letters`);
+}
+
+export function replayDeadLetter(id: string, body?: {
+	payload?: Record<string, unknown>;
+	event_time?: string;
+}) {
+	return api.post<{
+		dead_letter: StreamingDeadLetter;
+		replay_sequence_no: number;
+	}>(`/streaming/dead-letters/${id}/replay`, body ?? {});
 }
 
 export function listWindows() {
@@ -315,6 +377,13 @@ export function updateTopology(id: string, body: {
 
 export function runTopology(id: string) {
 	return api.post<TopologyRun>(`/streaming/topologies/${id}/run`, {});
+}
+
+export function replayTopology(id: string, body?: {
+	stream_ids?: string[];
+	from_sequence_no?: number;
+}) {
+	return api.post<ReplayTopologyResponse>(`/streaming/topologies/${id}/replay`, body ?? {});
 }
 
 export function getRuntime(id: string) {

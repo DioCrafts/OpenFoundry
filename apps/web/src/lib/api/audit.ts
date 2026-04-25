@@ -138,7 +138,45 @@ export interface GovernanceTemplate {
 	name: string;
 	summary: string;
 	standards: string[];
+	default_report_standard: ComplianceStandard;
+	checkpoint_prompts: string[];
+	sds_remediations: string[];
 	policies: GovernanceTemplatePolicy[];
+}
+
+export interface GovernanceTemplateApplication {
+	id: string;
+	template_slug: string;
+	template_name: string;
+	scope: string;
+	standards: string[];
+	policy_names: string[];
+	checkpoint_prompts: string[];
+	sds_remediations: string[];
+	default_report_standard: ComplianceStandard;
+	applied_by: string;
+	applied_at: string;
+	updated_at: string;
+}
+
+export interface CompliancePostureStandard {
+	standard: ComplianceStandard;
+	template_available: boolean;
+	applied_scope_count: number;
+	active_policy_count: number;
+	latest_report_status: string | null;
+	latest_report_generated_at: string | null;
+	coverage_score: number;
+	checkpoint_prompt_count: number;
+	sds_remediation_count: number;
+	evidence_summary: string;
+}
+
+export interface CompliancePostureOverview {
+	standards: CompliancePostureStandard[];
+	supported_capabilities: string[];
+	active_template_application_count: number;
+	active_legal_hold_policy_count: number;
 }
 
 export interface SensitiveDataFinding {
@@ -271,6 +309,14 @@ export function applyGovernanceTemplate(
 	},
 ) {
 	return api.post<ListResponse<AuditPolicy>>(`/audit/governance/templates/${slug}/apply`, body);
+}
+
+export function listGovernanceApplications() {
+	return api.get<ListResponse<GovernanceTemplateApplication>>('/audit/governance/applications');
+}
+
+export function getCompliancePosture() {
+	return api.get<CompliancePostureOverview>('/audit/compliance/posture');
 }
 
 export function listReports() {

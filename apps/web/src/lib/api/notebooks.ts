@@ -1,5 +1,7 @@
 import api from './client';
 
+export type NotebookKernel = 'python' | 'sql' | 'llm' | 'r';
+
 export interface Notebook {
   id: string;
   name: string;
@@ -39,9 +41,17 @@ export interface Session {
   last_activity: string;
 }
 
+export interface NotebookWorkspaceFile {
+  path: string;
+  language: string;
+  content: string;
+  size_bytes: number;
+  updated_at: string;
+}
+
 // ── Notebooks ──
 
-export function createNotebook(data: { name: string; description?: string; default_kernel?: string }) {
+export function createNotebook(data: { name: string; description?: string; default_kernel?: NotebookKernel }) {
   return api.post<Notebook>('/notebooks', data);
 }
 
@@ -61,7 +71,7 @@ export function getNotebook(id: string) {
   return api.get<{ notebook: Notebook; cells: Cell[] }>(`/notebooks/${id}`);
 }
 
-export function updateNotebook(id: string, data: { name?: string; description?: string; default_kernel?: string }) {
+export function updateNotebook(id: string, data: { name?: string; description?: string; default_kernel?: NotebookKernel }) {
   return api.put<Notebook>(`/notebooks/${id}`, data);
 }
 
@@ -71,11 +81,11 @@ export function deleteNotebook(id: string) {
 
 // ── Cells ──
 
-export function addCell(notebookId: string, data: { cell_type?: string; kernel?: string; source?: string; position?: number }) {
+export function addCell(notebookId: string, data: { cell_type?: string; kernel?: NotebookKernel; source?: string; position?: number }) {
   return api.post<Cell>(`/notebooks/${notebookId}/cells`, data);
 }
 
-export function updateCell(notebookId: string, cellId: string, data: { source?: string; cell_type?: string; kernel?: string; position?: number }) {
+export function updateCell(notebookId: string, cellId: string, data: { source?: string; cell_type?: string; kernel?: NotebookKernel; position?: number }) {
   return api.put<Cell>(`/notebooks/${notebookId}/cells/${cellId}`, data);
 }
 
@@ -99,7 +109,7 @@ export function executeAllCells(notebookId: string, sessionId?: string) {
 
 // ── Sessions ──
 
-export function createSession(notebookId: string, kernel?: string) {
+export function createSession(notebookId: string, kernel?: NotebookKernel) {
   return api.post<Session>(`/notebooks/${notebookId}/sessions`, { kernel });
 }
 
@@ -109,4 +119,16 @@ export function listSessions(notebookId: string) {
 
 export function stopSession(notebookId: string, sessionId: string) {
   return api.delete<Session>(`/notebooks/${notebookId}/sessions/${sessionId}`);
+}
+
+export function listWorkspaceFiles(notebookId: string) {
+  return api.get<{ data: NotebookWorkspaceFile[] }>(`/notebooks/${notebookId}/workspace/files`);
+}
+
+export function upsertWorkspaceFile(notebookId: string, body: { path: string; content: string }) {
+  return api.put<NotebookWorkspaceFile>(`/notebooks/${notebookId}/workspace/files`, body);
+}
+
+export function deleteWorkspaceFile(notebookId: string, path: string) {
+  return api.delete(`/notebooks/${notebookId}/workspace/files?path=${encodeURIComponent(path)}`);
 }

@@ -2,10 +2,7 @@ use auth_middleware::Claims;
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::models::{
-    audit_event::AuditEvent,
-    data_classification::ClassificationLevel,
-};
+use crate::models::{audit_event::AuditEvent, data_classification::ClassificationLevel};
 
 pub fn filter_events_for_claims(events: Vec<AuditEvent>, claims: &Claims) -> Vec<AuditEvent> {
     events
@@ -81,6 +78,8 @@ mod tests {
             sub: Uuid::nil(),
             iat: 0,
             exp: i64::MAX,
+            iss: None,
+            aud: None,
             jti: Uuid::nil(),
             email: "user@example.com".to_string(),
             name: "User".to_string(),
@@ -124,7 +123,10 @@ mod tests {
 
     #[test]
     fn classification_clearance_filters_events() {
-        assert!(can_access_event(&event(ClassificationLevel::Public), &claims("public")));
+        assert!(can_access_event(
+            &event(ClassificationLevel::Public),
+            &claims("public")
+        ));
         assert!(!can_access_event(
             &event(ClassificationLevel::Pii),
             &claims("confidential")

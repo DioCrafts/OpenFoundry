@@ -16,6 +16,7 @@ pub struct AppState {
     pub db: sqlx::PgPool,
     pub jwt_config: JwtConfig,
     pub notification_service_url: String,
+    pub ontology_service_url: String,
     pub pipeline_service_url: String,
     pub http_client: reqwest::Client,
 }
@@ -45,7 +46,7 @@ async fn main() {
         .await
         .expect("failed to run migrations");
 
-    let jwt_config = JwtConfig::new(&cfg.jwt_secret);
+    let jwt_config = JwtConfig::new(&cfg.jwt_secret).with_env_defaults();
     let http_client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
@@ -55,6 +56,7 @@ async fn main() {
         db: pool,
         jwt_config: jwt_config.clone(),
         notification_service_url: cfg.notification_service_url.clone(),
+        ontology_service_url: cfg.ontology_service_url.clone(),
         pipeline_service_url: cfg.pipeline_service_url.clone(),
         http_client,
     };

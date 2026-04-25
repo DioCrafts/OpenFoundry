@@ -12,13 +12,20 @@ use uuid::Uuid;
 use crate::{
     AppState,
     models::{
+        asset_lineage::{
+            ExperimentAssetLineageResponse, ModelAssetEdge, ModelAssetLineageSummary,
+            ModelAssetNode,
+        },
         experiment::{
             CreateExperimentRequest, Experiment, ListExperimentsResponse, UpdateExperimentRequest,
         },
+        model::RegisteredModel,
+        model_version::ModelVersion,
         run::{
             CompareRunsRequest, CompareRunsResponse, CreateExperimentRunRequest, ExperimentRun,
             ListRunsResponse, MetricValue, UpdateExperimentRunRequest,
         },
+        training_job::TrainingJob,
     },
 };
 
@@ -33,6 +40,7 @@ struct ExperimentRow {
     name: String,
     description: String,
     objective: String,
+    objective_spec: Value,
     task_type: String,
     primary_metric: String,
     status: String,
@@ -67,12 +75,79 @@ struct RunMetricsRow {
     metrics: Value,
 }
 
+#[derive(Debug, FromRow)]
+struct ModelRow {
+    id: Uuid,
+    name: String,
+    description: String,
+    problem_type: String,
+    status: String,
+    tags: Value,
+    owner_id: Option<Uuid>,
+    current_stage: String,
+    latest_version_number: Option<i32>,
+    active_deployment_id: Option<Uuid>,
+    created_at: chrono::DateTime<Utc>,
+    updated_at: chrono::DateTime<Utc>,
+}
+
+#[derive(Debug, FromRow)]
+struct ModelVersionRow {
+    id: Uuid,
+    model_id: Uuid,
+    version_number: i32,
+    version_label: String,
+    stage: String,
+    source_run_id: Option<Uuid>,
+    training_job_id: Option<Uuid>,
+    hyperparameters: Value,
+    metrics: Value,
+    artifact_uri: Option<String>,
+    schema: Value,
+    created_at: chrono::DateTime<Utc>,
+    promoted_at: Option<chrono::DateTime<Utc>>,
+}
+
+#[derive(Debug, FromRow)]
+struct TrainingJobRow {
+    id: Uuid,
+    experiment_id: Option<Uuid>,
+    model_id: Option<Uuid>,
+    name: String,
+    status: String,
+    dataset_ids: Value,
+    training_config: Value,
+    hyperparameter_search: Value,
+    objective_metric_name: String,
+    trials: Value,
+    best_model_version_id: Option<Uuid>,
+    submitted_at: chrono::DateTime<Utc>,
+    started_at: Option<chrono::DateTime<Utc>>,
+    completed_at: Option<chrono::DateTime<Utc>>,
+    created_at: chrono::DateTime<Utc>,
+}
+
+#[derive(Debug, FromRow)]
+struct DeploymentRow {
+    id: Uuid,
+    model_id: Uuid,
+    name: String,
+    status: String,
+    strategy_type: String,
+    endpoint_path: String,
+    traffic_split: Value,
+    monitoring_window: String,
+    baseline_dataset_id: Option<Uuid>,
+    drift_report: Option<Value>,
+}
+
 fn to_experiment(row: ExperimentRow) -> Experiment {
     Experiment {
         id: row.id,
         name: row.name,
         description: row.description,
         objective: row.objective,
+        objective_spec: deserialize_json(row.objective_spec),
         task_type: row.task_type,
         primary_metric: row.primary_metric,
         status: row.status,
@@ -101,6 +176,61 @@ fn to_run(row: RunRow) -> ExperimentRun {
         finished_at: row.finished_at,
         created_at: row.created_at,
         updated_at: row.updated_at,
+    }
+}
+
+fn to_model(row: ModelRow) -> RegisteredModel {
+    RegisteredModel {
+        id: row.id,
+        name: row.name,
+        description: row.description,
+        problem_type: row.problem_type,
+        status: row.status,
+        tags: deserialize_json(row.tags),
+        owner_id: row.owner_id,
+        current_stage: row.current_stage,
+        latest_version_number: row.latest_version_number,
+        active_deployment_id: row.active_deployment_id,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    }
+}
+
+fn to_model_version(row: ModelVersionRow) -> ModelVersion {
+    ModelVersion {
+        id: row.id,
+        model_id: row.model_id,
+        version_number: row.version_number,
+        version_label: row.version_label,
+        stage: row.stage,
+        source_run_id: row.source_run_id,
+        training_job_id: row.training_job_id,
+        hyperparameters: row.hyperparameters,
+        metrics: deserialize_json(row.metrics),
+        artifact_uri: row.artifact_uri,
+        schema: row.schema,
+        created_at: row.created_at,
+        promoted_at: row.promoted_at,
+    }
+}
+
+fn to_training_job(row: TrainingJobRow) -> TrainingJob {
+    TrainingJob {
+        id: row.id,
+        experiment_id: row.experiment_id,
+        model_id: row.model_id,
+        name: row.name,
+        status: row.status,
+        dataset_ids: deserialize_json(row.dataset_ids),
+        training_config: row.training_config,
+        hyperparameter_search: row.hyperparameter_search,
+        objective_metric_name: row.objective_metric_name,
+        trials: deserialize_json(row.trials),
+        best_model_version_id: row.best_model_version_id,
+        submitted_at: row.submitted_at,
+        started_at: row.started_at,
+        completed_at: row.completed_at,
+        created_at: row.created_at,
     }
 }
 
@@ -191,6 +321,7 @@ pub async fn list_experiments(
 			name,
 			description,
 			objective,
+			objective_spec,
 			task_type,
 			primary_metric,
 			status,
@@ -228,6 +359,7 @@ pub async fn create_experiment(
 			name,
 			description,
 			objective,
+			objective_spec,
 			task_type,
 			primary_metric,
 			status,
@@ -235,12 +367,13 @@ pub async fn create_experiment(
 			run_count,
 			best_metric
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, 0, NULL)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8, 0, NULL)
 		RETURNING
 			id,
 			name,
 			description,
 			objective,
+			objective_spec,
 			task_type,
 			primary_metric,
 			status,
@@ -256,6 +389,7 @@ pub async fn create_experiment(
     .bind(body.name.trim())
     .bind(body.description)
     .bind(body.objective)
+    .bind(to_json(&body.objective_spec))
     .bind(body.task_type)
     .bind(body.primary_metric)
     .bind(to_json(&body.tags))
@@ -278,6 +412,7 @@ pub async fn update_experiment(
 			name,
 			description,
 			objective,
+			objective_spec,
 			task_type,
 			primary_metric,
 			status,
@@ -302,6 +437,9 @@ pub async fn update_experiment(
     let tags = body
         .tags
         .unwrap_or_else(|| deserialize_json(current.tags.clone()));
+    let objective_spec = body
+        .objective_spec
+        .unwrap_or_else(|| deserialize_json(current.objective_spec.clone()));
 
     let row = query_as::<_, ExperimentRow>(
         r#"
@@ -310,10 +448,11 @@ pub async fn update_experiment(
 			name = $2,
 			description = $3,
 			objective = $4,
-			task_type = $5,
-			primary_metric = $6,
-			status = $7,
-			tags = $8,
+			objective_spec = $5,
+			task_type = $6,
+			primary_metric = $7,
+			status = $8,
+			tags = $9,
 			updated_at = NOW()
 		WHERE id = $1
 		RETURNING
@@ -321,6 +460,7 @@ pub async fn update_experiment(
 			name,
 			description,
 			objective,
+			objective_spec,
 			task_type,
 			primary_metric,
 			status,
@@ -336,6 +476,7 @@ pub async fn update_experiment(
     .bind(body.name.unwrap_or(current.name))
     .bind(body.description.unwrap_or(current.description))
     .bind(body.objective.unwrap_or(current.objective))
+    .bind(to_json(&objective_spec))
     .bind(body.task_type.unwrap_or(current.task_type))
     .bind(body.primary_metric.unwrap_or(current.primary_metric))
     .bind(body.status.unwrap_or(current.status))
@@ -349,6 +490,454 @@ pub async fn update_experiment(
         .map_err(|cause| db_error(&cause))?;
 
     Ok(Json(to_experiment(row)))
+}
+
+fn asset_node_id(kind: &str, id: impl std::fmt::Display) -> String {
+    format!("{kind}:{id}")
+}
+
+pub async fn get_experiment_asset_lineage(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> ServiceResult<ExperimentAssetLineageResponse> {
+    let Some(experiment_row) = query_as::<_, ExperimentRow>(
+        r#"
+		SELECT
+			id,
+			name,
+			description,
+			objective,
+			objective_spec,
+			task_type,
+			primary_metric,
+			status,
+			tags,
+			owner_id,
+			run_count,
+			best_metric,
+			created_at,
+			updated_at
+		FROM ml_experiments
+		WHERE id = $1
+		"#,
+    )
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|cause| db_error(&cause))?
+    else {
+        return Err(not_found("experiment not found"));
+    };
+    let experiment = to_experiment(experiment_row);
+
+    let runs = query_as::<_, RunRow>(
+        r#"
+		SELECT
+			id,
+			experiment_id,
+			name,
+			status,
+			params,
+			metrics,
+			artifacts,
+			notes,
+			source_dataset_ids,
+			model_version_id,
+			started_at,
+			finished_at,
+			created_at,
+			updated_at
+		FROM ml_runs
+		WHERE experiment_id = $1
+		ORDER BY created_at DESC
+		"#,
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|cause| db_error(&cause))?
+    .into_iter()
+    .map(to_run)
+    .collect::<Vec<_>>();
+
+    let training_jobs = query_as::<_, TrainingJobRow>(
+        r#"
+		SELECT
+			id,
+			experiment_id,
+			model_id,
+			name,
+			status,
+			dataset_ids,
+			training_config,
+			hyperparameter_search,
+			objective_metric_name,
+			trials,
+			best_model_version_id,
+			submitted_at,
+			started_at,
+			completed_at,
+			created_at
+		FROM ml_training_jobs
+		WHERE experiment_id = $1
+		ORDER BY submitted_at DESC, created_at DESC
+		"#,
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|cause| db_error(&cause))?
+    .into_iter()
+    .map(to_training_job)
+    .collect::<Vec<_>>();
+
+    let mut dataset_ids = BTreeSet::new();
+    let mut model_ids = experiment
+        .objective_spec
+        .linked_model_ids
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let mut version_ids = BTreeSet::new();
+    let mut frameworks = BTreeSet::new();
+
+    for dataset_id in &experiment.objective_spec.linked_dataset_ids {
+        dataset_ids.insert(*dataset_id);
+    }
+    for run in &runs {
+        for dataset_id in &run.source_dataset_ids {
+            dataset_ids.insert(*dataset_id);
+        }
+        if let Some(model_version_id) = run.model_version_id {
+            version_ids.insert(model_version_id);
+        }
+    }
+    for job in &training_jobs {
+        for dataset_id in &job.dataset_ids {
+            dataset_ids.insert(*dataset_id);
+        }
+        if let Some(model_id) = job.model_id {
+            model_ids.insert(model_id);
+        }
+        if let Some(best_model_version_id) = job.best_model_version_id {
+            version_ids.insert(best_model_version_id);
+        }
+        if let Some(engine) = job.training_config.get("engine").and_then(Value::as_str) {
+            frameworks.insert(engine.to_string());
+        }
+    }
+
+    let mut model_versions = Vec::<ModelVersion>::new();
+    if !version_ids.is_empty() {
+        model_versions = query_as::<_, ModelVersionRow>(
+            r#"
+			SELECT
+				id,
+				model_id,
+				version_number,
+				version_label,
+				stage,
+				source_run_id,
+				training_job_id,
+				hyperparameters,
+				metrics,
+				artifact_uri,
+				schema,
+				created_at,
+				promoted_at
+			FROM ml_model_versions
+			WHERE id = ANY($1)
+			ORDER BY version_number DESC, created_at DESC
+			"#,
+        )
+        .bind(version_ids.iter().copied().collect::<Vec<_>>())
+        .fetch_all(&state.db)
+        .await
+        .map_err(|cause| db_error(&cause))?
+        .into_iter()
+        .map(to_model_version)
+        .collect::<Vec<_>>();
+    }
+
+    for version in &model_versions {
+        model_ids.insert(version.model_id);
+        if let Some(engine) = version.schema.get("engine").and_then(Value::as_str) {
+            frameworks.insert(engine.to_string());
+        }
+        if let Some(framework) = version
+            .schema
+            .get("model_adapter")
+            .and_then(|value| value.get("framework"))
+            .and_then(Value::as_str)
+        {
+            frameworks.insert(framework.to_string());
+        }
+    }
+
+    let models = if model_ids.is_empty() {
+        Vec::new()
+    } else {
+        query_as::<_, ModelRow>(
+            r#"
+			SELECT
+				id,
+				name,
+				description,
+				problem_type,
+				status,
+				tags,
+				owner_id,
+				current_stage,
+				latest_version_number,
+				active_deployment_id,
+				created_at,
+				updated_at
+			FROM ml_models
+			WHERE id = ANY($1)
+			ORDER BY updated_at DESC, created_at DESC
+			"#,
+        )
+        .bind(model_ids.iter().copied().collect::<Vec<_>>())
+        .fetch_all(&state.db)
+        .await
+        .map_err(|cause| db_error(&cause))?
+        .into_iter()
+        .map(to_model)
+        .collect::<Vec<_>>()
+    };
+
+    let deployments = if model_ids.is_empty() {
+        Vec::new()
+    } else {
+        query_as::<_, DeploymentRow>(
+            r#"
+			SELECT
+				id,
+				model_id,
+				name,
+				status,
+				strategy_type,
+				endpoint_path,
+				traffic_split,
+				monitoring_window,
+				baseline_dataset_id,
+				drift_report
+			FROM ml_deployments
+			WHERE model_id = ANY($1)
+			ORDER BY updated_at DESC, created_at DESC
+			"#,
+        )
+        .bind(model_ids.iter().copied().collect::<Vec<_>>())
+        .fetch_all(&state.db)
+        .await
+        .map_err(|cause| db_error(&cause))?
+    };
+
+    let mut nodes = Vec::<ModelAssetNode>::new();
+    let mut edges = Vec::<ModelAssetEdge>::new();
+
+    let experiment_node_id = asset_node_id("experiment", experiment.id);
+    nodes.push(ModelAssetNode {
+        id: experiment_node_id.clone(),
+        kind: "experiment".to_string(),
+        label: experiment.name.clone(),
+        status: experiment.objective_spec.status.clone(),
+        metadata: json!({
+            "objective": experiment.objective,
+            "primary_metric": experiment.primary_metric,
+            "deployment_target": experiment.objective_spec.deployment_target,
+            "stakeholders": experiment.objective_spec.stakeholders,
+            "success_criteria": experiment.objective_spec.success_criteria,
+            "documentation_uri": experiment.objective_spec.documentation_uri,
+            "collaboration_notes": experiment.objective_spec.collaboration_notes,
+        }),
+    });
+
+    for dataset_id in &dataset_ids {
+        let node_id = asset_node_id("dataset", dataset_id);
+        nodes.push(ModelAssetNode {
+            id: node_id.clone(),
+            kind: "dataset".to_string(),
+            label: dataset_id.to_string(),
+            status: "referenced".to_string(),
+            metadata: json!({}),
+        });
+    }
+
+    for dataset_id in &experiment.objective_spec.linked_dataset_ids {
+        edges.push(ModelAssetEdge {
+            source: experiment_node_id.clone(),
+            target: asset_node_id("dataset", dataset_id),
+            relation: "targets_dataset".to_string(),
+        });
+    }
+
+    for run in &runs {
+        let node_id = asset_node_id("run", run.id);
+        nodes.push(ModelAssetNode {
+            id: node_id.clone(),
+            kind: "run".to_string(),
+            label: run.name.clone(),
+            status: run.status.clone(),
+            metadata: json!({
+                "metrics": run.metrics,
+                "params": run.params,
+                "artifacts": run.artifacts,
+                "notes": run.notes,
+                "source_dataset_ids": run.source_dataset_ids,
+            }),
+        });
+        edges.push(ModelAssetEdge {
+            source: experiment_node_id.clone(),
+            target: node_id.clone(),
+            relation: "tracks_run".to_string(),
+        });
+        for dataset_id in &run.source_dataset_ids {
+            edges.push(ModelAssetEdge {
+                source: node_id.clone(),
+                target: asset_node_id("dataset", dataset_id),
+                relation: "consumes_dataset".to_string(),
+            });
+        }
+        if let Some(model_version_id) = run.model_version_id {
+            edges.push(ModelAssetEdge {
+                source: node_id,
+                target: asset_node_id("version", model_version_id),
+                relation: "logged_model_version".to_string(),
+            });
+        }
+    }
+
+    for job in &training_jobs {
+        let node_id = asset_node_id("training_job", job.id);
+        nodes.push(ModelAssetNode {
+            id: node_id.clone(),
+            kind: "training_job".to_string(),
+            label: job.name.clone(),
+            status: job.status.clone(),
+            metadata: json!({
+                "objective_metric_name": job.objective_metric_name,
+                "training_config": job.training_config,
+                "hyperparameter_search": job.hyperparameter_search,
+                "dataset_ids": job.dataset_ids,
+                "trial_count": job.trials.len(),
+            }),
+        });
+        edges.push(ModelAssetEdge {
+            source: experiment_node_id.clone(),
+            target: node_id.clone(),
+            relation: "orchestrates_training".to_string(),
+        });
+        for dataset_id in &job.dataset_ids {
+            edges.push(ModelAssetEdge {
+                source: node_id.clone(),
+                target: asset_node_id("dataset", dataset_id),
+                relation: "trains_on".to_string(),
+            });
+        }
+        if let Some(model_id) = job.model_id {
+            edges.push(ModelAssetEdge {
+                source: node_id.clone(),
+                target: asset_node_id("model", model_id),
+                relation: "produces_for_model".to_string(),
+            });
+        }
+        if let Some(best_model_version_id) = job.best_model_version_id {
+            edges.push(ModelAssetEdge {
+                source: node_id,
+                target: asset_node_id("version", best_model_version_id),
+                relation: "best_candidate".to_string(),
+            });
+        }
+    }
+
+    for model_id in &experiment.objective_spec.linked_model_ids {
+        edges.push(ModelAssetEdge {
+            source: experiment_node_id.clone(),
+            target: asset_node_id("model", model_id),
+            relation: "targets_model".to_string(),
+        });
+    }
+
+    for model in &models {
+        nodes.push(ModelAssetNode {
+            id: asset_node_id("model", model.id),
+            kind: "model".to_string(),
+            label: model.name.clone(),
+            status: model.current_stage.clone(),
+            metadata: json!({
+                "problem_type": model.problem_type,
+                "tags": model.tags,
+                "latest_version_number": model.latest_version_number,
+            }),
+        });
+    }
+
+    for version in &model_versions {
+        nodes.push(ModelAssetNode {
+            id: asset_node_id("version", version.id),
+            kind: "model_version".to_string(),
+            label: version.version_label.clone(),
+            status: version.stage.clone(),
+            metadata: json!({
+                "version_number": version.version_number,
+                "artifact_uri": version.artifact_uri,
+                "metrics": version.metrics,
+                "hyperparameters": version.hyperparameters,
+                "schema": version.schema,
+            }),
+        });
+        edges.push(ModelAssetEdge {
+            source: asset_node_id("version", version.id),
+            target: asset_node_id("model", version.model_id),
+            relation: "belongs_to_model".to_string(),
+        });
+    }
+
+    for deployment in &deployments {
+        nodes.push(ModelAssetNode {
+            id: asset_node_id("deployment", deployment.id),
+            kind: "deployment".to_string(),
+            label: deployment.name.clone(),
+            status: deployment.status.clone(),
+            metadata: json!({
+                "strategy_type": deployment.strategy_type,
+                "endpoint_path": deployment.endpoint_path,
+                "monitoring_window": deployment.monitoring_window,
+                "traffic_split": deployment.traffic_split,
+                "baseline_dataset_id": deployment.baseline_dataset_id,
+                "drift_report": deployment.drift_report,
+            }),
+        });
+        edges.push(ModelAssetEdge {
+            source: asset_node_id("deployment", deployment.id),
+            target: asset_node_id("model", deployment.model_id),
+            relation: "serves_model".to_string(),
+        });
+        if let Some(baseline_dataset_id) = deployment.baseline_dataset_id {
+            edges.push(ModelAssetEdge {
+                source: asset_node_id("deployment", deployment.id),
+                target: asset_node_id("dataset", baseline_dataset_id),
+                relation: "monitors_against_dataset".to_string(),
+            });
+        }
+    }
+
+    Ok(Json(ExperimentAssetLineageResponse {
+        experiment_id: experiment.id,
+        objective_status: experiment.objective_spec.status.clone(),
+        nodes,
+        edges,
+        summary: ModelAssetLineageSummary {
+            dataset_count: dataset_ids.len(),
+            run_count: runs.len(),
+            training_job_count: training_jobs.len(),
+            model_count: models.len(),
+            version_count: model_versions.len(),
+            deployment_count: deployments.len(),
+            frameworks: frameworks.into_iter().collect(),
+        },
+    }))
 }
 
 pub async fn list_runs(

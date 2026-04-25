@@ -4,6 +4,7 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
+use serde_json::json;
 use uuid::Uuid;
 
 use crate::{
@@ -98,7 +99,20 @@ pub async fn decide_approval(
             .into_response();
     }
 
-    let updated_approval = sqlx::query_as::<_, WorkflowApproval>(
+    let normalized_decision = if body.decision.eq_ignore_ascii_case("approved") {
+        "approved"
+    } else {
+        "rejected"
+    };
+    let reviewed_payload = executor::upsert_approval_review_payload(
+        &approval.payload,
+        normalized_decision,
+        claims.sub,
+        body.comment.as_deref(),
+        &body.payload,
+    );
+
+    let mut updated_approval = match sqlx::query_as::<_, WorkflowApproval>(
         r#"UPDATE workflow_approvals
 		   SET status = CASE WHEN LOWER($2) = 'approved' THEN 'approved' ELSE 'rejected' END,
 			   decision = $2,
@@ -109,15 +123,17 @@ pub async fn decide_approval(
 		   RETURNING *"#,
     )
     .bind(approval_id)
-    .bind(&body.decision)
-    .bind(&body.payload)
+    .bind(normalized_decision)
+    .bind(&reviewed_payload)
     .bind(claims.sub)
     .fetch_one(&state.db)
-    .await;
-
-    let Ok(updated_approval) = updated_approval else {
-        tracing::error!("approval update failed");
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    .await
+    {
+        Ok(updated_approval) => updated_approval,
+        Err(error) => {
+            tracing::error!("approval update failed: {error}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
     };
 
     let workflow =
@@ -170,11 +186,110 @@ pub async fn decide_approval(
     executor::insert_approval_decision(
         &mut context,
         &updated_approval.step_id,
-        &body.decision,
+        normalized_decision,
         claims.sub,
         &body.payload,
         body.comment.as_deref(),
     );
+
+    if normalized_decision == "approved" && updated_approval.payload.get("proposal").is_some() {
+        match executor::apply_approval_proposal(
+            &state,
+            &mut context,
+            &updated_approval.step_id,
+            &updated_approval.payload,
+            &claims,
+        )
+        .await
+        {
+            Ok(response) => {
+                let execution_payload = if response.is_null() {
+                    executor::annotate_approval_proposal_execution(
+                        &updated_approval.payload,
+                        "approved_pending_manual_apply",
+                        None,
+                        None,
+                    )
+                } else {
+                    executor::annotate_approval_proposal_execution(
+                        &updated_approval.payload,
+                        "applied",
+                        Some(&response),
+                        None,
+                    )
+                };
+
+                match sqlx::query_as::<_, WorkflowApproval>(
+                    r#"UPDATE workflow_approvals
+                       SET payload = $2
+                       WHERE id = $1
+                       RETURNING *"#,
+                )
+                .bind(updated_approval.id)
+                .bind(&execution_payload)
+                .fetch_one(&state.db)
+                .await
+                {
+                    Ok(reloaded_approval) => updated_approval = reloaded_approval,
+                    Err(error) => {
+                        tracing::error!("approval execution payload update failed: {error}");
+                        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                    }
+                }
+            }
+            Err(error) => {
+                let failed_payload = executor::annotate_approval_proposal_execution(
+                    &updated_approval.payload,
+                    "failed",
+                    None,
+                    Some(&error),
+                );
+                let _ = sqlx::query_as::<_, WorkflowApproval>(
+                    r#"UPDATE workflow_approvals
+                       SET payload = $2
+                       WHERE id = $1
+                       RETURNING *"#,
+                )
+                .bind(updated_approval.id)
+                .bind(&failed_payload)
+                .fetch_one(&state.db)
+                .await;
+
+                let _ = executor::fail_run(&state, run.id, &context, error.clone()).await;
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": error })),
+                )
+                    .into_response();
+            }
+        }
+    } else if normalized_decision == "rejected"
+        && updated_approval.payload.get("proposal").is_some()
+    {
+        let rejected_payload = executor::annotate_approval_proposal_execution(
+            &updated_approval.payload,
+            "rejected",
+            None,
+            None,
+        );
+        match sqlx::query_as::<_, WorkflowApproval>(
+            r#"UPDATE workflow_approvals
+               SET payload = $2
+               WHERE id = $1
+               RETURNING *"#,
+        )
+        .bind(updated_approval.id)
+        .bind(&rejected_payload)
+        .fetch_one(&state.db)
+        .await
+        {
+            Ok(reloaded_approval) => updated_approval = reloaded_approval,
+            Err(error) => {
+                tracing::error!("approval rejection payload update failed: {error}");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        }
+    }
 
     let run = match sqlx::query_as::<_, WorkflowRun>(
         r#"UPDATE workflow_runs SET context = $2 WHERE id = $1 RETURNING *"#,
@@ -191,7 +306,8 @@ pub async fn decide_approval(
         }
     };
 
-    match executor::continue_after_approval(&state, &workflow, run, &body.decision, step).await {
+    match executor::continue_after_approval(&state, &workflow, run, normalized_decision, step).await
+    {
         Ok(updated_run) => Json(serde_json::json!({
             "approval": updated_approval,
             "run": updated_run,

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { CiRun, CommitDefinition } from '$lib/api/code-repos';
+	import type { BranchDefinition, CiRun, CommitDefinition } from '$lib/api/code-repos';
 
 	type CommitDraft = {
 		branch_name: string;
@@ -12,6 +12,7 @@
 
 	export let commits: CommitDefinition[] = [];
 	export let ciRuns: CiRun[] = [];
+	export let branches: BranchDefinition[] = [];
 	export let draft: CommitDraft;
 	export let busy = false;
 	export let onDraftChange: (patch: Partial<CommitDraft>) => void;
@@ -67,7 +68,13 @@
 			<div class="grid gap-4 md:grid-cols-2">
 				<label class="block text-sm">
 					<span class="mb-2 block font-medium text-stone-100">Branch</span>
-					<input class="w-full rounded-2xl border border-stone-700 bg-stone-900 px-4 py-3 outline-none transition focus:border-violet-400" value={draft.branch_name} oninput={(event) => onDraftChange({ branch_name: inputValue(event) })} />
+					<select class="w-full rounded-2xl border border-stone-700 bg-stone-900 px-4 py-3 outline-none transition focus:border-violet-400" value={draft.branch_name} onchange={(event) => onDraftChange({ branch_name: inputValue(event) })}>
+						{#each branches as branch}
+							<option value={branch.name}>
+								{branch.name} {branch.protected ? '• protected' : '• writable'}
+							</option>
+						{/each}
+					</select>
 				</label>
 				<label class="block text-sm">
 					<span class="mb-2 block font-medium text-stone-100">Author</span>
@@ -101,7 +108,7 @@
 									<p class="font-medium text-stone-100">{run.pipeline_name}</p>
 									<p class="text-xs text-stone-400">{run.branch_name} • {run.commit_sha} • {run.trigger}</p>
 								</div>
-								<span class="rounded-full bg-emerald-300 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-950">{run.status}</span>
+								<span class={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${run.status === 'passed' ? 'bg-emerald-300 text-emerald-950' : 'bg-rose-300 text-rose-950'}`}>{run.status}</span>
 							</div>
 							<div class="mt-3 flex flex-wrap gap-2">
 								{#each run.checks as check}

@@ -14,8 +14,8 @@ use crate::{
     domain::type_system::{validate_property_type, validate_property_value},
     models::interface::{
         CreateInterfacePropertyRequest, CreateInterfaceRequest, InterfaceProperty,
-        ListInterfacesQuery, ListInterfacesResponse, ObjectTypeInterfaceBinding,
-        OntologyInterface, UpdateInterfacePropertyRequest, UpdateInterfaceRequest,
+        ListInterfacesQuery, ListInterfacesResponse, ObjectTypeInterfaceBinding, OntologyInterface,
+        UpdateInterfacePropertyRequest, UpdateInterfaceRequest,
     },
 };
 
@@ -249,19 +249,20 @@ pub async fn update_interface_property(
     Path((_interface_id, property_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<UpdateInterfacePropertyRequest>,
 ) -> impl IntoResponse {
-    let existing =
-        match sqlx::query_as::<_, InterfaceProperty>("SELECT * FROM interface_properties WHERE id = $1")
-            .bind(property_id)
-            .fetch_optional(&state.db)
-            .await
-        {
-            Ok(Some(property)) => property,
-            Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-            Err(error) => {
-                tracing::error!("update interface property lookup failed: {error}");
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            }
-        };
+    let existing = match sqlx::query_as::<_, InterfaceProperty>(
+        "SELECT * FROM interface_properties WHERE id = $1",
+    )
+    .bind(property_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(property)) => property,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => {
+            tracing::error!("update interface property lookup failed: {error}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
 
     let next_default = body.default_value.or(existing.default_value.clone());
     if let Some(default_value) = &next_default {

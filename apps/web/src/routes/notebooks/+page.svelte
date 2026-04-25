@@ -1,6 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { listNotebooks, createNotebook, deleteNotebook, type Notebook } from '$lib/api/notebooks';
+  import {
+    listNotebooks,
+    createNotebook,
+    deleteNotebook,
+    type Notebook,
+    type NotebookKernel,
+  } from '$lib/api/notebooks';
   import { goto } from '$app/navigation';
 
   let notebooks = $state<Notebook[]>([]);
@@ -11,7 +17,7 @@
   let showCreate = $state(false);
   let newName = $state('');
   let newDescription = $state('');
-  let newKernel = $state('python');
+  let newKernel = $state<NotebookKernel>('python');
 
   async function load() {
     loading = true;
@@ -58,6 +64,8 @@
       <select class="border rounded px-3 py-2" bind:value={newKernel}>
         <option value="python">Python</option>
         <option value="sql">SQL</option>
+        <option value="llm">LLM</option>
+        <option value="r">R</option>
       </select>
       <button class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700" onclick={handleCreate}>
         Create

@@ -12,7 +12,7 @@ use crate::config::GatewayConfig;
 
 /// Reverse-proxy handler: forwards requests to backend services based on URL prefix.
 pub async fn proxy_handler(
-    State((config, client)): State<(GatewayConfig, Client)>,
+    State((config, client, jwt_config)): State<(GatewayConfig, Client, JwtConfig)>,
     mut req: Request,
 ) -> Response {
     let path = req.uri().path();
@@ -21,7 +21,7 @@ pub async fn proxy_handler(
         .get(AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
-        .and_then(|token| jwt::decode_token(&JwtConfig::new(&config.jwt_secret), token).ok());
+        .and_then(|token| jwt::decode_token(&jwt_config, token).ok());
     if let Some(claims) = claims.as_ref() {
         if let Err(response) = enforce_zero_trust_scope(claims, req.method(), path) {
             return response;
@@ -35,6 +35,7 @@ pub async fn proxy_handler(
         || path.starts_with("/api/v1/permissions")
         || path.starts_with("/api/v1/groups")
         || path.starts_with("/api/v1/policies")
+        || path.starts_with("/api/v1/restricted-views")
         || path.starts_with("/api/v1/api-keys")
         || path.starts_with("/api/v1/control-panel")
         || path.starts_with("/api/v2/admin")
@@ -213,7 +214,11 @@ fn apply_auth_context_headers(
         .header("x-openfoundry-auth-methods", claims.auth_methods.join(","))
         .header(
             "x-openfoundry-zero-trust",
-            if claims.session_scope.is_some() { "scoped" } else { "standard" },
+            if claims.session_scope.is_some() {
+                "scoped"
+            } else {
+                "standard"
+            },
         );
 
     if let Some(org_id) = claims.org_id {
@@ -245,6 +250,26 @@ fn apply_auth_context_headers(
                     .collect::<Vec<_>>()
                     .join(","),
             );
+        }
+        if !scope.allowed_markings.is_empty() {
+            request = request.header(
+                "x-openfoundry-allowed-markings",
+                scope.allowed_markings.join(","),
+            );
+        }
+        if !scope.restricted_view_ids.is_empty() {
+            request = request.header(
+                "x-openfoundry-restricted-view-ids",
+                scope
+                    .restricted_view_ids
+                    .iter()
+                    .map(uuid::Uuid::to_string)
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
+        }
+        if scope.consumer_mode {
+            request = request.header("x-openfoundry-consumer-mode", "true");
         }
         if let Some(guest_email) = scope.guest_email.as_deref() {
             request = request
@@ -282,6 +307,8 @@ mod tests {
             sub: Uuid::nil(),
             iat: 0,
             exp: i64::MAX,
+            iss: None,
+            aud: None,
             jti: Uuid::nil(),
             email: "guest@example.com".to_string(),
             name: "Guest".to_string(),
@@ -300,6 +327,9 @@ mod tests {
                 allowed_org_ids: vec![Uuid::nil()],
                 workspace: Some("shared".to_string()),
                 classification_clearance: Some("public".to_string()),
+                allowed_markings: vec!["public".to_string()],
+                restricted_view_ids: vec![Uuid::nil()],
+                consumer_mode: true,
                 guest_email: Some("guest@example.com".to_string()),
                 guest_display_name: Some("Guest".to_string()),
             }),

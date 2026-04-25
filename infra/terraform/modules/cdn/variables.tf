@@ -61,6 +61,30 @@ variable "waf_enabled" {
   default     = true
 }
 
+variable "allowed_countries" {
+  type        = list(string)
+  description = "Optional ISO country allowlist enforced at the edge."
+  default     = []
+}
+
+variable "geo_restriction_mode" {
+  type        = string
+  description = "allow_all, whitelist, or sovereign_only."
+  default     = "allow_all"
+}
+
+variable "origin_residency_region" {
+  type        = string
+  description = "Preferred origin-residency region for regulated traffic."
+  default     = ""
+}
+
+variable "airgapped_origin" {
+  type        = bool
+  description = "Whether the backing origin is served from an air-gapped or private network posture."
+  default     = false
+}
+
 variable "stale_while_revalidate_seconds" {
   type        = number
   description = "Serve stale responses while fetching fresh content from origin."

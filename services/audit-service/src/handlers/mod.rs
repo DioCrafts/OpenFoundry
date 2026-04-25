@@ -6,7 +6,8 @@ use axum::{Json, http::StatusCode};
 use serde::Serialize;
 
 use crate::models::{
-    audit_event::AuditEventRow, compliance_report::ComplianceReportRow, policy::PolicyRow,
+    audit_event::AuditEventRow, compliance_report::ComplianceReportRow,
+    governance_posture::GovernanceTemplateApplicationRow, policy::PolicyRow,
 };
 
 #[derive(Debug, Serialize)]
@@ -140,6 +141,28 @@ pub async fn load_reports(
 
     rows.into_iter()
         .map(crate::models::compliance_report::ComplianceReport::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|cause| {
+            sqlx::Error::Decode(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                cause,
+            )))
+        })
+}
+
+pub async fn load_governance_template_applications(
+    db: &sqlx::PgPool,
+) -> Result<Vec<crate::models::governance_posture::GovernanceTemplateApplication>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, GovernanceTemplateApplicationRow>(
+        "SELECT id, template_slug, template_name, scope, standards, policy_names, checkpoint_prompts, sds_remediations, default_report_standard, applied_by, applied_at, updated_at
+         FROM governance_template_applications
+         ORDER BY updated_at DESC",
+    )
+    .fetch_all(db)
+    .await?;
+
+    rows.into_iter()
+        .map(crate::models::governance_posture::GovernanceTemplateApplication::try_from)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|cause| {
             sqlx::Error::Decode(Box::new(std::io::Error::new(

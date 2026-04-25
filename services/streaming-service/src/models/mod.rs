@@ -1,3 +1,4 @@
+pub mod dead_letter;
 pub mod sink;
 pub mod stream;
 pub mod topology;

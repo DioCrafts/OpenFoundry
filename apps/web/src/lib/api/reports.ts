@@ -7,7 +7,7 @@ export interface ListResponse<T> {
 export type GeneratorKind = 'pdf' | 'excel' | 'csv' | 'html' | 'pptx';
 export type ScheduleCadence = 'manual' | 'cron' | 'daily' | 'weekly' | 'monthly';
 export type SectionKind = 'kpi' | 'table' | 'chart' | 'narrative' | 'map';
-export type DistributionChannel = 'email' | 's3' | 'slack' | 'webhook';
+export type DistributionChannel = 'email' | 's3' | 'slack' | 'teams' | 'webhook';
 
 export interface ReportSection {
 	id: string;

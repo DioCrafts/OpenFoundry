@@ -1,4 +1,5 @@
 use crate::models::{
+    compliance_report::ComplianceStandard,
     data_classification::ClassificationLevel,
     governance_template::{GovernanceTemplate, GovernanceTemplatePolicy},
 };
@@ -11,6 +12,15 @@ pub fn governance_template_catalog() -> Vec<GovernanceTemplate> {
             summary: "Retention, subject-rights handling, and PII controls for GDPR workloads."
                 .to_string(),
             standards: vec!["gdpr".to_string()],
+            default_report_standard: ComplianceStandard::Gdpr,
+            checkpoint_prompts: vec![
+                "Document the lawful basis before exporting personal data.".to_string(),
+                "Justify why subject-linked data must remain accessible.".to_string(),
+            ],
+            sds_remediations: vec![
+                "mask_pii_before_export".to_string(),
+                "notify_privacy_officer".to_string(),
+            ],
             policies: vec![
                 GovernanceTemplatePolicy {
                     name: "GDPR PII retention".to_string(),
@@ -48,6 +58,15 @@ pub fn governance_template_catalog() -> Vec<GovernanceTemplate> {
             summary: "Audit retention and protected health information handling for HIPAA."
                 .to_string(),
             standards: vec!["hipaa".to_string()],
+            default_report_standard: ComplianceStandard::Hipaa,
+            checkpoint_prompts: vec![
+                "Provide the treatment/payment/operations rationale for PHI access.".to_string(),
+                "Confirm minimum necessary PHI exposure for this workflow.".to_string(),
+            ],
+            sds_remediations: vec![
+                "quarantine_phi_extract".to_string(),
+                "page_security_response".to_string(),
+            ],
             policies: vec![
                 GovernanceTemplatePolicy {
                     name: "HIPAA PHI access logs".to_string(),
@@ -58,10 +77,7 @@ pub fn governance_template_catalog() -> Vec<GovernanceTemplate> {
                     retention_days: 2190,
                     legal_hold: true,
                     purge_mode: "retain".to_string(),
-                    rules: vec![
-                        "log_all_phi_access".to_string(),
-                        "require_mfa".to_string(),
-                    ],
+                    rules: vec!["log_all_phi_access".to_string(), "require_mfa".to_string()],
                 },
                 GovernanceTemplatePolicy {
                     name: "HIPAA incident review".to_string(),
@@ -85,6 +101,15 @@ pub fn governance_template_catalog() -> Vec<GovernanceTemplate> {
             summary: "Restrict export, legal hold, and controlled-data handling for ITAR."
                 .to_string(),
             standards: vec!["itar".to_string()],
+            default_report_standard: ComplianceStandard::Itar,
+            checkpoint_prompts: vec![
+                "Confirm recipient eligibility before controlled export.".to_string(),
+                "Justify cross-border movement of controlled lineage.".to_string(),
+            ],
+            sds_remediations: vec![
+                "block_cross_border_delivery".to_string(),
+                "require_export_review".to_string(),
+            ],
             policies: vec![
                 GovernanceTemplatePolicy {
                     name: "ITAR export gate".to_string(),
@@ -132,8 +157,20 @@ mod tests {
     #[test]
     fn governance_templates_cover_core_standards() {
         let catalog = governance_template_catalog();
-        assert!(catalog.iter().any(|template| template.slug == "gdpr-default"));
-        assert!(catalog.iter().any(|template| template.slug == "hipaa-baseline"));
-        assert!(catalog.iter().any(|template| template.slug == "itar-export-control"));
+        assert!(
+            catalog
+                .iter()
+                .any(|template| template.slug == "gdpr-default")
+        );
+        assert!(
+            catalog
+                .iter()
+                .any(|template| template.slug == "hipaa-baseline")
+        );
+        assert!(
+            catalog
+                .iter()
+                .any(|template| template.slug == "itar-export-control")
+        );
     }
 }

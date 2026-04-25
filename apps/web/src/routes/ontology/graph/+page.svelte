@@ -144,6 +144,14 @@
     loadGraph();
   }
 
+  function countEntries(entries: Record<string, number> | undefined) {
+    return Object.entries(entries ?? {}).sort((left, right) => right[1] - left[1]);
+  }
+
+  function formatScope(scope: string | undefined) {
+    return (scope ?? 'local').replaceAll('_', ' ');
+  }
+
   onMount(async () => {
     const page = get(pageStore);
     rootObjectId = page.url.searchParams.get('root_object_id') ?? '';
@@ -251,6 +259,61 @@
         Object mode
       </button>
     </div>
+
+    {#if graph}
+      <div class="mt-6 grid gap-3 md:grid-cols-4">
+        <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+          <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Scope</div>
+          <div class="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
+            {formatScope(graph.summary.scope)}
+          </div>
+        </div>
+        <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+          <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Max Hops</div>
+          <div class="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
+            {graph.summary.max_hops_reached}
+          </div>
+        </div>
+        <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+          <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Sensitive Objects</div>
+          <div class="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
+            {graph.summary.sensitive_objects}
+          </div>
+        </div>
+        <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+          <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Boundary Crossings</div>
+          <div class="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
+            {graph.summary.boundary_crossings}
+          </div>
+        </div>
+      </div>
+
+      {#if countEntries(graph.summary.object_types).length > 0}
+        <div class="mt-4">
+          <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Types in scope</p>
+          <div class="mt-2 flex flex-wrap gap-2">
+            {#each countEntries(graph.summary.object_types) as [label, count]}
+              <span class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                {label} · {count}
+              </span>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      {#if graph.summary.sensitive_markings.length > 0}
+        <div class="mt-4">
+          <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Sensitive markings</p>
+          <div class="mt-2 flex flex-wrap gap-2">
+            {#each graph.summary.sensitive_markings as marking}
+              <span class="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                {marking}
+              </span>
+            {/each}
+          </div>
+        </div>
+      {/if}
+    {/if}
   </section>
 
   {#if error}

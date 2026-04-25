@@ -59,6 +59,7 @@
 					dev_command: 'pnpm dev',
 					preview_command: 'pnpm build',
 					ci_required: false,
+					allow_direct_commits_on_protected: false,
 				}),
 			});
 			return;
@@ -76,6 +77,7 @@
 					dev_command: 'python -m python_agent_package',
 					preview_command: 'python -m compileall src',
 					ci_required: true,
+					allow_direct_commits_on_protected: false,
 				}),
 			});
 			return;
@@ -86,11 +88,12 @@
 			slug: 'foundry-widget-kit',
 			description: 'Shared widget primitives ready for marketplace publication.',
 			package_kind: 'widget',
-			settings_text: presetSettings({
-				runtime: 'rust',
-				default_path: 'src/lib.rs',
-				ci_required: true,
-			}),
+				settings_text: presetSettings({
+					runtime: 'rust',
+					default_path: 'src/lib.rs',
+					ci_required: true,
+					allow_direct_commits_on_protected: false,
+				}),
 		});
 	}
 </script>
@@ -100,7 +103,7 @@
 		<div>
 			<p class="text-xs font-semibold uppercase tracking-[0.24em] text-sky-700">Repository Control Plane</p>
 			<h2 class="mt-2 text-2xl font-semibold text-stone-900">Object-backed repos, package kinds, and owner metadata</h2>
-			<p class="mt-1 text-sm text-stone-600">Shape repository descriptors that power branches, merge requests, CI triggers, and marketplace publication.</p>
+			<p class="mt-1 text-sm text-stone-600">Shape repository descriptors that power protected branches, merge policies, CI triggers, and marketplace publication.</p>
 		</div>
 		<div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
 			<div class="rounded-2xl bg-stone-950 px-4 py-3 text-stone-50">

@@ -36,6 +36,26 @@ export interface OpenFoundryMutationOptions<TResult> {
   onError?: (error: Error) => void;
 }
 
+export type OpenFoundryDatasetsResponse = Awaited<
+  ReturnType<OpenFoundryClient['datasetDatasetListdatasets']>
+>;
+export type OpenFoundryOntologyTypesResponse = Awaited<
+  ReturnType<OpenFoundryClient['ontologyOntologyListobjecttypes']>
+>;
+export type OpenFoundryPipelinesResponse = Awaited<
+  ReturnType<OpenFoundryClient['pipelinePipelineListpipelines']>
+>;
+export type OpenFoundryControlPanelResponse = Awaited<
+  ReturnType<OpenFoundryClient['adminV2Getcontrolpanel']>
+>;
+
+export interface OpenFoundryPlatformOverview {
+  datasets: OpenFoundryDatasetsResponse;
+  ontologyTypes: OpenFoundryOntologyTypesResponse;
+  pipelines: OpenFoundryPipelinesResponse;
+  controlPanel: OpenFoundryControlPanelResponse;
+}
+
 const OpenFoundryContext = createContext<OpenFoundryClient | null>(null);
 
 export function OpenFoundryProvider(props: OpenFoundryProviderProps) {
@@ -154,6 +174,59 @@ export function useOpenFoundryMutation<TResult, TArgs extends unknown[]>(
 
 export function createOpenFoundryQueryKey(...parts: unknown[]): string {
   return stableSerialize(parts);
+}
+
+export function useDatasets(
+  options: OpenFoundryQueryOptions<OpenFoundryDatasetsResponse> = {},
+): OpenFoundryQueryState<OpenFoundryDatasetsResponse> {
+  const client = useOpenFoundry();
+  return useOpenFoundryQuery(() => client.datasetDatasetListdatasets(), [client], options);
+}
+
+export function useOntologyTypes(
+  options: OpenFoundryQueryOptions<OpenFoundryOntologyTypesResponse> = {},
+): OpenFoundryQueryState<OpenFoundryOntologyTypesResponse> {
+  const client = useOpenFoundry();
+  return useOpenFoundryQuery(() => client.ontologyOntologyListobjecttypes(), [client], options);
+}
+
+export function usePipelines(
+  options: OpenFoundryQueryOptions<OpenFoundryPipelinesResponse> = {},
+): OpenFoundryQueryState<OpenFoundryPipelinesResponse> {
+  const client = useOpenFoundry();
+  return useOpenFoundryQuery(() => client.pipelinePipelineListpipelines(), [client], options);
+}
+
+export function useControlPanel(
+  options: OpenFoundryQueryOptions<OpenFoundryControlPanelResponse> = {},
+): OpenFoundryQueryState<OpenFoundryControlPanelResponse> {
+  const client = useOpenFoundry();
+  return useOpenFoundryQuery(() => client.adminV2Getcontrolpanel(), [client], options);
+}
+
+export function usePlatformOverview(
+  options: OpenFoundryQueryOptions<OpenFoundryPlatformOverview> = {},
+): OpenFoundryQueryState<OpenFoundryPlatformOverview> {
+  const client = useOpenFoundry();
+  return useOpenFoundryQuery(
+    async () => {
+      const [datasets, ontologyTypes, pipelines, controlPanel] = await Promise.all([
+        client.datasetDatasetListdatasets(),
+        client.ontologyOntologyListobjecttypes(),
+        client.pipelinePipelineListpipelines(),
+        client.adminV2Getcontrolpanel(),
+      ]);
+
+      return {
+        datasets,
+        ontologyTypes,
+        pipelines,
+        controlPanel,
+      };
+    },
+    [client],
+    options,
+  );
 }
 
 function stableSerialize(value: unknown): string {

@@ -21,7 +21,8 @@ pub async fn activate_install(
 ) -> Result<InstallActivation> {
     match listing.package_kind {
         PackageType::AppTemplate => {
-            activate_app_template(state, headers, listing, version, workspace_name, install_id).await
+            activate_app_template(state, headers, listing, version, workspace_name, install_id)
+                .await
         }
         _ => Ok(InstallActivation {
             kind: "marketplace_record".to_string(),
@@ -29,7 +30,11 @@ pub async fn activate_install(
             resource_id: None,
             resource_slug: Some(listing.slug.clone()),
             public_url: None,
-            notes: Some("Package recorded in marketplace installs. Runtime activation is only wired for app templates in this milestone.".to_string()),
+            notes: Some(format!(
+                "Recorded product package on channel `{}` with {} packaged resource(s). Runtime activation is only wired for app templates in this milestone.",
+                version.release_channel,
+                version.packaged_resources.len()
+            )),
         }),
     }
 }
@@ -46,7 +51,12 @@ async fn activate_app_template(
         .manifest
         .get("template_key")
         .and_then(Value::as_str)
-        .or_else(|| version.manifest.get("app_template_key").and_then(Value::as_str))
+        .or_else(|| {
+            version
+                .manifest
+                .get("app_template_key")
+                .and_then(Value::as_str)
+        })
         .context("app template install is missing manifest.template_key")?;
     let short_install_id = install_id.simple().to_string();
     let short_install_id = &short_install_id[..8];
@@ -65,12 +75,10 @@ async fn activate_app_template(
     });
 
     let create_response = authorized_request(
-        state
-            .http_client
-            .post(format!(
-                "{}/api/v1/apps/from-template",
-                state.app_builder_service_url.trim_end_matches('/')
-            )),
+        state.http_client.post(format!(
+            "{}/api/v1/apps/from-template",
+            state.app_builder_service_url.trim_end_matches('/')
+        )),
         headers,
     )
     .json(&create_payload)
@@ -132,11 +140,14 @@ async fn activate_app_template(
     Ok(InstallActivation {
         kind: "app_template".to_string(),
         status: "activated".to_string(),
-        resource_id: Some(uuid::Uuid::parse_str(&app_id).context("invalid app id returned by app-builder")?),
+        resource_id: Some(
+            uuid::Uuid::parse_str(&app_id).context("invalid app id returned by app-builder")?,
+        ),
         resource_slug: Some(app_slug.clone()),
         public_url: Some(format!("/apps/runtime/{app_slug}")),
         notes: Some(format!(
-            "Created and published from template `{template_key}` via app-builder-service."
+            "Created and published from template `{template_key}` via app-builder-service on channel `{}`.",
+            version.release_channel
         )),
     })
 }

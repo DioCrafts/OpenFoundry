@@ -161,17 +161,23 @@ pub async fn publish_version(
     let dependencies =
         serde_json::to_value(registry::normalize_dependencies(&request.dependencies))
             .map_err(|cause| internal_error(cause.to_string()))?;
+    let packaged_resources = serde_json::to_value(
+        crate::domain::devops::normalize_packaged_resources(&request.packaged_resources),
+    )
+    .map_err(|cause| internal_error(cause.to_string()))?;
 
     sqlx::query(
-		"INSERT INTO marketplace_package_versions (id, listing_id, version, changelog, dependency_mode, dependencies, manifest, published_at)
-		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8)",
+		"INSERT INTO marketplace_package_versions (id, listing_id, version, release_channel, changelog, dependency_mode, dependencies, packaged_resources, manifest, published_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10)",
 	)
 	.bind(version_id)
 	.bind(id)
 	.bind(&request.version)
+	.bind(crate::domain::devops::normalize_release_channel(&request.release_channel))
 	.bind(&request.changelog)
 	.bind(&request.dependency_mode)
 	.bind(dependencies)
+	.bind(packaged_resources)
 	.bind(request.manifest)
 	.bind(published_at)
 	.execute(&state.db)

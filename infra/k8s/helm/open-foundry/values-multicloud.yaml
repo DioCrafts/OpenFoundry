@@ -1,0 +1,43 @@
+global:
+  publicWebOrigin: https://platform.openfoundry.example.com
+  deploymentFabric:
+    cloud: hybrid
+    environment: production
+    cell: global-control-plane
+    region: global
+    multiCloud:
+      enabled: true
+      activeProvider: aws-eu
+      workloadIdentity:
+        awsRoleArn: arn:aws:iam::123456789012:role/openfoundry-platform
+        gcpServiceAccount: platform-router@openfoundry-prod.iam.gserviceaccount.com
+        azureClientId: 00000000-0000-7000-8000-000000000321
+      providers:
+        - name: aws-eu
+          cloud: aws
+          region: eu-west-1
+          workspaceTargets:
+            - Operations Center - EU
+            - Regulated Analytics - EU
+        - name: gcp-us
+          cloud: gcp
+          region: us-central1
+          workspaceTargets:
+            - Operations Center - US
+            - Research Sandbox - US
+        - name: azure-uk
+          cloud: azure
+          region: uksouth
+          workspaceTargets:
+            - Partner Exchange - UK
+
+apollo:
+  enabled: true
+  schedule: "*/10 * * * *"
+  actionMode: gated_sync
+  reconcileFleetIds:
+    - 01968b70-4f20-71b8-a6f0-0f4000001001
+    - 01968b70-4f20-71b8-a6f0-0f4000001002
+  env:
+    APOLLO_RELEASE_CHANNELS: stable,canary
+    APOLLO_PROMOTION_POLICY: readiness_and_window

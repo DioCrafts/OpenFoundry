@@ -2,6 +2,7 @@ use chrono::{Duration, Utc};
 
 use crate::models::{sink::CepMatch, topology::CepDefinition};
 
+#[allow(dead_code)]
 pub fn simulate_cep_matches(cep_definition: Option<&CepDefinition>) -> Vec<CepMatch> {
     let Some(definition) = cep_definition else {
         return Vec::new();

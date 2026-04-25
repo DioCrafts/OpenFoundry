@@ -1,9 +1,10 @@
-pub mod control_panel;
 pub mod api_key;
+pub mod control_panel;
 pub mod group;
 pub mod mfa;
 pub mod permission;
 pub mod policy;
+pub mod restricted_view;
 pub mod role;
 pub mod session;
 pub mod sso;

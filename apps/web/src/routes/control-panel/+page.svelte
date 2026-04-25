@@ -7,9 +7,12 @@
 	import {
 		getControlPanel,
 		getUpgradeReadiness,
+		previewIdentityProviderMapping,
 		updateControlPanel,
 		type AppBrandingSettings,
 		type ControlPanelSettings,
+		type IdentityProviderMapping,
+		type IdentityProviderMappingPreviewResponse,
 		type UpgradeAssistantSettings,
 		type UpgradeReadinessResponse,
 	} from '$lib/api/control-panel';
@@ -52,6 +55,12 @@
 	let draft = $state<ControlPanelDraft>(createEmptyDraft());
 	let ssoProviders = $state<SsoProviderRecord[]>([]);
 	let upgradeReadiness = $state<UpgradeReadinessResponse | null>(null);
+	let previewLoading = $state(false);
+	let idpPreviewProviderSlug = $state('');
+	let idpPreviewEmail = $state('');
+	let idpPreviewRawClaimsJson = $state(JSON.stringify(defaultPreviewClaims(), null, 2));
+	let idpPreviewResult = $state<IdentityProviderMappingPreviewResponse | null>(null);
+	let idpPreviewError = $state('');
 
 	onMount(() => {
 		void loadPage();
@@ -92,6 +101,16 @@
 			preflight_checks: [],
 			rollout_stages: [],
 			rollback_steps: [],
+		};
+	}
+
+	function defaultPreviewClaims() {
+		return {
+			organization_id: '00000000-0000-7000-8000-000000000001',
+			workspace: 'shared-enterprise',
+			classification_clearance: 'internal',
+			department: 'finance',
+			roles: ['viewer', 'editor'],
 		};
 	}
 
@@ -172,6 +191,71 @@
 		}
 	}
 
+	function setPreviewDefaults(nextSettings: ControlPanelSettings, providers: SsoProviderRecord[]) {
+		const primaryMapping = nextSettings.identity_provider_mappings[0];
+		const defaultProviderSlug = primaryMapping?.provider_slug ?? providers[0]?.slug ?? '';
+		const defaultDomain = primaryMapping?.allowed_email_domains[0] ?? 'openfoundry.dev';
+
+		if (!idpPreviewProviderSlug || !providers.some((provider) => provider.slug === idpPreviewProviderSlug)) {
+			idpPreviewProviderSlug = defaultProviderSlug;
+		}
+		if (!idpPreviewEmail) {
+			idpPreviewEmail = `operator@${defaultDomain}`;
+		}
+		if (!idpPreviewRawClaimsJson.trim()) {
+			idpPreviewRawClaimsJson = JSON.stringify(defaultPreviewClaims(), null, 2);
+		}
+	}
+
+	function mappingSummary() {
+		try {
+			const mappings = parseJsonDraft<IdentityProviderMapping[]>(
+				draft.identity_provider_mappings_json,
+				'Identity provider mappings',
+			);
+			const ruleCount = mappings.reduce((total, entry) => total + entry.organization_rules.length, 0);
+			return `${mappings.length} mapping(s), ${ruleCount} advanced org rule(s)`;
+		} catch {
+			return 'Invalid mapping JSON';
+		}
+	}
+
+	function policySummary() {
+		try {
+			const policies = parseJsonDraft<{ name: string }[]>(
+				draft.resource_management_policies_json,
+				'Resource management policies',
+			);
+			return `${policies.length} resource policy/policies configured`;
+		} catch {
+			return 'Invalid policy JSON';
+		}
+	}
+
+	async function runIdentityMappingPreview() {
+		if (!idpPreviewProviderSlug.trim()) {
+			idpPreviewError = 'Selecciona un provider para ejecutar el preview.';
+			return;
+		}
+
+		previewLoading = true;
+		idpPreviewError = '';
+		idpPreviewResult = null;
+
+		try {
+			const rawClaims = parseJsonDraft<Record<string, unknown>>(idpPreviewRawClaimsJson, 'Identity preview claims');
+			idpPreviewResult = await previewIdentityProviderMapping({
+				provider_slug: idpPreviewProviderSlug.trim(),
+				email: idpPreviewEmail.trim(),
+				raw_claims: rawClaims,
+			});
+		} catch (error: unknown) {
+			idpPreviewError = error instanceof Error ? error.message : 'Unable to run the identity mapping preview';
+		} finally {
+			previewLoading = false;
+		}
+	}
+
 	async function loadPage() {
 		loading = true;
 		uiError = '';
@@ -197,6 +281,7 @@
 			ssoProviders = providers;
 			upgradeReadiness = readiness;
 			draft = toDraft(nextSettings);
+			setPreviewDefaults(nextSettings, providers);
 		} catch (error: unknown) {
 			if (error instanceof ApiError && error.status === 403) {
 				uiError = 'Your session cannot read the platform control panel.';
@@ -240,6 +325,7 @@
 			settings = nextSettings;
 			upgradeReadiness = await getUpgradeReadiness();
 			draft = toDraft(nextSettings);
+			setPreviewDefaults(nextSettings, ssoProviders);
 			notice = 'Platform control panel updated.';
 			notifications.success(notice);
 		} catch (error: unknown) {
@@ -368,17 +454,17 @@
 					<label class="block text-sm md:col-span-2">
 						<span class="mb-2 block font-medium text-slate-700">Identity provider mappings JSON</span>
 						<textarea class="min-h-48 w-full rounded-2xl border border-slate-200 px-4 py-3 font-mono text-xs outline-none transition focus:border-emerald-500" bind:value={draft.identity_provider_mappings_json}></textarea>
-						<p class="mt-2 text-xs text-slate-500">Assigna org, workspace, clearance, default roles y dominios permitidos por `provider_slug`. Providers detectados: {ssoProviders.length}.</p>
+						<p class="mt-2 text-xs text-slate-500">Asigna org, workspace, clearance, default roles y dominios permitidos por `provider_slug`. Soporta `organization_rules` con `email_domain` o `claim_equals`. Providers detectados: {ssoProviders.length}. {mappingSummary()}.</p>
 					</label>
 					<label class="block text-sm md:col-span-2">
 						<span class="mb-2 block font-medium text-slate-700">Resource management policies JSON</span>
 						<textarea class="min-h-48 w-full rounded-2xl border border-slate-200 px-4 py-3 font-mono text-xs outline-none transition focus:border-emerald-500" bind:value={draft.resource_management_policies_json}></textarea>
-						<p class="mt-2 text-xs text-slate-500">Estas políticas alimentan `tenant_tier` y `tenant_quotas`, que luego el gateway usa para clamp de queries, workers, body size y rate limiting.</p>
+						<p class="mt-2 text-xs text-slate-500">Estas políticas alimentan `tenant_tier` y `tenant_quotas`, que luego el gateway usa para clamp de queries, workers, body size y rate limiting. {policySummary()}.</p>
 					</label>
 					<label class="block text-sm md:col-span-2">
 						<span class="mb-2 block font-medium text-slate-700">Upgrade assistant JSON</span>
 						<textarea class="min-h-48 w-full rounded-2xl border border-slate-200 px-4 py-3 font-mono text-xs outline-none transition focus:border-emerald-500" bind:value={draft.upgrade_assistant_json}></textarea>
-						<p class="mt-2 text-xs text-slate-500">Define versión actual/objetivo, maintenance window, stages de rollout y rollback steps. El panel de readiness los valida contra el estado vivo de auth.</p>
+						<p class="mt-2 text-xs text-slate-500">Define versión actual/objetivo, maintenance window, preflight checks con estados `pending/ready/warning/blocked`, stages de rollout y rollback steps. El panel de readiness los valida contra el estado vivo de auth.</p>
 					</label>
 				</div>
 			</section>
@@ -466,6 +552,58 @@
 							<div class="mt-2"><span class="font-medium text-slate-900">Target:</span> {upgradeReadiness.target_version}</div>
 							<div class="mt-2"><span class="font-medium text-slate-900">Channel:</span> {upgradeReadiness.release_channel}</div>
 						</div>
+						<div class="mt-4 grid gap-3 sm:grid-cols-3">
+							<div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+								<div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Preflight</div>
+								<div class="mt-2 text-lg font-semibold text-slate-900">
+									{upgradeReadiness.preflight_ready_count}/{upgradeReadiness.preflight_total_count}
+								</div>
+								<div class="mt-1 text-xs text-slate-500">checks ready</div>
+							</div>
+							<div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+								<div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Rollout</div>
+								<div class="mt-2 text-lg font-semibold text-slate-900">
+									{upgradeReadiness.completed_stage_count}/{upgradeReadiness.total_stage_count}
+								</div>
+								<div class="mt-1 text-xs text-slate-500">stages completed</div>
+							</div>
+							<div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+								<div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Coverage</div>
+								<div class="mt-2 text-lg font-semibold text-slate-900">
+									{upgradeReadiness.completed_rollout_percentage}%
+								</div>
+								<div class="mt-1 text-xs text-slate-500">rollout already completed</div>
+							</div>
+						</div>
+						{#if upgradeReadiness.next_stage}
+							<div class="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-900">
+								<div class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Next stage</div>
+								<div class="mt-2 font-semibold">{upgradeReadiness.next_stage.label}</div>
+								<div class="mt-1 text-emerald-800">
+									{upgradeReadiness.next_stage.rollout_percentage}% rollout target • status {upgradeReadiness.next_stage.status}
+								</div>
+							</div>
+						{/if}
+						{#if upgradeReadiness.blockers.length > 0}
+							<div class="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-800">
+								<div class="text-xs font-semibold uppercase tracking-[0.18em] text-rose-700">Blockers</div>
+								<div class="mt-3 space-y-2">
+									{#each upgradeReadiness.blockers as blocker}
+										<div>{blocker}</div>
+									{/each}
+								</div>
+							</div>
+						{/if}
+						{#if upgradeReadiness.recommended_actions.length > 0}
+							<div class="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
+								<div class="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Recommended actions</div>
+								<div class="mt-3 space-y-2">
+									{#each upgradeReadiness.recommended_actions as action}
+										<div>{action}</div>
+									{/each}
+								</div>
+							</div>
+						{/if}
 						<div class="mt-4 space-y-3">
 							{#each upgradeReadiness.checks as check}
 								<div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
@@ -484,6 +622,125 @@
 						</div>
 					{:else}
 						<div class="mt-4 text-sm text-slate-500">Upgrade readiness unavailable.</div>
+					{/if}
+				</section>
+
+				<section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+					<div class="flex items-start justify-between gap-4">
+						<div>
+							<p class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Identity Mapping</p>
+							<h2 class="mt-2 text-xl font-semibold text-slate-900">IdP assignment preview</h2>
+							<p class="mt-2 text-sm text-slate-500">
+								Simula la resolución real de org, workspace, clearance, roles y tenant tier antes de tocar producción.
+							</p>
+						</div>
+						<button
+							class="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+							onclick={runIdentityMappingPreview}
+							disabled={previewLoading || !canReadControlPanel()}
+						>
+							{previewLoading ? 'Previewing...' : 'Run preview'}
+						</button>
+					</div>
+					<div class="mt-5 grid gap-4">
+						<label class="block text-sm">
+							<span class="mb-2 block font-medium text-slate-700">Provider</span>
+							<select class="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none transition focus:border-emerald-500" bind:value={idpPreviewProviderSlug}>
+								<option value="">Select provider</option>
+								{#each ssoProviders as provider}
+									<option value={provider.slug}>{provider.name} • {provider.slug}</option>
+								{/each}
+							</select>
+						</label>
+						<label class="block text-sm">
+							<span class="mb-2 block font-medium text-slate-700">User email</span>
+							<input class="w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none transition focus:border-emerald-500" bind:value={idpPreviewEmail} />
+						</label>
+						<label class="block text-sm">
+							<span class="mb-2 block font-medium text-slate-700">Raw claims JSON</span>
+							<textarea class="min-h-40 w-full rounded-2xl border border-slate-200 px-4 py-3 font-mono text-xs outline-none transition focus:border-emerald-500" bind:value={idpPreviewRawClaimsJson}></textarea>
+						</label>
+					</div>
+					{#if idpPreviewError}
+						<div class="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+							{idpPreviewError}
+						</div>
+					{/if}
+					{#if idpPreviewResult}
+						<div class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+							<div class="flex items-start justify-between gap-3">
+								<div>
+									<div class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Resolved identity</div>
+									<div class="mt-2 text-lg font-semibold text-slate-900">{idpPreviewResult.email}</div>
+									<div class="mt-1 text-xs text-slate-500">{idpPreviewResult.provider_slug}</div>
+								</div>
+								<span class={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${idpPreviewResult.mapping_found ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+									{idpPreviewResult.mapping_found ? 'mapped' : 'provider-only'}
+								</span>
+							</div>
+							<div class="mt-4 grid gap-3 sm:grid-cols-2">
+								<div>
+									<div class="text-xs uppercase tracking-[0.18em] text-slate-500">Matched rule</div>
+									<div class="mt-1 font-medium text-slate-900">{idpPreviewResult.matched_rule_name ?? 'None'}</div>
+								</div>
+								<div>
+									<div class="text-xs uppercase tracking-[0.18em] text-slate-500">Organization</div>
+									<div class="mt-1 font-medium text-slate-900">{idpPreviewResult.organization_id ?? 'Unassigned'}</div>
+								</div>
+								<div>
+									<div class="text-xs uppercase tracking-[0.18em] text-slate-500">Workspace</div>
+									<div class="mt-1 font-medium text-slate-900">{idpPreviewResult.workspace ?? 'None'}</div>
+								</div>
+								<div>
+									<div class="text-xs uppercase tracking-[0.18em] text-slate-500">Clearance</div>
+									<div class="mt-1 font-medium text-slate-900">{idpPreviewResult.classification_clearance ?? 'None'}</div>
+								</div>
+								<div>
+									<div class="text-xs uppercase tracking-[0.18em] text-slate-500">Tenant tier</div>
+									<div class="mt-1 font-medium text-slate-900">{idpPreviewResult.tenant_tier ?? 'None'}</div>
+								</div>
+								<div>
+									<div class="text-xs uppercase tracking-[0.18em] text-slate-500">Resource policy</div>
+									<div class="mt-1 font-medium text-slate-900">{idpPreviewResult.resource_policy_name ?? 'None'}</div>
+								</div>
+							</div>
+							<div class="mt-4">
+								<div class="text-xs uppercase tracking-[0.18em] text-slate-500">Roles</div>
+								<div class="mt-2 flex flex-wrap gap-2">
+									{#if idpPreviewResult.role_names.length === 0}
+										<span class="rounded-full bg-slate-200 px-3 py-1 text-xs font-medium text-slate-700">No roles</span>
+									{:else}
+										{#each idpPreviewResult.role_names as role}
+											<span class="rounded-full bg-slate-900 px-3 py-1 text-xs font-medium text-white">{role}</span>
+										{/each}
+									{/if}
+								</div>
+							</div>
+							{#if idpPreviewResult.quota}
+								<div class="mt-4 grid gap-3 sm:grid-cols-2">
+									<div class="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+										<div><span class="font-medium text-slate-900">Query limit:</span> {idpPreviewResult.quota.max_query_limit}</div>
+										<div class="mt-2"><span class="font-medium text-slate-900">RPM:</span> {idpPreviewResult.quota.requests_per_minute}</div>
+										<div class="mt-2"><span class="font-medium text-slate-900">Storage:</span> {idpPreviewResult.quota.max_storage_gb} GB</div>
+									</div>
+									<div class="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+										<div><span class="font-medium text-slate-900">Pipeline workers:</span> {idpPreviewResult.quota.max_pipeline_workers}</div>
+										<div class="mt-2"><span class="font-medium text-slate-900">Shared spaces:</span> {idpPreviewResult.quota.max_shared_spaces}</div>
+										<div class="mt-2"><span class="font-medium text-slate-900">Guest sessions:</span> {idpPreviewResult.quota.max_guest_sessions}</div>
+									</div>
+								</div>
+							{/if}
+							{#if idpPreviewResult.notes.length > 0}
+								<div class="mt-4 rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-4 text-sm text-slate-600">
+									<div class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Notes</div>
+									<div class="mt-3 space-y-2">
+										{#each idpPreviewResult.notes as note}
+											<div>{note}</div>
+										{/each}
+									</div>
+								</div>
+							{/if}
+						</div>
 					{/if}
 				</section>
 

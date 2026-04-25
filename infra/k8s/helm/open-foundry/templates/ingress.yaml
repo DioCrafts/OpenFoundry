@@ -1,4 +1,15 @@
 {{- if .Values.global.ingress.enabled }}
+{{- $annotations := dict -}}
+{{- range $key, $value := .Values.global.ingress.annotations }}
+{{- $_ := set $annotations $key $value -}}
+{{- end }}
+{{- range $key, $value := .Values.global.deploymentFabric.geoRestrictions.ingressAnnotations }}
+{{- $_ := set $annotations $key $value -}}
+{{- end }}
+{{- $allowedIngressCidrs := .Values.global.deploymentFabric.geoRestrictions.allowedIngressCidrs | default (list) -}}
+{{- if and (gt (len $allowedIngressCidrs) 0) (not (hasKey $annotations "nginx.ingress.kubernetes.io/whitelist-source-range")) }}
+{{- $_ := set $annotations "nginx.ingress.kubernetes.io/whitelist-source-range" (join "," $allowedIngressCidrs) -}}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -6,9 +17,9 @@ metadata:
   namespace: {{ include "open-foundry.namespace" (dict "root" .) }}
   labels:
 {{ include "open-foundry.commonLabels" (dict "root" . "serviceName" "gateway") | nindent 4 }}
-{{- with .Values.global.ingress.annotations }}
+{{- if gt (len $annotations) 0 }}
   annotations:
-{{ toYaml . | indent 4 }}
+{{ toYaml $annotations | indent 4 }}
 {{- end }}
 spec:
 {{- if .Values.global.ingress.className }}

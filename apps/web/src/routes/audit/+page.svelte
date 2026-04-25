@@ -5,20 +5,26 @@
 	import AuditTimeline from '$components/audit/AuditTimeline.svelte';
 	import ComplianceDashboard from '$components/audit/ComplianceDashboard.svelte';
 	import ExportWizard from '$components/audit/ExportWizard.svelte';
+	import GovernanceStudio from '$components/audit/GovernanceStudio.svelte';
 	import PolicyManager from '$components/audit/PolicyManager.svelte';
 	import {
+		applyGovernanceTemplate,
 		appendEvent,
 		createPolicy,
 		eraseSubjectData,
 		exportSubjectData,
 		generateReport,
+		getCompliancePosture,
 		getOverview,
 		listAnomalies,
 		listClassifications,
 		listCollectors,
 		listEvents,
+		listGovernanceApplications,
+		listGovernanceTemplates,
 		listPolicies,
 		listReports,
+		scanSensitiveData,
 		updatePolicy,
 		type AnomalyAlert,
 		type AuditEvent,
@@ -26,6 +32,7 @@
 		type AuditOverview,
 		type AuditPolicy,
 		type AuditSeverity,
+		type CompliancePostureOverview,
 		type ClassificationCatalogEntry,
 		type ClassificationLevel,
 		type CollectorStatus,
@@ -33,6 +40,9 @@
 		type ComplianceStandard,
 		type GdprEraseResponse,
 		type GdprExportPayload,
+		type GovernanceTemplate,
+		type GovernanceTemplateApplication,
+		type SensitiveDataScanResponse,
 	} from '$lib/api/audit';
 	import { notifications } from '$lib/stores/notifications';
 
@@ -89,6 +99,12 @@
 		legal_hold: boolean;
 	};
 
+	type GovernanceTemplateDraft = {
+		scope: string;
+		updated_by: string;
+		scan_text: string;
+	};
+
 	let overview = $state<AuditOverview | null>(null);
 	let events = $state<AuditEvent[]>([]);
 	let collectors = $state<CollectorStatus[]>([]);
@@ -96,8 +112,12 @@
 	let policies = $state<AuditPolicy[]>([]);
 	let reports = $state<ComplianceReport[]>([]);
 	let classifications = $state<ClassificationCatalogEntry[]>([]);
+	let governanceTemplates = $state<GovernanceTemplate[]>([]);
+	let governanceApplications = $state<GovernanceTemplateApplication[]>([]);
+	let compliancePosture = $state<CompliancePostureOverview | null>(null);
 	let exportPayload = $state<GdprExportPayload | null>(null);
 	let eraseResponse = $state<GdprEraseResponse | null>(null);
+	let scanResult = $state<SensitiveDataScanResponse | null>(null);
 	let selectedPolicyId = $state('');
 	let loading = $state(true);
 	let busyAction = $state('');
@@ -107,6 +127,7 @@
 	let policyDraft = $state<PolicyDraft>(createEmptyPolicyDraft());
 	let reportDraft = $state<ReportDraft>(createEmptyReportDraft());
 	let gdprDraft = $state<GdprDraft>(createEmptyGdprDraft());
+	let governanceTemplateDraft = $state<GovernanceTemplateDraft>(createEmptyGovernanceTemplateDraft());
 
 	const busy = $derived(loading || busyAction.length > 0);
 
@@ -178,6 +199,14 @@
 		};
 	}
 
+	function createEmptyGovernanceTemplateDraft(): GovernanceTemplateDraft {
+		return {
+			scope: 'production-platform',
+			updated_by: 'Security Governance',
+			scan_text: 'Customer SSN 123-45-6789 exported to analytics bucket',
+		};
+	}
+
 	function toLocalDateTime(date: Date) {
 		const pad = (value: number) => String(value).padStart(2, '0');
 		return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
@@ -231,11 +260,26 @@
 		gdprDraft = { ...gdprDraft, ...patch };
 	}
 
+	function updateGovernanceTemplateDraft(patch: Partial<GovernanceTemplateDraft>) {
+		governanceTemplateDraft = { ...governanceTemplateDraft, ...patch };
+	}
+
 	async function refreshAll() {
 		loading = true;
 		uiError = '';
 		try {
-			const [overviewResponse, eventResponse, collectorsResponse, anomaliesResponse, policiesResponse, reportsResponse, classificationsResponse] = await Promise.all([
+			const [
+				overviewResponse,
+				eventResponse,
+				collectorsResponse,
+				anomaliesResponse,
+				policiesResponse,
+				reportsResponse,
+				classificationsResponse,
+				governanceTemplateResponse,
+				governanceApplicationResponse,
+				compliancePostureResponse
+			] = await Promise.all([
 				getOverview(),
 				listEvents(filters),
 				listCollectors(),
@@ -243,6 +287,9 @@
 				listPolicies(),
 				listReports(),
 				listClassifications(),
+				listGovernanceTemplates(),
+				listGovernanceApplications(),
+				getCompliancePosture(),
 			]);
 
 			overview = overviewResponse;
@@ -252,6 +299,9 @@
 			policies = policiesResponse.items;
 			reports = reportsResponse.items;
 			classifications = classificationsResponse;
+			governanceTemplates = governanceTemplateResponse;
+			governanceApplications = governanceApplicationResponse.items;
+			compliancePosture = compliancePostureResponse;
 
 			if (selectedPolicyId) {
 				const selected = policies.find((policy) => policy.id === selectedPolicyId);
@@ -395,6 +445,39 @@
 			busyAction = '';
 		}
 	}
+
+	async function applyGovernanceTemplateAction(slug: string) {
+		busyAction = `template-${slug}`;
+		try {
+			await applyGovernanceTemplate(slug, {
+				scope: governanceTemplateDraft.scope,
+				updated_by: governanceTemplateDraft.updated_by,
+			});
+			await refreshAll();
+			notifications.success(`Applied governance template ${slug}`);
+		} catch (error) {
+			uiError = error instanceof Error ? error.message : 'Unable to apply governance template';
+			notifications.error(uiError);
+		} finally {
+			busyAction = '';
+		}
+	}
+
+	async function runSensitiveDataScanAction() {
+		busyAction = 'sds-scan';
+		try {
+			scanResult = await scanSensitiveData({
+				content: governanceTemplateDraft.scan_text,
+				redact: true,
+			});
+			notifications.success('Sensitive data scan completed');
+		} catch (error) {
+			uiError = error instanceof Error ? error.message : 'Unable to run sensitive data scan';
+			notifications.error(uiError);
+		} finally {
+			busyAction = '';
+		}
+	}
 </script>
 
 <div class="space-y-6">
@@ -418,6 +501,18 @@
 	{/if}
 
 	<ComplianceDashboard {overview} {collectors} {anomalies} {reports} />
+
+	<GovernanceStudio
+		templates={governanceTemplates}
+		applications={governanceApplications}
+		posture={compliancePosture}
+		{scanResult}
+		draft={governanceTemplateDraft}
+		{busy}
+		onDraftChange={updateGovernanceTemplateDraft}
+		onApplyTemplate={applyGovernanceTemplateAction}
+		onScan={runSensitiveDataScanAction}
+	/>
 
 	<div class="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
 		<AuditLogViewer {events} {classifications} {filters} draft={eventDraft} {busy} onFilterChange={updateFilters} onApplyFilters={applyFilters} onDraftChange={updateEventDraft} onAppendEvent={appendEventAction} />

@@ -13,6 +13,7 @@
   "files": [
     "dist",
     "src",
+    "CHANGELOG.md",
     "README.md"
   ],
   "license": "Apache-2.0",
@@ -21,7 +22,8 @@
   "private": true,
   "scripts": {
     "build": "tsc -p .",
-    "check": "tsc -p . --noEmit"
+    "check": "tsc -p . --noEmit",
+    "smoke": "tsc -p . --noEmit"
   },
   "type": "module",
   "types": "./dist/index.d.ts",

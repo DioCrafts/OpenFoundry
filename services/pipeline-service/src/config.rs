@@ -14,6 +14,8 @@ pub struct AppConfig {
     pub dataset_service_url: String,
     #[serde(default = "default_workflow_service_url")]
     pub workflow_service_url: String,
+    #[serde(default = "default_ai_service_url")]
+    pub ai_service_url: String,
     #[serde(default = "default_storage_backend")]
     pub storage_backend: String,
     #[serde(default = "default_storage_bucket")]
@@ -47,6 +49,9 @@ fn default_dataset_service_url() -> String {
 fn default_workflow_service_url() -> String {
     "http://localhost:50061".to_string()
 }
+fn default_ai_service_url() -> String {
+    "http://localhost:50060".to_string()
+}
 fn default_storage_backend() -> String {
     "s3".to_string()
 }
@@ -59,9 +64,31 @@ fn default_distributed_pipeline_workers() -> usize {
 
 impl AppConfig {
     pub fn from_env() -> Result<Self, config::ConfigError> {
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let runtime_env = runtime_env_name();
         config::Config::builder()
+            .add_source(
+                config::File::from(manifest_dir.join("config/default.toml")).required(false),
+            )
+            .add_source(
+                config::File::from(manifest_dir.join(format!("config/{runtime_env}.toml")))
+                    .required(false),
+            )
             .add_source(config::Environment::default().separator("__"))
             .build()?
             .try_deserialize()
+    }
+}
+
+fn runtime_env_name() -> String {
+    match std::env::var("OPENFOUNDRY_ENV")
+        .or_else(|_| std::env::var("APP_ENV"))
+        .unwrap_or_else(|_| "default".to_string())
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "development" | "dev" => "default".to_string(),
+        "production" => "prod".to_string(),
+        other => other.to_string(),
     }
 }

@@ -14,16 +14,18 @@ use crate::{
     domain::{
         access::ensure_object_access,
         rules::{
-            apply_rule_effect, build_rule_evaluate_response, evaluate_rule_against_object,
-            load_recent_rule_runs, load_rule, load_rules_for_object_type, machinery_insights,
-            record_rule_run, validate_rule_definition,
+            apply_rule_effect, build_rule_evaluate_response, enqueue_rule_schedule,
+            evaluate_rule_against_object, load_recent_rule_runs, load_rule,
+            load_rules_for_object_type, machinery_insights, machinery_queue, record_rule_run,
+            transition_machinery_queue_item, validate_rule_definition,
         },
     },
     handlers::objects::load_object_instance,
     models::rule::{
         CreateRuleRequest, ListRulesQuery, ListRulesResponse, MachineryInsightsResponse,
-        OntologyRule, OntologyRuleRow, RuleEvaluateRequest, RuleEvaluateResponse,
-        RuleEvaluationMode, UpdateRuleRequest,
+        MachineryQueueResponse, OntologyRule, OntologyRuleRow, RuleEvaluateRequest,
+        RuleEvaluateResponse, RuleEvaluationMode, UpdateMachineryQueueItemRequest,
+        UpdateRuleRequest,
     },
 };
 
@@ -201,8 +203,7 @@ pub async fn update_rule(
     let effect_spec = body.effect_spec.unwrap_or(existing.effect_spec.clone());
 
     if let Err(error) =
-        validate_rule_definition(&state, existing.object_type_id, &trigger_spec, &effect_spec)
-            .await
+        validate_rule_definition(&state, existing.object_type_id, &trigger_spec, &effect_spec).await
     {
         return invalid(error);
     }
@@ -239,10 +240,7 @@ pub async fn update_rule(
     }
 }
 
-pub async fn delete_rule(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-) -> impl IntoResponse {
+pub async fn delete_rule(State(state): State<AppState>, Path(id): Path<Uuid>) -> impl IntoResponse {
     match sqlx::query("DELETE FROM ontology_rules WHERE id = $1")
         .bind(id)
         .execute(&state.db)
@@ -277,11 +275,7 @@ pub async fn simulate_rule(
         return invalid("rule object_type_id does not match the target object");
     }
     if let Err(error) = ensure_object_access(&claims, &object) {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({ "error": error })),
-        )
-            .into_response();
+        return (StatusCode::FORBIDDEN, Json(json!({ "error": error }))).into_response();
     }
 
     let properties_patch = match parse_properties_patch(&body.properties_patch) {
@@ -331,11 +325,7 @@ pub async fn apply_rule(
         return invalid("rule object_type_id does not match the target object");
     }
     if let Err(error) = ensure_object_access(&claims, &object) {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({ "error": error })),
-        )
-            .into_response();
+        return (StatusCode::FORBIDDEN, Json(json!({ "error": error }))).into_response();
     }
 
     let properties_patch = match parse_properties_patch(&body.properties_patch) {
@@ -353,7 +343,7 @@ pub async fn apply_rule(
         object.clone()
     };
 
-    if let Err(error) = record_rule_run(
+    let recorded_run = match record_rule_run(
         &state,
         rule.id,
         object.id,
@@ -365,7 +355,26 @@ pub async fn apply_rule(
     )
     .await
     {
-        tracing::warn!(%error, "failed to record ontology rule execution");
+        Ok(run) => Some(run),
+        Err(error) => {
+            tracing::warn!(%error, "failed to record ontology rule execution");
+            None
+        }
+    };
+
+    if let (Some(recorded_run), true) = (recorded_run.as_ref(), match_result.matched) {
+        if let Err(error) = enqueue_rule_schedule(
+            &state,
+            &rule,
+            &updated_object,
+            recorded_run.id,
+            &match_result.effect_preview,
+            claims.sub,
+        )
+        .await
+        {
+            tracing::warn!(%error, "failed to enqueue machinery schedule");
+        }
     }
 
     let response = RuleEvaluateResponse {
@@ -386,6 +395,29 @@ pub async fn get_machinery_insights(
             data,
         })
         .into_response(),
+        Err(error) => db_error(error),
+    }
+}
+
+pub async fn get_machinery_queue(
+    State(state): State<AppState>,
+    Query(query): Query<ListRulesQuery>,
+) -> impl IntoResponse {
+    match machinery_queue(&state, query.object_type_id).await {
+        Ok(data) => Json::<MachineryQueueResponse>(data).into_response(),
+        Err(error) => db_error(error),
+    }
+}
+
+pub async fn update_machinery_queue_item(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<UpdateMachineryQueueItemRequest>,
+) -> impl IntoResponse {
+    match transition_machinery_queue_item(&state, id, body.status.as_str()).await {
+        Ok(Some(item)) => Json(json!(item)).into_response(),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) if error == "unsupported machinery queue status" => invalid(error),
         Err(error) => db_error(error),
     }
 }

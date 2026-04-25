@@ -147,6 +147,10 @@ pub async fn create_training_job(
         &objective_metric_name,
     )
     .map_err(bad_request)?;
+    let dataset_ids_for_schema = body.dataset_ids.clone();
+    let training_config_for_schema = resolved_training_config.clone();
+    let search_for_schema = search.clone();
+    let objective_metric_name_for_schema = objective_metric_name.clone();
     let now = Utc::now();
     let job_id = Uuid::now_v7();
 
@@ -208,10 +212,25 @@ pub async fn create_training_job(
                 "ml://models/{model_id}/versions/{next_version_number}"
             )))
             .bind(execution.best_schema.clone().unwrap_or_else(|| {
+                let engine = training_config_for_schema
+                    .get("engine")
+                    .and_then(Value::as_str)
+                    .unwrap_or("tabular-logistic");
                 json!({
                     "signature": "tabular",
-                    "objective_metric": objective_metric_name,
-                    "generated_by": "training-orchestrator"
+                    "engine": engine,
+                    "model_adapter": {
+                        "kind": "native",
+                        "framework": engine,
+                        "runtime": "in-process"
+                    },
+                    "objective_metric": objective_metric_name_for_schema,
+                    "generated_by": "training-orchestrator",
+                    "reproducibility": {
+                        "dataset_ids": dataset_ids_for_schema,
+                        "training_config": training_config_for_schema,
+                        "hyperparameter_search": search_for_schema
+                    }
                 })
             }))
             .fetch_one(&state.db)

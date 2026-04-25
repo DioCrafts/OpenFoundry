@@ -8,6 +8,11 @@
     uploadData,
     type Dataset,
   } from '$lib/api/datasets';
+  import {
+    buildObjectTableLines,
+    downloadStructuredPdf,
+    type PdfSection,
+  } from '$lib/utils/pdf';
 
   let datasets = $state<Dataset[]>([]);
   let primaryDatasetId = $state('');
@@ -18,6 +23,7 @@
   let loadingPrimary = $state(false);
   let _loadingSecondary = $state(false);
   let exporting = $state(false);
+  let exportingPdf = $state(false);
   let fullscreen = $state(false);
   let error = $state('');
 
@@ -256,6 +262,77 @@
     }
   }
 
+  function datasetName(datasetId: string) {
+    return datasets.find((dataset) => dataset.id === datasetId)?.name ?? 'Unselected dataset';
+  }
+
+  async function exportCurrentPdf() {
+    if (analysisRows.length === 0) {
+      return;
+    }
+
+    exportingPdf = true;
+    error = '';
+
+    try {
+      const filtered = filteredRows();
+      const sections: PdfSection[] = [
+        {
+          heading: 'Analysis scope',
+          lines: [
+            `Primary dataset: ${datasetName(primaryDatasetId)}`,
+            `Join dataset: ${secondaryDatasetId ? datasetName(secondaryDatasetId) : 'None'}`,
+            `Rows in source view: ${sourceRows().length}`,
+            `Rows after filters: ${filtered.length}`,
+            `Dimension: ${dimension || 'Not selected'}`,
+            `Secondary dimension: ${secondaryDimension || 'Not selected'}`,
+            `Metric: ${metric || 'Not selected'} (${aggregation})`,
+            `Date field: ${dateField || 'No date filter'}`,
+          ],
+        },
+        {
+          heading: 'Path and filters',
+          lines: [
+            `Search: ${search.trim() || 'None'}`,
+            `Drill category: ${selectedCategory || 'Global view'}`,
+            `Date window: ${dateFrom || 'Start'} -> ${dateTo || 'Now'}`,
+            `Analysis path: ${analysisPath.join(' -> ') || 'No path state captured'}`,
+          ],
+        },
+        {
+          heading: 'Primary analysis',
+          lines: [
+            `${analysisRows.length} grouped row(s) ready for materialization.`,
+            ...buildObjectTableLines(analysisRows as Array<Record<string, unknown>>, 12, 3),
+          ],
+        },
+        {
+          heading: 'Linked breakdown',
+          lines: [
+            `${breakdownRows.length} breakdown row(s) in the secondary board.`,
+            ...buildObjectTableLines(breakdownRows as Array<Record<string, unknown>>, 12, 3),
+          ],
+        },
+      ];
+
+      downloadStructuredPdf({
+        fileName: `contour-${datasetName(primaryDatasetId).toLowerCase().replace(/[^a-z0-9]+/g, '-')}.pdf`,
+        title: 'Contour Analysis Export',
+        subtitle: datasetName(primaryDatasetId),
+        metadata: [
+          `Generated at ${new Date().toISOString()}`,
+          `Fullscreen mode: ${fullscreen ? 'enabled' : 'disabled'}`,
+          'OpenFoundry Contour PDF snapshot',
+        ],
+        sections,
+      });
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : 'Failed to export PDF snapshot';
+    } finally {
+      exportingPdf = false;
+    }
+  }
+
   onMount(() => {
     void loadDatasets();
   });
@@ -279,6 +356,9 @@
       <div class="flex flex-wrap gap-2">
         <button class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium dark:border-slate-700" onclick={() => fullscreen = !fullscreen}>
           {fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+        </button>
+        <button class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium disabled:opacity-60 dark:border-slate-700" onclick={exportCurrentPdf} disabled={exportingPdf || analysisRows.length === 0}>
+          {exportingPdf ? 'Exporting PDF...' : 'Export PDF'}
         </button>
         <button class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60 dark:bg-slate-100 dark:text-slate-950" onclick={exportCurrentView} disabled={exporting || analysisRows.length === 0}>
           {exporting ? 'Exporting...' : 'Export to dataset'}

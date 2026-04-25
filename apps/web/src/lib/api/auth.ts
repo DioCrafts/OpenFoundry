@@ -94,6 +94,14 @@ export interface PolicyEvaluationResult {
   matched_policy_ids: string[];
   deny_policy_ids: string[];
   row_filter: string | null;
+  hidden_columns: string[];
+  matched_restricted_view_ids: string[];
+  restricted_views: RestrictedViewEvaluation[];
+  deny_reasons: string[];
+  allowed_org_ids: string[];
+  allowed_markings: string[];
+  effective_clearance: string | null;
+  consumer_mode: boolean;
 }
 
 export interface ApiKeyRecord {
@@ -169,8 +177,41 @@ export interface SessionScope {
   allowed_org_ids: string[];
   workspace: string | null;
   classification_clearance: string | null;
+  allowed_markings: string[];
+  restricted_view_ids: string[];
+  consumer_mode: boolean;
   guest_email: string | null;
   guest_display_name: string | null;
+}
+
+export interface RestrictedViewRecord {
+  id: string;
+  name: string;
+  description: string | null;
+  resource: string;
+  action: string;
+  conditions: Record<string, unknown>;
+  row_filter: string | null;
+  hidden_columns: string[];
+  allowed_org_ids: string[];
+  allowed_markings: string[];
+  consumer_mode_enabled: boolean;
+  allow_guest_access: boolean;
+  enabled: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RestrictedViewEvaluation {
+  id: string;
+  name: string;
+  row_filter: string | null;
+  hidden_columns: string[];
+  allowed_org_ids: string[];
+  allowed_markings: string[];
+  consumer_mode_enabled: boolean;
+  allow_guest_access: boolean;
 }
 
 export interface ScopedSessionRecord {
@@ -283,6 +324,9 @@ export function createScopedSession(data: {
   allowed_org_ids?: string[];
   workspace?: string | null;
   classification_clearance?: string | null;
+  allowed_markings?: string[];
+  restricted_view_ids?: string[];
+  consumer_mode?: boolean;
   expires_at?: string | null;
 }) {
   return api.post<ScopedSessionWithToken>('/auth/sessions/scoped', data);
@@ -299,6 +343,9 @@ export function createGuestSession(data: {
   allowed_org_ids?: string[];
   workspace?: string | null;
   classification_clearance?: string | null;
+  allowed_markings?: string[];
+  restricted_view_ids?: string[];
+  consumer_mode?: boolean;
   expires_at?: string | null;
 }) {
   return api.post<ScopedSessionWithToken>('/auth/sessions/guest', data);
@@ -378,6 +425,51 @@ export function removeUserFromGroup(userId: string, groupId: string) {
 
 export function listPolicies() {
   return api.get<PolicyRecord[]>('/policies');
+}
+
+export function listRestrictedViews() {
+  return api.get<RestrictedViewRecord[]>('/restricted-views');
+}
+
+export function createRestrictedView(data: {
+  name: string;
+  description?: string | null;
+  resource: string;
+  action: string;
+  conditions: Record<string, unknown>;
+  row_filter?: string | null;
+  hidden_columns?: string[];
+  allowed_org_ids?: string[];
+  allowed_markings?: string[];
+  consumer_mode_enabled?: boolean;
+  allow_guest_access?: boolean;
+  enabled: boolean;
+}) {
+  return api.post<RestrictedViewRecord>('/restricted-views', data);
+}
+
+export function updateRestrictedView(
+  viewId: string,
+  data: {
+    name: string;
+    description?: string | null;
+    resource: string;
+    action: string;
+    conditions: Record<string, unknown>;
+    row_filter?: string | null;
+    hidden_columns?: string[];
+    allowed_org_ids?: string[];
+    allowed_markings?: string[];
+    consumer_mode_enabled?: boolean;
+    allow_guest_access?: boolean;
+    enabled: boolean;
+  },
+) {
+  return api.put<RestrictedViewRecord>(`/restricted-views/${viewId}`, data);
+}
+
+export function deleteRestrictedView(viewId: string) {
+  return api.delete<void>(`/restricted-views/${viewId}`);
 }
 
 export function createPolicy(data: {

@@ -1,6 +1,7 @@
 pub mod agent_registry;
 pub mod discovery;
 pub mod egress;
+pub mod hyperauto;
 pub mod scheduler;
 pub mod schema_inference;
 pub mod secret_manager;

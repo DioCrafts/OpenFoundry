@@ -17,6 +17,7 @@ pub struct AppState {
     pub db: sqlx::PgPool,
     pub jwt_config: JwtConfig,
     pub kernel_manager: KernelManager,
+    pub data_dir: String,
 }
 
 impl axum::extract::FromRef<AppState> for JwtConfig {
@@ -44,13 +45,18 @@ async fn main() {
         .await
         .expect("failed to run migrations");
 
-    let jwt_config = JwtConfig::new(&cfg.jwt_secret);
-    let kernel_manager = KernelManager::new(jwt_config.clone(), cfg.query_service_url.clone());
+    let jwt_config = JwtConfig::new(&cfg.jwt_secret).with_env_defaults();
+    let kernel_manager = KernelManager::new(
+        jwt_config.clone(),
+        cfg.query_service_url.clone(),
+        cfg.ai_service_url.clone(),
+    );
 
     let state = AppState {
         db: pool,
         jwt_config: jwt_config.clone(),
         kernel_manager,
+        data_dir: cfg.data_dir.clone(),
     };
 
     let public = Router::new().route("/health", get(|| async { "ok" }));
@@ -73,6 +79,13 @@ async fn main() {
         .route("/api/v1/notebooks/{id}/sessions", post(handlers::sessions::create_session))
         .route("/api/v1/notebooks/{id}/sessions", get(handlers::sessions::list_sessions))
         .route("/api/v1/notebooks/{notebook_id}/sessions/{session_id}", delete(handlers::sessions::stop_session))
+        .route(
+            "/api/v1/notebooks/{id}/workspace/files",
+            get(handlers::workspace::list_workspace_files)
+                .post(handlers::workspace::upsert_workspace_file)
+                .put(handlers::workspace::upsert_workspace_file)
+                .delete(handlers::workspace::delete_workspace_file),
+        )
         // Notepad
         .route(
             "/api/v1/notepad/documents",
