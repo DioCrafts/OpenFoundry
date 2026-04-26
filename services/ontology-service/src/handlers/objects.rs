@@ -22,6 +22,7 @@ use crate::{
             load_rules_for_object_type,
         },
         schema::{load_effective_properties, validate_object_properties},
+        search::semantic::cosine_similarity,
     },
     handlers::actions::preview_action_for_simulation,
     handlers::actions::{ensure_action_actor_permission, ensure_action_target_permission},
@@ -38,6 +39,7 @@ use crate::{
             ScenarioSummary, ScenarioSummaryDelta,
         },
         rule::{OntologyRule, RuleEvaluationMode, RuleMatchResponse},
+        search::{KnnObjectResult, KnnObjectsRequest, KnnObjectsResponse},
     },
 };
 
@@ -382,6 +384,218 @@ pub async fn query_objects(
     .into_response()
 }
 
+pub async fn knn_objects(
+    AuthUser(claims): AuthUser,
+    State(state): State<AppState>,
+    Path(type_id): Path<Uuid>,
+    Json(body): Json<KnnObjectsRequest>,
+) -> impl IntoResponse {
+    let limit = body.limit.unwrap_or(10).clamp(1, 100);
+    let metric = body
+        .metric
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("cosine")
+        .to_ascii_lowercase();
+    if !matches!(metric.as_str(), "cosine" | "dot_product" | "euclidean") {
+        return invalid("metric must be one of: cosine, dot_product, euclidean");
+    }
+
+    let definitions = match load_effective_properties(&state.db, type_id).await {
+        Ok(definitions) => definitions,
+        Err(error) => {
+            tracing::error!("load effective properties failed for KNN query: {error}");
+            return db_error("failed to load object type schema");
+        }
+    };
+
+    let Some(property_definition) = definitions
+        .iter()
+        .find(|definition| definition.name == body.property_name)
+    else {
+        return invalid(format!("unknown property '{}'", body.property_name));
+    };
+
+    if property_definition.property_type != "vector" {
+        return invalid(format!(
+            "property '{}' must be of type vector to run a KNN query",
+            body.property_name
+        ));
+    }
+
+    let query_vector = match (&body.anchor_object_id, &body.query_vector) {
+        (Some(_), Some(_)) => {
+            return invalid("provide either anchor_object_id or query_vector, but not both");
+        }
+        (None, None) => return invalid("provide anchor_object_id or query_vector"),
+        (None, Some(vector)) => {
+            if vector.is_empty() {
+                return invalid("query_vector cannot be empty");
+            }
+            vector.clone()
+        }
+        (Some(anchor_object_id), None) => {
+            let anchor = match load_object_instance(&state.db, *anchor_object_id).await {
+                Ok(Some(object)) => object,
+                Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+                Err(error) => {
+                    tracing::error!("anchor object lookup failed for KNN query: {error}");
+                    return db_error("failed to load anchor object");
+                }
+            };
+
+            if anchor.object_type_id != type_id {
+                return invalid("anchor_object_id must belong to the object type being queried");
+            }
+
+            if let Err(error) = ensure_object_access(&claims, &anchor) {
+                return (StatusCode::FORBIDDEN, Json(json!({ "error": error }))).into_response();
+            }
+
+            let Some(vector) =
+                extract_vector_from_properties(&anchor.properties, &body.property_name)
+            else {
+                return invalid(format!(
+                    "anchor object does not have a valid vector value for '{}'",
+                    body.property_name
+                ));
+            };
+            vector
+        }
+    };
+
+    let exclude_anchor = body
+        .exclude_anchor
+        .unwrap_or(body.anchor_object_id.is_some());
+
+    let objects = match load_accessible_object_set(&state, &claims, type_id).await {
+        Ok(objects) => objects,
+        Err(error) => {
+            tracing::error!("failed to load candidate object set for KNN query: {error}");
+            return db_error("failed to load candidate objects");
+        }
+    };
+
+    let mut data = objects
+        .into_iter()
+        .filter_map(|object| {
+            if exclude_anchor
+                && body.anchor_object_id.is_some()
+                && object_json_id(&object) == body.anchor_object_id
+            {
+                return None;
+            }
+
+            let candidate_vector = extract_vector_from_object_json(&object, &body.property_name)?;
+            let (score, distance) = knn_score(&metric, &query_vector, &candidate_vector)?;
+
+            Some(KnnObjectResult {
+                object,
+                score,
+                distance,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    data.sort_by(|left, right| {
+        right
+            .score
+            .partial_cmp(&left.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    data.truncate(limit);
+
+    Json(json!(KnnObjectsResponse {
+        property_name: body.property_name,
+        metric,
+        total: data.len(),
+        data,
+    }))
+    .into_response()
+}
+
+fn extract_vector_from_object_json(object: &Value, property_name: &str) -> Option<Vec<f32>> {
+    object
+        .get("properties")
+        .and_then(|properties| extract_vector_from_properties(properties, property_name))
+}
+
+fn extract_vector_from_properties(properties: &Value, property_name: &str) -> Option<Vec<f32>> {
+    properties
+        .as_object()
+        .and_then(|properties| properties.get(property_name))
+        .and_then(extract_vector_from_value)
+}
+
+fn extract_vector_from_value(value: &Value) -> Option<Vec<f32>> {
+    let values = value.as_array()?;
+    if values.is_empty() {
+        return None;
+    }
+
+    values
+        .iter()
+        .map(|entry| entry.as_f64().map(|value| value as f32))
+        .collect()
+}
+
+fn object_json_id(object: &Value) -> Option<Uuid> {
+    object
+        .get("id")
+        .and_then(Value::as_str)
+        .and_then(|value| Uuid::parse_str(value).ok())
+}
+
+fn knn_score(metric: &str, query: &[f32], candidate: &[f32]) -> Option<(f32, Option<f32>)> {
+    if query.is_empty() || candidate.is_empty() || query.len() != candidate.len() {
+        return None;
+    }
+
+    match metric {
+        "cosine" => {
+            let similarity = cosine_similarity(query, candidate);
+            Some((similarity, Some((1.0 - similarity).max(0.0))))
+        }
+        "dot_product" => Some((dot_product(query, candidate)?, None)),
+        "euclidean" => {
+            let distance = euclidean_distance(query, candidate)?;
+            Some((1.0 / (1.0 + distance), Some(distance)))
+        }
+        _ => None,
+    }
+}
+
+fn dot_product(left: &[f32], right: &[f32]) -> Option<f32> {
+    if left.is_empty() || right.is_empty() || left.len() != right.len() {
+        return None;
+    }
+
+    Some(
+        left.iter()
+            .zip(right.iter())
+            .map(|(left, right)| left * right)
+            .sum(),
+    )
+}
+
+fn euclidean_distance(left: &[f32], right: &[f32]) -> Option<f32> {
+    if left.is_empty() || right.is_empty() || left.len() != right.len() {
+        return None;
+    }
+
+    Some(
+        left.iter()
+            .zip(right.iter())
+            .map(|(left, right)| {
+                let delta = left - right;
+                delta * delta
+            })
+            .sum::<f32>()
+            .sqrt(),
+    )
+}
+
 pub async fn list_neighbors(
     AuthUser(claims): AuthUser,
     State(state): State<AppState>,
@@ -416,7 +630,7 @@ async fn load_applicable_actions(
 ) -> Result<Vec<ActionType>, String> {
     let rows = sqlx::query_as::<_, crate::models::action_type::ActionTypeRow>(
         r#"SELECT id, name, display_name, description, object_type_id, operation_kind,
-                  input_schema, config, confirmation_required, permission_key, authorization_policy,
+                  input_schema, form_schema, config, confirmation_required, permission_key, authorization_policy,
                   owner_id,
                   created_at, updated_at
            FROM action_types
@@ -2259,7 +2473,10 @@ pub async fn load_object_instance(
 mod tests {
     use serde_json::json;
 
-    use super::{build_simulation_impact_summary, extract_graph_object_ids};
+    use super::{
+        build_simulation_impact_summary, extract_graph_object_ids, extract_vector_from_object_json,
+        knn_score,
+    };
     use crate::models::graph::{GraphEdge, GraphNode, GraphResponse, GraphSummary};
     use uuid::Uuid;
 
@@ -2354,5 +2571,42 @@ mod tests {
         assert_eq!(summary.direct_neighbors, 1);
         assert_eq!(summary.matching_rules, 2);
         assert_eq!(summary.changed_properties.len(), 2);
+    }
+
+    #[test]
+    fn vector_extraction_reads_numeric_property_arrays() {
+        let object = json!({
+            "id": Uuid::nil(),
+            "properties": {
+                "embedding": [0.2, 0.4, 0.8]
+            }
+        });
+
+        let vector = extract_vector_from_object_json(&object, "embedding").expect("vector");
+
+        assert_eq!(vector, vec![0.2, 0.4, 0.8]);
+    }
+
+    #[test]
+    fn cosine_knn_score_prefers_closer_vectors() {
+        let query = [1.0, 0.0, 0.0];
+        let close = [0.98, 0.02, 0.0];
+        let far = [0.0, 1.0, 0.0];
+
+        let close_score = knn_score("cosine", &query, &close).expect("close score").0;
+        let far_score = knn_score("cosine", &query, &far).expect("far score").0;
+
+        assert!(close_score > far_score);
+    }
+
+    #[test]
+    fn euclidean_knn_score_reports_distance() {
+        let query = [1.0, 1.0];
+        let candidate = [2.0, 1.0];
+
+        let (score, distance) = knn_score("euclidean", &query, &candidate).expect("score");
+
+        assert!(score > 0.0);
+        assert_eq!(distance, Some(1.0));
     }
 }

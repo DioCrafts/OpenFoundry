@@ -74,6 +74,8 @@ enum ProjectTemplate {
     Connector,
     Transform,
     Widget,
+    FunctionTypescript,
+    FunctionPython,
 }
 
 #[derive(Subcommand)]
@@ -281,11 +283,6 @@ async fn main() -> Result<()> {
 }
 
 fn init_project(name: &str, template: ProjectTemplate, output_root: &Path) -> Result<()> {
-    let kind = match template {
-        ProjectTemplate::Connector => PluginKind::Connector,
-        ProjectTemplate::Transform => PluginKind::Transform,
-        ProjectTemplate::Widget => PluginKind::Widget,
-    };
     let project_dir = output_root.join(name);
     if project_dir.exists() {
         bail!("output directory already exists: {}", project_dir.display());
@@ -293,22 +290,189 @@ fn init_project(name: &str, template: ProjectTemplate, output_root: &Path) -> Re
 
     fs::create_dir_all(project_dir.join("src"))
         .with_context(|| format!("failed to create {}", project_dir.display()))?;
-    fs::write(
-        project_dir.join("Cargo.toml"),
-        scaffold::cargo_toml(name, kind),
-    )?;
-    fs::write(
-        project_dir.join("plugin.json"),
-        scaffold::manifest_json(name, kind),
-    )?;
-    fs::write(project_dir.join("src/lib.rs"), scaffold::lib_rs(name, kind))?;
 
-    println!(
-        "scaffolded {} plugin at {}",
-        kind.as_str(),
-        project_dir.display()
-    );
+    match template {
+        ProjectTemplate::Connector | ProjectTemplate::Transform | ProjectTemplate::Widget => {
+            let kind = match template {
+                ProjectTemplate::Connector => PluginKind::Connector,
+                ProjectTemplate::Transform => PluginKind::Transform,
+                ProjectTemplate::Widget => PluginKind::Widget,
+                ProjectTemplate::FunctionTypescript | ProjectTemplate::FunctionPython => {
+                    unreachable!("handled in outer match")
+                }
+            };
+            fs::write(
+                project_dir.join("Cargo.toml"),
+                scaffold::cargo_toml(name, kind),
+            )?;
+            fs::write(
+                project_dir.join("plugin.json"),
+                scaffold::manifest_json(name, kind),
+            )?;
+            fs::write(project_dir.join("src/lib.rs"), scaffold::lib_rs(name, kind))?;
+
+            println!(
+                "scaffolded {} plugin at {}",
+                kind.as_str(),
+                project_dir.display()
+            );
+        }
+        ProjectTemplate::FunctionTypescript => {
+            fs::write(
+                project_dir.join("openfoundry-function.json"),
+                function_manifest_json(name, "typescript", "default"),
+            )?;
+            fs::write(
+                project_dir.join("package.json"),
+                function_package_json(name),
+            )?;
+            fs::write(
+                project_dir.join("README.md"),
+                function_readme(name, "typescript", "src/index.ts"),
+            )?;
+            fs::write(
+                project_dir.join("src/index.ts"),
+                function_typescript_source(),
+            )?;
+
+            println!(
+                "scaffolded typescript function package at {}",
+                project_dir.display()
+            );
+        }
+        ProjectTemplate::FunctionPython => {
+            fs::write(
+                project_dir.join("openfoundry-function.json"),
+                function_manifest_json(name, "python", "handler"),
+            )?;
+            fs::write(project_dir.join("requirements.txt"), "openfoundry-sdk\n")?;
+            fs::write(
+                project_dir.join("README.md"),
+                function_readme(name, "python", "src/main.py"),
+            )?;
+            fs::write(project_dir.join("src/main.py"), function_python_source())?;
+
+            println!(
+                "scaffolded python function package at {}",
+                project_dir.display()
+            );
+        }
+    }
+
     Ok(())
+}
+
+fn function_manifest_json(name: &str, runtime: &str, entrypoint: &str) -> String {
+    format!(
+        r#"{{
+  "name": "{name}",
+  "version": "0.1.0",
+  "runtime": "{runtime}",
+  "entrypoint": "{entrypoint}",
+  "display_name": "{display}",
+  "description": "Reusable ontology function package scaffolded by of-cli.",
+  "capabilities": {{
+    "allow_ontology_read": true,
+    "allow_ontology_write": false,
+    "allow_ai": true,
+    "allow_network": false,
+    "timeout_seconds": 15,
+    "max_source_bytes": 65536
+  }}
+}}
+"#,
+        display = title_case_name(name),
+    )
+}
+
+fn function_package_json(name: &str) -> String {
+    format!(
+        r#"{{
+  "name": "{name}",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {{
+    "check": "tsc --noEmit"
+  }},
+  "devDependencies": {{
+    "typescript": "^5.6.3"
+  }}
+}}
+"#
+    )
+}
+
+fn function_readme(name: &str, runtime: &str, source_path: &str) -> String {
+    format!(
+        "# {title}\n\n\
+Scaffolded with `cargo run -p of-cli -- project init {name} --template function-{runtime}`.\n\n\
+## Files\n\n\
+- `openfoundry-function.json`: package metadata you can map into the Functions Platform.\n\
+- `{source_path}`: starter runtime source.\n\n\
+## Next steps\n\n\
+1. Refine the source logic and capabilities.\n\
+2. Register the package in OpenFoundry from the Functions Platform.\n\
+3. Simulate the package against a target object before wiring it into an action.\n",
+        title = title_case_name(name),
+    )
+}
+
+fn function_typescript_source() -> &'static str {
+    r#"export default async function handler(context) {
+  const target = context.targetObject;
+  const related = await context.sdk.ontology.search({
+    query: target?.properties?.name ?? 'high risk case',
+    kind: 'object_instance',
+    limit: 5,
+  });
+
+  return {
+    output: {
+      inspectedObjectId: target?.id ?? null,
+      related,
+      capabilities: context.capabilities,
+    },
+  };
+}
+"#
+}
+
+fn function_python_source() -> &'static str {
+    r#"def handler(context):
+    target = context.get("target_object")
+    related = context["sdk"].ontology.search(
+        query=(target or {}).get("properties", {}).get("name", "high risk case"),
+        kind="object_instance",
+        limit=5,
+    )
+
+    return {
+        "output": {
+            "inspectedObjectId": (target or {}).get("id"),
+            "related": related,
+            "capabilities": context["capabilities"],
+        }
+    }
+"#
+}
+
+fn title_case_name(name: &str) -> String {
+    name.split(['-', '_', ' '])
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| {
+            let mut chars = segment.chars();
+            match chars.next() {
+                Some(first) => {
+                    let mut rendered = first.to_uppercase().collect::<String>();
+                    rendered.push_str(chars.as_str());
+                    rendered
+                }
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn build_deploy_plan<'a>(service: &'a str, environment: &'a str) -> DeployPlan<'a> {

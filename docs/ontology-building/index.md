@@ -2,7 +2,7 @@
 
 This section is the semantic core of OpenFoundry.
 
-It mirrors the role that the Ontology plays in Foundry-style platforms: a layer that connects integrated data and models to operational concepts such as assets, cases, workflows, risks, suppliers, incidents, facilities, or customers.
+It documents the part of the platform that can turn datasets, streams, workflows, policies, and AI capabilities into a shared operational model of the business.
 
 ## OpenFoundry mapping
 
@@ -15,6 +15,7 @@ The closest repository components today are:
 - `services/workflow-service`
 - `services/app-builder-service`
 - `services/geospatial-service`
+- `services/ai-service`
 - `proto/ontology/*`
 - `proto/workflow/*`
 - `proto/query/*`
@@ -34,13 +35,27 @@ The closest repository components today are:
 - [Functions by runtime](/ontology-building/functions-runtime/)
 - [Rules and simulation](/ontology-building/rules-and-simulation)
 - [Object sets and search](/ontology-building/object-sets-and-search)
+- [Semantic search](/ontology-building/semantic-search)
 - [Object permissioning](/ontology-building/object-permissioning)
+- [Indexing and materialization](/ontology-building/indexing-and-materialization)
+- [Object edits and conflict resolution](/ontology-building/object-edits-and-conflict-resolution)
 - [Applications](/ontology-building/applications)
 - [Applications catalog](/ontology-building/applications-catalog/)
 - [Ontology architecture](/ontology-building/ontology-architecture/)
 - [Ontology Manager](/ontology-building/ontology-manager)
-- [Semantic search](/ontology-building/semantic-search)
 
 ## Current status
 
-This is the most developed capability section in the docs because it is the best fit for the current OpenFoundry service model and one of the clearest differentiators of the platform.
+This is one of the most developed documentation areas in the site because it aligns unusually well with the service boundaries already visible in the monorepo.
+
+The repository already contains real signals for:
+
+- ontology metadata management
+- object and link modeling
+- action execution
+- function simulation
+- object-set policy and materialization
+- semantic search
+- ABAC and restricted views
+
+The main gaps are less about the absence of ontology ideas and more about how much of the full lifecycle has already been consolidated into first-class platform products.

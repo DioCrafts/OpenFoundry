@@ -120,6 +120,7 @@ rand = "0.8"
 base64 = "0.22"
 url = { version = "2", features = ["serde"] }
 regex = "1"
+semver = "1"
 
 # ── Testing ──
 testcontainers = "0.23"

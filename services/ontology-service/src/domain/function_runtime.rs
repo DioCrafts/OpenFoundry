@@ -6,6 +6,7 @@ use auth_middleware::{
 };
 use chrono::{DateTime, Utc};
 use pyo3::{prelude::*, types::PyDict};
+use semver::Version;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::{fs, process::Command, time::timeout};
@@ -19,6 +20,7 @@ use crate::{
         action_type::ActionType,
         function_package::{
             FunctionCapabilities, FunctionPackage, FunctionPackageRow, FunctionPackageSummary,
+            parse_function_package_version,
         },
     },
 };
@@ -77,6 +79,14 @@ impl ResolvedInlineFunction {
 #[derive(Debug, Deserialize)]
 struct FunctionPackageReferenceConfig {
     function_package_id: Uuid,
+}
+
+#[derive(Debug, Deserialize)]
+struct VersionedFunctionPackageReferenceConfig {
+    function_package_name: String,
+    function_package_version: String,
+    #[serde(default)]
+    function_package_auto_upgrade: bool,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -244,6 +254,17 @@ async function main() {
             request(input.ontologyServiceUrl, 'POST', `/api/v1/ontology/types/${typeId}/objects/query`, {
               equals,
               limit,
+            })
+        : blockedCapability('ontology.read'),
+      knnObjects: allowOntologyRead
+        ? ({ typeId, propertyName, anchorObjectId, queryVector, limit, metric, excludeAnchor }) =>
+            request(input.ontologyServiceUrl, 'POST', `/api/v1/ontology/types/${typeId}/objects/knn`, {
+              property_name: propertyName,
+              anchor_object_id: anchorObjectId,
+              query_vector: queryVector,
+              limit,
+              metric,
+              exclude_anchor: excludeAnchor,
             })
         : blockedCapability('ontology.read'),
       listNeighbors: allowOntologyRead
@@ -463,6 +484,21 @@ class _OntologySdk:
             },
         )
 
+    def knn_objects(self, *, type_id, property_name, anchor_object_id=None, query_vector=None, limit=None, metric=None, exclude_anchor=None):
+        return _request(
+            ontology_service_url,
+            'POST',
+            f'/api/v1/ontology/types/{type_id}/objects/knn',
+            {
+                'property_name': property_name,
+                'anchor_object_id': anchor_object_id,
+                'query_vector': query_vector,
+                'limit': limit,
+                'metric': metric,
+                'exclude_anchor': exclude_anchor,
+            },
+        )
+
     def list_neighbors(self, *, type_id, object_id):
         return _request(ontology_service_url, 'GET', f'/api/v1/ontology/types/{type_id}/objects/{object_id}/neighbors')
 
@@ -586,6 +622,7 @@ llm = _Llm()
 if not capabilities.get('allow_ontology_read', True):
     sdk.ontology.get_object = _blocked_capability('ontology.read')
     sdk.ontology.query_objects = _blocked_capability('ontology.read')
+    sdk.ontology.knn_objects = _blocked_capability('ontology.read')
     sdk.ontology.list_neighbors = _blocked_capability('ontology.read')
     sdk.ontology.search = _blocked_capability('ontology.read')
     sdk.ontology.graph = _blocked_capability('ontology.read')
@@ -701,7 +738,7 @@ async fn load_function_package(
     function_package_id: Uuid,
 ) -> Result<Option<FunctionPackage>, String> {
     sqlx::query_as::<_, FunctionPackageRow>(
-        r#"SELECT id, name, display_name, description, runtime, source, entrypoint,
+        r#"SELECT id, name, version, display_name, description, runtime, source, entrypoint,
                   capabilities, owner_id, created_at, updated_at
            FROM ontology_function_packages
            WHERE id = $1"#,
@@ -713,6 +750,70 @@ async fn load_function_package(
     .map(FunctionPackage::try_from)
     .transpose()
     .map_err(|error| format!("failed to decode function package: {error}"))
+}
+
+async fn load_function_packages_by_name(
+    state: &AppState,
+    function_package_name: &str,
+) -> Result<Vec<FunctionPackage>, String> {
+    sqlx::query_as::<_, FunctionPackageRow>(
+        r#"SELECT id, name, version, display_name, description, runtime, source, entrypoint,
+                  capabilities, owner_id, created_at, updated_at
+           FROM ontology_function_packages
+           WHERE name = $1"#,
+    )
+    .bind(function_package_name)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|error| format!("failed to load function packages: {error}"))?
+    .into_iter()
+    .map(FunctionPackage::try_from)
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|error| format!("failed to decode function packages: {error}"))
+}
+
+fn supports_auto_upgrade(baseline: &Version) -> bool {
+    baseline.major >= 1 && baseline.pre.is_empty()
+}
+
+fn compatible_auto_upgrade_version(baseline: &Version, candidate: &Version) -> bool {
+    supports_auto_upgrade(baseline)
+        && candidate.major == baseline.major
+        && candidate.pre.is_empty()
+        && candidate >= baseline
+}
+
+fn select_function_package_version<'a>(
+    packages: &'a [FunctionPackage],
+    reference: &VersionedFunctionPackageReferenceConfig,
+) -> Result<Option<&'a FunctionPackage>, String> {
+    let requested_version = parse_function_package_version(&reference.function_package_version)?;
+
+    if reference.function_package_auto_upgrade {
+        if !supports_auto_upgrade(&requested_version) {
+            return Err(
+                "function package auto-upgrade requires a stable baseline version 1.0.0 or above"
+                    .to_string(),
+            );
+        }
+
+        let mut compatible = packages
+            .iter()
+            .filter_map(|package| {
+                parse_function_package_version(&package.version)
+                    .ok()
+                    .filter(|version| compatible_auto_upgrade_version(&requested_version, version))
+                    .map(|version| (version, package))
+            })
+            .collect::<Vec<_>>();
+
+        compatible.sort_by(|left, right| right.0.cmp(&left.0));
+        return Ok(compatible.into_iter().map(|(_, package)| package).next());
+    }
+
+    Ok(packages
+        .iter()
+        .find(|package| package.version == reference.function_package_version))
 }
 
 pub fn validate_function_capabilities(
@@ -776,6 +877,50 @@ pub async fn resolve_inline_function_config(
         return Ok(Some(ResolvedInlineFunction {
             config: inline_config,
             capabilities: package.capabilities,
+            package: Some(package_summary),
+        }));
+    }
+
+    if config.get("function_package_name").is_some() {
+        let reference: VersionedFunctionPackageReferenceConfig = serde_json::from_value(json!({
+            "function_package_name": config.get("function_package_name"),
+            "function_package_version": config.get("function_package_version"),
+            "function_package_auto_upgrade": config
+                .get("function_package_auto_upgrade")
+                .cloned()
+                .unwrap_or(Value::Bool(false)),
+        }))
+        .map_err(|error| format!("invalid versioned function package reference: {error}"))?;
+        let packages =
+            load_function_packages_by_name(state, &reference.function_package_name).await?;
+        let package = select_function_package_version(&packages, &reference)?.ok_or_else(|| {
+            if reference.function_package_auto_upgrade {
+                format!(
+                    "no compatible function package version found for '{}' starting at {}",
+                    reference.function_package_name, reference.function_package_version
+                )
+            } else {
+                format!(
+                    "referenced function package '{}@{}' was not found",
+                    reference.function_package_name, reference.function_package_version
+                )
+            }
+        })?;
+        let package_summary = FunctionPackageSummary::from(package);
+        let inline_config = parse_inline_function_config(&json!({
+            "runtime": package.runtime,
+            "source": package.source,
+        }))?
+        .ok_or_else(|| "function package does not define a supported runtime".to_string())?;
+        validate_function_capabilities(
+            &inline_config,
+            &package.capabilities,
+            Some(&package_summary),
+        )?;
+
+        return Ok(Some(ResolvedInlineFunction {
+            config: inline_config,
+            capabilities: package.capabilities.clone(),
             package: Some(package_summary),
         }));
     }
@@ -1238,9 +1383,33 @@ pub fn object_to_json(object: ObjectInstance) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use chrono::Utc;
     use serde_json::json;
+    use uuid::Uuid;
 
-    use super::{InlineFunctionConfig, enrich_typescript_result, parse_inline_function_config};
+    use crate::models::function_package::{FunctionCapabilities, FunctionPackage};
+
+    use super::{
+        InlineFunctionConfig, VersionedFunctionPackageReferenceConfig, enrich_typescript_result,
+        parse_inline_function_config, select_function_package_version,
+    };
+
+    fn package(name: &str, version: &str) -> FunctionPackage {
+        FunctionPackage {
+            id: Uuid::nil(),
+            name: name.to_string(),
+            version: version.to_string(),
+            display_name: name.to_string(),
+            description: String::new(),
+            runtime: "typescript".to_string(),
+            source: "export default async function handler() { return {}; }".to_string(),
+            entrypoint: "default".to_string(),
+            capabilities: FunctionCapabilities::default(),
+            owner_id: Uuid::nil(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
 
     #[test]
     fn parses_typescript_runtime_config() {
@@ -1264,5 +1433,56 @@ mod tests {
         );
         assert_eq!(result["stdout"], json!(["hello"]));
         assert_eq!(result["output"]["stdout"], json!(["hello"]));
+    }
+
+    #[test]
+    fn resolves_exact_versioned_package_reference() {
+        let packages = vec![package("triage", "1.1.0"), package("triage", "1.2.0")];
+        let reference = VersionedFunctionPackageReferenceConfig {
+            function_package_name: "triage".to_string(),
+            function_package_version: "1.1.0".to_string(),
+            function_package_auto_upgrade: false,
+        };
+
+        let selected = select_function_package_version(&packages, &reference)
+            .expect("reference should be valid")
+            .expect("package should exist");
+
+        assert_eq!(selected.version, "1.1.0");
+    }
+
+    #[test]
+    fn resolves_latest_compatible_auto_upgrade_release() {
+        let packages = vec![
+            package("triage", "1.1.0"),
+            package("triage", "1.3.2"),
+            package("triage", "2.0.0"),
+        ];
+        let reference = VersionedFunctionPackageReferenceConfig {
+            function_package_name: "triage".to_string(),
+            function_package_version: "1.2.0".to_string(),
+            function_package_auto_upgrade: true,
+        };
+
+        let selected = select_function_package_version(&packages, &reference)
+            .expect("reference should be valid")
+            .expect("package should exist");
+
+        assert_eq!(selected.version, "1.3.2");
+    }
+
+    #[test]
+    fn rejects_auto_upgrade_for_unstable_baseline() {
+        let packages = vec![package("triage", "0.3.0")];
+        let reference = VersionedFunctionPackageReferenceConfig {
+            function_package_name: "triage".to_string(),
+            function_package_version: "0.3.0".to_string(),
+            function_package_auto_upgrade: true,
+        };
+
+        let error = select_function_package_version(&packages, &reference)
+            .expect_err("unstable auto-upgrade should fail");
+
+        assert!(error.contains("stable baseline version 1.0.0 or above"));
     }
 }

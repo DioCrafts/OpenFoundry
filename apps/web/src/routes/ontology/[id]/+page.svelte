@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { page as pageStore } from '$app/stores';
+  import ActionExecutor from '$lib/components/ontology/ActionExecutor.svelte';
   import {
     applyRule,
     attachSharedPropertyType,
@@ -14,13 +15,17 @@
     deleteActionWhatIfBranch,
     deleteObject,
     detachSharedPropertyType,
+    executeInlineEdit,
     executeAction,
+    getFunctionAuthoringSurface,
+    getFunctionPackageMetrics,
     getMachineryInsights,
     getMachineryQueue,
     getObjectView,
     getObjectType,
     listActionTypes,
     listFunctionPackages,
+    listFunctionPackageRuns,
     listLinkTypes,
     listObjects,
     listProperties,
@@ -32,16 +37,22 @@
     simulateObject,
     simulateObjectScenarios,
     simulateRule,
+    updateProperty,
     updateMachineryQueueItem,
     validateAction,
     type ActionAuthorizationPolicy,
+    type ActionFormSchema,
     type ActionInputField,
     type ActionOperationKind,
     type ActionType,
     type ActionWhatIfBranch,
     type ExecuteActionResponse,
     type FunctionCapabilities,
+    type FunctionAuthoringSurface,
+    type FunctionAuthoringTemplate,
+    type FunctionPackageMetrics,
     type FunctionPackage,
+    type FunctionPackageRun,
     type LinkType,
     type MachineryInsight,
     type MachineryQueueResponse,
@@ -52,6 +63,7 @@
     type ObjectType,
     type OntologyRule,
     type Property,
+    type PropertyInlineEditConfig,
     type ScenarioGoalSpec,
     type ScenarioMetricSpec,
     type ScenarioSimulationCandidate,
@@ -184,10 +196,44 @@
     'timestamp',
     'json',
     'array',
+    'vector',
     'reference',
     'geo_point',
     'media_reference',
   ];
+
+  function buildDefaultActionFormSchema(inputSchema: ActionInputField[]): ActionFormSchema {
+    const requiredFields = inputSchema.filter((field) => field.required).map((field) => field.name);
+    const optionalFields = inputSchema.filter((field) => !field.required).map((field) => field.name);
+    const sections = [];
+
+    if (requiredFields.length) {
+      sections.push({
+        id: 'core',
+        title: 'Core inputs',
+        description: 'The minimum information required to run this action.',
+        columns: requiredFields.length > 1 ? 2 : 1,
+        parameter_names: requiredFields,
+      });
+    }
+
+    if (optionalFields.length) {
+      sections.push({
+        id: sections.length ? 'optional' : 'main',
+        title: sections.length ? 'Optional context' : 'Parameters',
+        description: sections.length
+          ? 'Additional context that can refine the action execution.'
+          : 'Parameters required for this action.',
+        columns: optionalFields.length > 1 ? 2 : 1,
+        parameter_names: optionalFields,
+      });
+    }
+
+    return {
+      sections,
+      parameter_overrides: [],
+    };
+  }
 
   const functionSourceTemplates = {
     typescript: `export default async function handler(context) {
@@ -239,6 +285,9 @@
   let linkTypes = $state<LinkType[]>([]);
   let objects = $state<ObjectInstance[]>([]);
   let actions = $state<ActionType[]>([]);
+  const inlineEditActionOptions = $derived(
+    actions.filter((action) => action.operation_kind === 'update_object'),
+  );
   let loading = $state(true);
   let error = $state('');
   const attachableSharedPropertyTypes = $derived(
@@ -250,9 +299,12 @@
   let actionFormError = $state('');
   let actionFormSuccess = $state('');
   let objectError = $state('');
+  let objectSuccess = $state('');
   let runtimeError = $state('');
   let sharedPropertyFormError = $state('');
   let sharedPropertyFormSuccess = $state('');
+  let propertyConfigError = $state('');
+  let propertyConfigSuccess = $state('');
 
   let creatingAction = $state(false);
   let creatingObject = $state(false);
@@ -263,6 +315,8 @@
   let attachingSharedPropertyType = $state(false);
   let detachingSharedPropertyTypeId = $state('');
   let deletingWhatIfBranchId = $state('');
+  let savingInlineEditPropertyId = $state('');
+  let executingInlineEditKey = $state('');
 
   let selectedActionId = $state('');
   let selectedTargetObjectId = $state('');
@@ -270,7 +324,10 @@
   let validation = $state<ValidateActionResponse | null>(null);
   let execution = $state<ExecuteActionResponse | null>(null);
   let actionWhatIfBranches = $state<ActionWhatIfBranch[]>([]);
+  let functionAuthoringSurface = $state<FunctionAuthoringSurface | null>(null);
   let functionPackages = $state<FunctionPackage[]>([]);
+  let functionMetrics = $state<FunctionPackageMetrics | null>(null);
+  let functionRuns = $state<FunctionPackageRun[]>([]);
   let rules = $state<OntologyRule[]>([]);
   let machineryInsights = $state<MachineryInsight[]>([]);
   let machineryQueue = $state<MachineryQueueResponse | null>(null);
@@ -284,12 +341,14 @@
   let creatingFunctionPackage = $state(false);
   let creatingRule = $state(false);
   let functionRuntimeLoading = $state(false);
+  let functionMonitoringLoading = $state(false);
   let ruleRuntimeLoading = $state(false);
 
   let functionFormError = $state('');
   let functionFormSuccess = $state('');
   let functionRuntimeError = $state('');
   let functionRuntimeResult = $state<Record<string, unknown> | null>(null);
+  let functionMonitoringError = $state('');
   let ruleFormError = $state('');
   let ruleFormSuccess = $state('');
   let ruleRuntimeError = $state('');
@@ -297,6 +356,7 @@
   let updatingMachineryQueueItemId = $state('');
 
   let functionName = $state('');
+  let functionVersion = $state('0.1.0');
   let functionDisplayName = $state('');
   let functionDescription = $state('');
   let functionRuntime = $state<'typescript' | 'python'>('typescript');
@@ -433,10 +493,18 @@
   let actionPermissionKey = $state('');
   let actionAuthorizationPolicyText = $state(JSON.stringify({}, null, 2));
   let actionInputSchemaText = $state(JSON.stringify(actionTemplates.update_object.inputSchema, null, 2));
+  let actionFormSchemaText = $state(
+    JSON.stringify(buildDefaultActionFormSchema(actionTemplates.update_object.inputSchema), null, 2),
+  );
   let actionConfigText = $state(JSON.stringify(actionTemplates.update_object.config, null, 2));
 
   let objectPropertiesText = $state('{}');
+  let propertyInlineEditActionSelections = $state<Record<string, string>>({});
+  let propertyInlineEditInputNames = $state<Record<string, string>>({});
+  let objectInlineEditDrafts = $state<Record<string, string>>({});
   let actionParametersText = $state('{}');
+  let actionParametersDraft = $state<Record<string, unknown>>({});
+  let actionParametersInputError = $state('');
   let actionJustification = $state('');
   let whatIfBranchName = $state('');
   let whatIfBranchDescription = $state('');
@@ -454,6 +522,23 @@
 
   function formatTimestamp(value: string | null | undefined) {
     return value ? new Date(value).toLocaleString() : 'n/a';
+  }
+
+  function formatDuration(value: number | null | undefined) {
+    if (value === null || value === undefined || Number.isNaN(value)) return 'n/a';
+    return `${Math.round(value)} ms`;
+  }
+
+  function formatPercent(value: number | null | undefined) {
+    if (value === null || value === undefined || Number.isNaN(value)) return 'n/a';
+    return `${(value * 100).toFixed(1)}%`;
+  }
+
+  function applyFunctionAuthoringTemplate(template: FunctionAuthoringTemplate) {
+    functionRuntime = template.runtime === 'python' ? 'python' : 'typescript';
+    functionEntrypoint = template.entrypoint === 'handler' ? 'handler' : 'default';
+    functionCapabilitiesText = formatJson(template.default_capabilities);
+    functionSourceText = template.starter_source;
   }
 
   function countEntries(entries: Record<string, number> | undefined) {
@@ -515,6 +600,116 @@
       throw new Error(`${label} must be a JSON object`);
     }
     return parsed as Record<string, unknown>;
+  }
+
+  function resetActionParameters() {
+    actionParametersDraft = {};
+    actionParametersText = '{}';
+    actionParametersInputError = '';
+  }
+
+  function handleStructuredActionParametersChange(
+    event: CustomEvent<{ parameters: Record<string, unknown> }>,
+  ) {
+    actionParametersDraft = event.detail.parameters;
+    actionParametersText = formatJson(event.detail.parameters);
+    actionParametersInputError = '';
+  }
+
+  function handleActionParametersTextInput(event: Event) {
+    const next = (event.currentTarget as HTMLTextAreaElement).value;
+    actionParametersText = next;
+    try {
+      actionParametersDraft = parseJsonObject(next, 'Action parameters');
+      actionParametersInputError = '';
+    } catch (cause) {
+      actionParametersInputError =
+        cause instanceof Error ? cause.message : 'Action parameters must be valid JSON';
+    }
+  }
+
+  function getSelectedTargetObject(): ObjectInstance | null {
+    return objects.find((object) => object.id === selectedTargetObjectId) ?? null;
+  }
+
+  function inlineEditFieldKey(objectId: string, propertyId: string) {
+    return `${objectId}:${propertyId}`;
+  }
+
+  function formatInlineEditDraft(value: unknown): string {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string') return value;
+    return JSON.stringify(value);
+  }
+
+  function parseInlineEditSubmissionValue(property: Property, raw: string): unknown {
+    const trimmed = raw.trim();
+
+    switch (property.property_type) {
+      case 'integer': {
+        const parsed = Number.parseInt(trimmed, 10);
+        if (Number.isNaN(parsed)) throw new Error(`${property.display_name} must be an integer`);
+        return parsed;
+      }
+      case 'float': {
+        const parsed = Number.parseFloat(trimmed);
+        if (Number.isNaN(parsed)) throw new Error(`${property.display_name} must be a number`);
+        return parsed;
+      }
+      case 'boolean': {
+        if (trimmed === 'true') return true;
+        if (trimmed === 'false') return false;
+        throw new Error(`${property.display_name} must be true or false`);
+      }
+      case 'json':
+      case 'array':
+        return parseJsonValue(trimmed, `${property.display_name} inline edit value`, null);
+      case 'vector': {
+        const parsed = parseJsonArray<number>(trimmed, `${property.display_name} inline edit value`);
+        if (!parsed.length || !parsed.every((entry) => typeof entry === 'number' && Number.isFinite(entry))) {
+          throw new Error(`${property.display_name} must be a non-empty JSON array of numeric values`);
+        }
+        return parsed;
+      }
+      default:
+        return raw;
+    }
+  }
+
+  function actionLabelById(actionId: string | null | undefined) {
+    if (!actionId) return 'No action configured';
+    const action = actions.find((candidate) => candidate.id === actionId);
+    return action?.display_name || action?.name || actionId;
+  }
+
+  function syncPropertyInlineEditConfigDrafts(nextProperties: Property[]) {
+    propertyInlineEditActionSelections = Object.fromEntries(
+      nextProperties.map((property) => [
+        property.id,
+        property.inline_edit_config?.action_type_id ?? '',
+      ]),
+    );
+    propertyInlineEditInputNames = Object.fromEntries(
+      nextProperties.map((property) => [
+        property.id,
+        property.inline_edit_config?.input_name ?? '',
+      ]),
+    );
+  }
+
+  function syncObjectInlineEditDrafts(nextProperties: Property[], nextObjects: ObjectInstance[]) {
+    const inlineEditableProperties = nextProperties.filter((property) => property.inline_edit_config);
+    const nextDrafts: Record<string, string> = {};
+
+    for (const object of nextObjects) {
+      for (const property of inlineEditableProperties) {
+        nextDrafts[inlineEditFieldKey(object.id, property.id)] = formatInlineEditDraft(
+          object.properties?.[property.name],
+        );
+      }
+    }
+
+    objectInlineEditDrafts = nextDrafts;
   }
 
   function scenarioDeltaClass(
@@ -600,7 +795,9 @@
   }
 
   function applyTemplate(kind: ActionOperationKind) {
-    actionInputSchemaText = formatJson(actionTemplates[kind].inputSchema);
+    const nextInputSchema = actionTemplates[kind].inputSchema;
+    actionInputSchemaText = formatJson(nextInputSchema);
+    actionFormSchemaText = formatJson(buildDefaultActionFormSchema(nextInputSchema));
     actionConfigText = formatJson(actionTemplates[kind].config);
   }
 
@@ -620,8 +817,12 @@
   }
 
   function syncSelections(nextActions: ActionType[], nextObjects: ObjectInstance[]) {
+    const previousSelectedActionId = selectedActionId;
     if (!nextActions.some((action) => action.id === selectedActionId)) {
       selectedActionId = nextActions[0]?.id ?? '';
+    }
+    if (selectedActionId !== previousSelectedActionId) {
+      resetActionParameters();
     }
 
     if (!nextObjects.some((object) => object.id === selectedTargetObjectId)) {
@@ -631,6 +832,50 @@
     if (!selectedTargetObjectId && nextObjects[0]) {
       selectedTargetObjectId = nextObjects[0].id;
     }
+  }
+
+  function syncFunctionPackageSelection(nextFunctionPackages: FunctionPackage[]) {
+    if (
+      selectedFunctionPackageId &&
+      nextFunctionPackages.some((functionPackage) => functionPackage.id === selectedFunctionPackageId)
+    ) {
+      return;
+    }
+
+    selectedFunctionPackageId = nextFunctionPackages[0]?.id ?? '';
+  }
+
+  async function loadFunctionPackageMonitoring(functionPackageId = selectedFunctionPackageId) {
+    if (!functionPackageId) {
+      functionMetrics = null;
+      functionRuns = [];
+      functionMonitoringError = '';
+      return;
+    }
+
+    functionMonitoringLoading = true;
+    functionMonitoringError = '';
+
+    try {
+      const [nextMetrics, nextRuns] = await Promise.all([
+        getFunctionPackageMetrics(functionPackageId),
+        listFunctionPackageRuns(functionPackageId, { page: 1, per_page: 8 }),
+      ]);
+      functionMetrics = nextMetrics;
+      functionRuns = nextRuns.data;
+    } catch (cause) {
+      functionMonitoringError =
+        cause instanceof Error ? cause.message : 'Failed to load function monitoring';
+      functionMetrics = null;
+      functionRuns = [];
+    } finally {
+      functionMonitoringLoading = false;
+    }
+  }
+
+  async function handleSelectFunctionPackage(functionPackageId: string) {
+    selectedFunctionPackageId = functionPackageId;
+    await loadFunctionPackageMonitoring(functionPackageId);
   }
 
   async function loadActionWhatIfHistory(actionId = selectedActionId) {
@@ -653,6 +898,7 @@
     runtimeError = '';
     validation = null;
     execution = null;
+    resetActionParameters();
     await loadActionWhatIfHistory(id);
   }
 
@@ -694,6 +940,7 @@
         nextLinkTypes,
         nextObjects,
         nextActions,
+        nextFunctionAuthoringSurface,
         nextFunctionPackages,
         nextRules,
         nextMachineryInsights,
@@ -706,6 +953,7 @@
         listLinkTypes({ object_type_id: objectTypeId, page: 1, per_page: 100 }),
         listObjects(objectTypeId, { page: 1, per_page: 50 }),
         listActionTypes({ object_type_id: objectTypeId, page: 1, per_page: 100 }),
+        getFunctionAuthoringSurface(),
         listFunctionPackages({ page: 1, per_page: 100 }),
         listRules({ object_type_id: objectTypeId, page: 1, per_page: 100 }),
         getMachineryInsights({ object_type_id: objectTypeId }),
@@ -719,6 +967,9 @@
       linkTypes = nextLinkTypes.data;
       objects = nextObjects.data;
       actions = nextActions.data;
+      functionAuthoringSurface = nextFunctionAuthoringSurface;
+      syncPropertyInlineEditConfigDrafts(nextProperties);
+      syncObjectInlineEditDrafts(nextProperties, nextObjects.data);
       functionPackages = nextFunctionPackages.data;
       rules = nextRules.data;
       machineryInsights = nextMachineryInsights.data;
@@ -735,8 +986,9 @@
         selectedSharedPropertyTypeId = nextAttachableSharedPropertyTypes[0]?.id ?? '';
       }
       syncSelections(nextActions.data, nextObjects.data);
-      selectedFunctionPackageId = nextFunctionPackages.data[0]?.id ?? '';
+      syncFunctionPackageSelection(nextFunctionPackages.data);
       await loadActionWhatIfHistory(selectedActionId);
+      await loadFunctionPackageMonitoring(selectedFunctionPackageId);
       if (selectedTargetObjectId) {
         await loadObjectInspector(selectedTargetObjectId);
       } else {
@@ -846,12 +1098,14 @@
 
     creatingObject = true;
     objectError = '';
+    objectSuccess = '';
 
     try {
       const propertiesPayload = parseJsonObject(objectPropertiesText, 'Object properties');
       const created = await createObject(objectTypeId, propertiesPayload);
       objectPropertiesText = '{}';
       selectedTargetObjectId = created.id;
+      objectSuccess = 'Object created and selected for action testing.';
       await load();
     } catch (cause) {
       objectError = cause instanceof Error ? cause.message : 'Failed to create object';
@@ -866,6 +1120,7 @@
     }
 
     objectError = '';
+    objectSuccess = '';
 
     try {
       await deleteObject(objectTypeId, id);
@@ -877,6 +1132,91 @@
       await load();
     } catch (cause) {
       objectError = cause instanceof Error ? cause.message : 'Failed to delete object';
+    }
+  }
+
+  async function handleSaveInlineEditConfig(property: Property) {
+    if (!objectTypeId) {
+      return;
+    }
+
+    const selectedActionId = propertyInlineEditActionSelections[property.id]?.trim();
+    const inputName = propertyInlineEditInputNames[property.id]?.trim();
+
+    savingInlineEditPropertyId = property.id;
+    propertyConfigError = '';
+    propertyConfigSuccess = '';
+
+    try {
+      if (!selectedActionId) {
+        throw new Error('Select an update_object action or clear the configuration');
+      }
+
+      const inlineEditConfig: PropertyInlineEditConfig = {
+        action_type_id: selectedActionId,
+        input_name: inputName || undefined,
+      };
+
+      await updateProperty(objectTypeId, property.id, {
+        inline_edit_config: inlineEditConfig,
+      });
+      propertyConfigSuccess = `Inline edit configured for ${property.display_name}.`;
+      await load();
+    } catch (cause) {
+      propertyConfigError =
+        cause instanceof Error ? cause.message : 'Failed to save inline edit configuration';
+    } finally {
+      savingInlineEditPropertyId = '';
+    }
+  }
+
+  async function handleClearInlineEditConfig(property: Property) {
+    if (!objectTypeId) {
+      return;
+    }
+
+    savingInlineEditPropertyId = property.id;
+    propertyConfigError = '';
+    propertyConfigSuccess = '';
+
+    try {
+      await updateProperty(objectTypeId, property.id, {
+        inline_edit_config: null,
+      });
+      propertyConfigSuccess = `Inline edit cleared for ${property.display_name}.`;
+      await load();
+    } catch (cause) {
+      propertyConfigError =
+        cause instanceof Error ? cause.message : 'Failed to clear inline edit configuration';
+    } finally {
+      savingInlineEditPropertyId = '';
+    }
+  }
+
+  async function handleExecuteInlineEdit(objectId: string, property: Property) {
+    if (!objectTypeId) {
+      return;
+    }
+
+    const draftKey = inlineEditFieldKey(objectId, property.id);
+    const rawValue = objectInlineEditDrafts[draftKey] ?? '';
+
+    executingInlineEditKey = draftKey;
+    objectError = '';
+    objectSuccess = '';
+    runtimeError = '';
+    execution = null;
+
+    try {
+      const value = parseInlineEditSubmissionValue(property, rawValue);
+      selectedTargetObjectId = objectId;
+      execution = await executeInlineEdit(objectTypeId, objectId, property.id, { value });
+      objectSuccess = `Inline edit applied through ${actionLabelById(property.inline_edit_config?.action_type_id)}.`;
+      await load();
+    } catch (cause) {
+      objectError = cause instanceof Error ? cause.message : 'Failed to apply inline edit';
+    } finally {
+      executingInlineEditKey = '';
     }
   }
 
@@ -896,6 +1236,7 @@
       }
 
       const inputSchema = parseJsonArray<ActionInputField>(actionInputSchemaText, 'Action input schema');
+      const formSchema = parseJsonObject(actionFormSchemaText, 'Action form schema') as ActionFormSchema;
       const config = parseJsonValue(actionConfigText, 'Action config', {});
       const authorizationPolicy = parseJsonObject(
         actionAuthorizationPolicyText,
@@ -908,6 +1249,7 @@
         object_type_id: objectTypeId,
         operation_kind: actionOperationKind,
         input_schema: inputSchema,
+        form_schema: formSchema,
         config,
         confirmation_required: actionConfirmationRequired,
         permission_key: actionPermissionKey.trim() || undefined,
@@ -1067,6 +1409,7 @@
       ) as Partial<FunctionCapabilities>;
       const created = await createFunctionPackage({
         name: functionName.trim(),
+        version: functionVersion.trim() || undefined,
         display_name: functionDisplayName.trim() || undefined,
         description: functionDescription.trim() || undefined,
         runtime: functionRuntime,
@@ -1077,6 +1420,7 @@
       selectedFunctionPackageId = created.id;
       functionFormSuccess = `Created function package ${created.display_name}.`;
       functionName = '';
+      functionVersion = '0.1.0';
       functionDisplayName = '';
       functionDescription = '';
       await load();
@@ -1087,9 +1431,21 @@
     }
   }
 
-  function useFunctionPackageInActionConfig(packageId: string) {
+  function usePinnedFunctionPackageInActionConfig(packageId: string) {
     actionOperationKind = 'invoke_function';
     actionConfigText = formatJson({ function_package_id: packageId });
+  }
+
+  function useVersionedFunctionPackageInActionConfig(
+    functionPackage: FunctionPackage,
+    autoUpgrade = false,
+  ) {
+    actionOperationKind = 'invoke_function';
+    actionConfigText = formatJson({
+      function_package_name: functionPackage.name,
+      function_package_version: functionPackage.version,
+      ...(autoUpgrade ? { function_package_auto_upgrade: true } : {}),
+    });
   }
 
   async function handleSimulateFunctionPackage(packageId: string) {
@@ -1098,6 +1454,7 @@
     functionRuntimeLoading = true;
     functionRuntimeError = '';
     functionRuntimeResult = null;
+    selectedFunctionPackageId = packageId;
 
     try {
       const result = await simulateFunctionPackage(packageId, {
@@ -1106,8 +1463,10 @@
         parameters: parseJsonObject(actionParametersText, 'Function package parameters'),
       });
       functionRuntimeResult = result as unknown as Record<string, unknown>;
+      await loadFunctionPackageMonitoring(packageId);
     } catch (cause) {
       functionRuntimeError = cause instanceof Error ? cause.message : 'Failed to simulate function package';
+      await loadFunctionPackageMonitoring(packageId);
     } finally {
       functionRuntimeLoading = false;
     }
@@ -1298,6 +1657,18 @@
           </a>
         </div>
 
+        {#if propertyConfigError}
+          <div class="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
+            {propertyConfigError}
+          </div>
+        {/if}
+
+        {#if propertyConfigSuccess}
+          <div class="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300">
+            {propertyConfigSuccess}
+          </div>
+        {/if}
+
         {#if properties.length === 0}
           <div class="mt-4 rounded-2xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-500 dark:border-slate-700">
             No properties have been defined yet.
@@ -1320,6 +1691,74 @@
                 {#if property.description}
                   <p class="mt-2 text-sm text-slate-500">{property.description}</p>
                 {/if}
+                <div class="mt-3 rounded-2xl bg-slate-50 p-4 dark:bg-slate-950/40">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p class="text-sm font-medium text-slate-900 dark:text-slate-100">Action-backed inline edit</p>
+                      <p class="mt-1 text-xs text-slate-500">
+                        Back this property with an `update_object` action. At execution time the edited value is sent through the action and other mapped inputs are prefilled from the current object when possible.
+                      </p>
+                    </div>
+                    <span class={`rounded-full px-2.5 py-1 text-xs font-medium ${property.inline_edit_config ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300'}`}>
+                      {property.inline_edit_config ? 'Configured' : 'Disabled'}
+                    </span>
+                  </div>
+                  <div class="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.75fr)_auto_auto]">
+                    <div>
+                      <label
+                        class="mb-1 block text-xs font-medium uppercase tracking-[0.2em] text-slate-500"
+                        for={`inline-action-${property.id}`}
+                      >
+                        Update action
+                      </label>
+                      <select
+                        id={`inline-action-${property.id}`}
+                        bind:value={propertyInlineEditActionSelections[property.id]}
+                        class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                      >
+                        <option value="">Select action</option>
+                        {#each inlineEditActionOptions as action (action.id)}
+                          <option value={action.id}>{action.display_name}</option>
+                        {/each}
+                      </select>
+                    </div>
+                    <div>
+                      <label
+                        class="mb-1 block text-xs font-medium uppercase tracking-[0.2em] text-slate-500"
+                        for={`inline-input-${property.id}`}
+                      >
+                        Input name
+                      </label>
+                      <input
+                        id={`inline-input-${property.id}`}
+                        bind:value={propertyInlineEditInputNames[property.id]}
+                        class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 font-mono text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                        placeholder="Auto-detect"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      class="rounded-full bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+                      disabled={savingInlineEditPropertyId === property.id}
+                      onclick={() => void handleSaveInlineEditConfig(property)}
+                    >
+                      {savingInlineEditPropertyId === property.id ? 'Saving...' : 'Save'}
+                    </button>
+                    <button
+                      type="button"
+                      class="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                      disabled={savingInlineEditPropertyId === property.id}
+                      onclick={() => void handleClearInlineEditConfig(property)}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  {#if property.inline_edit_config}
+                    <p class="mt-3 text-xs text-slate-500">
+                      Current action: <span class="font-medium text-slate-700 dark:text-slate-200">{actionLabelById(property.inline_edit_config.action_type_id)}</span>
+                    </p>
+                  {/if}
+                </div>
               </div>
             {/each}
           </div>
@@ -1539,6 +1978,78 @@
           </div>
         {/if}
 
+        {#if functionAuthoringSurface}
+          <div class="mt-4 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Authoring kits</h3>
+                <p class="mt-1 text-xs text-slate-500">Backend-defined templates, SDK references, and CLI scaffolds for reusable ontology functions.</p>
+              </div>
+              <div class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                {functionAuthoringSurface.templates.length} templates
+              </div>
+            </div>
+
+            <div class="mt-4 grid gap-3 xl:grid-cols-3">
+              {#each functionAuthoringSurface.templates as template (template.id)}
+                <article class="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h4 class="font-medium text-slate-900 dark:text-slate-100">{template.display_name}</h4>
+                    <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{template.runtime}</span>
+                  </div>
+                  <p class="mt-2 text-sm text-slate-500">{template.description}</p>
+                  <div class="mt-3 flex flex-wrap gap-2">
+                    {#each template.recommended_use_cases as useCase}
+                      <span class="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700 dark:bg-indigo-950/30 dark:text-indigo-200">{useCase}</span>
+                    {/each}
+                  </div>
+                  <div class="mt-3 text-xs text-slate-500">
+                    Entrypoint: <span class="font-mono">{template.entrypoint}</span>
+                    {#if template.cli_scaffold_template}
+                      · CLI scaffold: <span class="font-mono">{template.cli_scaffold_template}</span>
+                    {/if}
+                  </div>
+                  <div class="mt-4 flex justify-end">
+                    <button
+                      type="button"
+                      class="rounded-full border border-indigo-300 px-3 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-600 dark:text-indigo-200 dark:hover:bg-indigo-950/30"
+                      onclick={() => applyFunctionAuthoringTemplate(template)}
+                    >
+                      Apply template
+                    </button>
+                  </div>
+                </article>
+              {/each}
+            </div>
+
+            <div class="mt-4 grid gap-4 lg:grid-cols-2">
+              <div class="rounded-2xl bg-slate-50 p-4 dark:bg-slate-900/60">
+                <h4 class="text-sm font-semibold text-slate-900 dark:text-slate-100">SDK packages</h4>
+                <div class="mt-3 space-y-3 text-xs text-slate-500">
+                  {#each functionAuthoringSurface.sdk_packages as sdkPackage (sdkPackage.language)}
+                    <div class="rounded-2xl border border-slate-200 bg-white px-3 py-3 dark:border-slate-800 dark:bg-slate-950">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span class="font-medium text-slate-900 dark:text-slate-100">{sdkPackage.language}</span>
+                        <span class="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-slate-600 dark:bg-slate-800 dark:text-slate-300">{sdkPackage.package_name}</span>
+                      </div>
+                      <div class="mt-2 font-mono text-[11px]">{sdkPackage.path}</div>
+                    </div>
+                  {/each}
+                </div>
+              </div>
+
+              <div class="rounded-2xl bg-slate-50 p-4 dark:bg-slate-900/60">
+                <h4 class="text-sm font-semibold text-slate-900 dark:text-slate-100">CLI scaffolds</h4>
+                <div class="mt-3 space-y-3">
+                  {#each functionAuthoringSurface.cli_commands as command}
+                    <pre class="overflow-x-auto rounded-2xl bg-slate-950 px-3 py-3 text-[11px] text-slate-100">{command}</pre>
+                  {/each}
+                </div>
+              </div>
+            </div>
+          </div>
+        {/if}
+
         <form class="mt-4 space-y-4" onsubmit={handleCreateFunctionPackage}>
           <div class="grid gap-4 md:grid-cols-2">
             <div>
@@ -1550,6 +2061,18 @@
                 placeholder="customer_triage"
               />
             </div>
+            <div>
+              <label for="function-package-version" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Version</label>
+              <input
+                id="function-package-version"
+                bind:value={functionVersion}
+                class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 font-mono text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                placeholder="1.0.0"
+              />
+            </div>
+          </div>
+
+          <div class="grid gap-4 md:grid-cols-1">
             <div>
               <label for="function-package-display-name" class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Display name</label>
               <input
@@ -1625,6 +2148,7 @@
                   <div class="font-medium text-slate-900 dark:text-slate-100">{functionPackage.display_name}</div>
                   <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                     <span class="font-mono">{functionPackage.name}</span>
+                    <span class="rounded-full bg-indigo-100 px-2 py-0.5 font-mono text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200">{functionPackage.version}</span>
                     <span class="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">{functionPackage.runtime}</span>
                     <span class="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">{functionPackage.entrypoint}</span>
                   </div>
@@ -1633,8 +2157,17 @@
                   {/if}
                 </div>
                 <div class="flex flex-wrap gap-2">
-                  <button type="button" class="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800" onclick={() => { selectedFunctionPackageId = functionPackage.id; useFunctionPackageInActionConfig(functionPackage.id); }}>
-                    Use in action
+                  <button type="button" class="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800" onclick={() => void handleSelectFunctionPackage(functionPackage.id)}>
+                    View metrics
+                  </button>
+                  <button type="button" class="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800" onclick={() => { void handleSelectFunctionPackage(functionPackage.id); usePinnedFunctionPackageInActionConfig(functionPackage.id); }}>
+                    Pin by id
+                  </button>
+                  <button type="button" class="rounded-full border border-indigo-300 px-3 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-600 dark:text-indigo-200 dark:hover:bg-indigo-950/30" onclick={() => { void handleSelectFunctionPackage(functionPackage.id); useVersionedFunctionPackageInActionConfig(functionPackage); }}>
+                    Use version
+                  </button>
+                  <button type="button" class="rounded-full border border-emerald-300 px-3 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 dark:border-emerald-600 dark:text-emerald-200 dark:hover:bg-emerald-950/30" onclick={() => { void handleSelectFunctionPackage(functionPackage.id); useVersionedFunctionPackageInActionConfig(functionPackage, true); }}>
+                    Auto-upgrade
                   </button>
                   <button type="button" class="rounded-full bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700" onclick={() => handleSimulateFunctionPackage(functionPackage.id)}>
                     {functionRuntimeLoading && selectedFunctionPackageId === functionPackage.id ? 'Running...' : 'Simulate'}
@@ -1662,6 +2195,99 @@
         {#if functionRuntimeResult}
           <pre class="mt-4 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">{formatJson(functionRuntimeResult)}</pre>
         {/if}
+
+        <div class="mt-6 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Function monitoring</h3>
+              <p class="mt-1 text-xs text-slate-500">Recent executions and aggregate metrics for the selected reusable package.</p>
+            </div>
+            {#if functionMetrics}
+              <div class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                {functionMetrics.package.display_name} · {functionMetrics.package.version}
+              </div>
+            {/if}
+          </div>
+
+          {#if functionMonitoringError}
+            <div class="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
+              {functionMonitoringError}
+            </div>
+          {/if}
+
+          {#if functionMonitoringLoading}
+            <div class="mt-4 rounded-2xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-500 dark:border-slate-700">
+              Loading function run history...
+            </div>
+          {:else if functionMetrics}
+            <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                <div class="text-xs uppercase tracking-[0.18em] text-slate-500">Executions</div>
+                <div class="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-100">{functionMetrics.total_runs}</div>
+                <div class="mt-1 text-xs text-slate-500">{functionMetrics.action_runs} action · {functionMetrics.simulation_runs} simulation</div>
+              </div>
+              <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                <div class="text-xs uppercase tracking-[0.18em] text-slate-500">Success rate</div>
+                <div class="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-100">{formatPercent(functionMetrics.success_rate)}</div>
+                <div class="mt-1 text-xs text-slate-500">{functionMetrics.successful_runs} success · {functionMetrics.failed_runs} failure</div>
+              </div>
+              <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                <div class="text-xs uppercase tracking-[0.18em] text-slate-500">Average duration</div>
+                <div class="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-100">{formatDuration(functionMetrics.avg_duration_ms)}</div>
+                <div class="mt-1 text-xs text-slate-500">P95 {formatDuration(functionMetrics.p95_duration_ms)}</div>
+              </div>
+              <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
+                <div class="text-xs uppercase tracking-[0.18em] text-slate-500">Last run</div>
+                <div class="mt-2 text-sm font-semibold text-slate-900 dark:text-slate-100">{formatTimestamp(functionMetrics.last_run_at)}</div>
+                <div class="mt-1 text-xs text-slate-500">Last success {formatTimestamp(functionMetrics.last_success_at)}</div>
+              </div>
+            </div>
+
+            {#if functionRuns.length === 0}
+              <div class="mt-4 rounded-2xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-500 dark:border-slate-700">
+                No runs have been recorded for this package yet.
+              </div>
+            {:else}
+              <div class="mt-4 overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
+                <table class="min-w-full divide-y divide-slate-200 text-left text-sm dark:divide-slate-800">
+                  <thead class="bg-slate-50 text-xs uppercase tracking-[0.16em] text-slate-500 dark:bg-slate-900/70">
+                    <tr>
+                      <th class="px-4 py-3">When</th>
+                      <th class="px-4 py-3">Kind</th>
+                      <th class="px-4 py-3">Status</th>
+                      <th class="px-4 py-3">Duration</th>
+                      <th class="px-4 py-3">Context</th>
+                      <th class="px-4 py-3">Error</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-200 dark:divide-slate-800">
+                    {#each functionRuns as run (run.id)}
+                      <tr class="align-top">
+                        <td class="px-4 py-3 text-slate-600 dark:text-slate-300">{formatTimestamp(run.completed_at)}</td>
+                        <td class="px-4 py-3">
+                          <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200">{run.invocation_kind}</span>
+                        </td>
+                        <td class="px-4 py-3">
+                          <span class={`rounded-full px-2 py-0.5 text-xs ${run.status === 'success' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200' : 'bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-200'}`}>{run.status}</span>
+                        </td>
+                        <td class="px-4 py-3 text-slate-600 dark:text-slate-300">{formatDuration(run.duration_ms)}</td>
+                        <td class="px-4 py-3 text-xs text-slate-500">
+                          <div>{run.action_name ?? 'Standalone simulation'}</div>
+                          <div class="mt-1 font-mono">{run.target_object_id ?? 'no target object'}</div>
+                        </td>
+                        <td class="px-4 py-3 text-xs text-slate-500">{run.error_message ?? '—'}</td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+            {/if}
+          {:else}
+            <div class="mt-4 rounded-2xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-500 dark:border-slate-700">
+              Select a function package to inspect its run history.
+            </div>
+          {/if}
+        </div>
       </section>
 
       <section class="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -1905,6 +2531,12 @@
           </div>
         {/if}
 
+        {#if objectSuccess}
+          <div class="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300">
+            {objectSuccess}
+          </div>
+        {/if}
+
         <form class="mt-4 space-y-3" onsubmit={handleCreateObject}>
           <label class="block text-sm font-medium text-slate-700 dark:text-slate-200" for="object-properties-json">
             New object properties JSON
@@ -1958,6 +2590,53 @@
                     Delete
                   </button>
                 </div>
+                {#if properties.some((property) => property.inline_edit_config)}
+                  <div class="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p class="text-sm font-medium text-slate-900 dark:text-slate-100">Inline edits backed by actions</p>
+                        <p class="mt-1 text-xs text-slate-500">
+                          Each field below runs its configured action type instead of patching the object directly.
+                        </p>
+                      </div>
+                      <span class="rounded-full bg-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                        {properties.filter((property) => property.inline_edit_config).length} configured
+                      </span>
+                    </div>
+
+                    <div class="mt-4 space-y-3">
+                      {#each properties.filter((property) => property.inline_edit_config) as property (property.id)}
+                        <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                          <div>
+                            <label
+                              class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200"
+                              for={`object-inline-${object.id}-${property.id}`}
+                            >
+                              {property.display_name}
+                            </label>
+                            <input
+                              id={`object-inline-${object.id}-${property.id}`}
+                              bind:value={objectInlineEditDrafts[inlineEditFieldKey(object.id, property.id)]}
+                              class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                              placeholder={property.name}
+                            />
+                            <p class="mt-1 text-xs text-slate-500">
+                              Action: {actionLabelById(property.inline_edit_config?.action_type_id)} • Type: {property.property_type}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            class="rounded-full bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50"
+                            disabled={executingInlineEditKey === inlineEditFieldKey(object.id, property.id)}
+                            onclick={() => void handleExecuteInlineEdit(object.id, property)}
+                          >
+                            {executingInlineEditKey === inlineEditFieldKey(object.id, property.id) ? 'Applying...' : 'Apply inline edit'}
+                          </button>
+                        </div>
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
                 <pre class="mt-3 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">{formatJson(object.properties)}</pre>
               </div>
             {/each}
@@ -2056,7 +2735,7 @@
             {actionTemplates[actionOperationKind].notes}
           </div>
 
-          <div class="grid gap-4 xl:grid-cols-3">
+          <div class="grid gap-4 xl:grid-cols-2">
             <div>
               <div class="mb-1 flex items-center justify-between gap-3">
                 <label class="block text-sm font-medium text-slate-700 dark:text-slate-200" for="action-input-schema">Input schema JSON</label>
@@ -2075,6 +2754,38 @@
                 class="w-full rounded-2xl border border-slate-300 bg-slate-950 px-4 py-3 font-mono text-xs text-slate-100 dark:border-slate-700"
                 spellcheck="false"
               ></textarea>
+              <p class="mt-2 text-xs text-slate-500">
+                Inputs reuse ontology property types, including `vector` for numeric JSON arrays and `media_reference` for URI/URL strings or JSON objects with `uri` or `url`.
+              </p>
+            </div>
+            <div>
+              <div class="mb-1 flex items-center justify-between gap-3">
+                <label class="block text-sm font-medium text-slate-700 dark:text-slate-200" for="action-form-schema">Form schema JSON</label>
+                <button
+                  type="button"
+                  class="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  onclick={() => {
+                    try {
+                      const inputSchema = parseJsonArray<ActionInputField>(actionInputSchemaText, 'Action input schema');
+                      actionFormSchemaText = formatJson(buildDefaultActionFormSchema(inputSchema));
+                    } catch (cause) {
+                      actionFormError = cause instanceof Error ? cause.message : 'Failed to generate form schema';
+                    }
+                  }}
+                >
+                  Generate form schema
+                </button>
+              </div>
+              <textarea
+                id="action-form-schema"
+                bind:value={actionFormSchemaText}
+                rows={12}
+                class="w-full rounded-2xl border border-slate-300 bg-slate-950 px-4 py-3 font-mono text-xs text-slate-100 dark:border-slate-700"
+                spellcheck="false"
+              ></textarea>
+              <p class="mt-2 text-xs text-slate-500">
+                Supports `sections`, per-section conditional overrides, and parameter-level overrides for requiredness, visibility, labels, and defaults.
+              </p>
             </div>
             <div>
               <label class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200" for="action-config">Config JSON</label>
@@ -2085,6 +2796,9 @@
                 class="w-full rounded-2xl border border-slate-300 bg-slate-950 px-4 py-3 font-mono text-xs text-slate-100 dark:border-slate-700"
                 spellcheck="false"
               ></textarea>
+              <p class="mt-2 text-xs text-slate-500">
+                Function-backed actions can reference packages by pinned `function_package_id` or by `function_package_name` + `function_package_version`, with optional `function_package_auto_upgrade: true` for stable same-major upgrades.
+              </p>
             </div>
             <div>
               <label class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200" for="action-authorization-policy">Authorization policy JSON</label>
@@ -2248,14 +2962,34 @@
           </div>
 
           <div>
+            <p class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200">Structured form</p>
+            <ActionExecutor
+              action={getSelectedAction()}
+              targetObject={getSelectedTargetObject()}
+              parameters={actionParametersDraft}
+              title="Action inputs"
+              emptyMessage="This action can run without any user-supplied parameters."
+              on:change={handleStructuredActionParametersChange}
+            />
+          </div>
+
+          <div>
             <label class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200" for="action-parameters">Invocation parameters JSON</label>
             <textarea
               id="action-parameters"
-              bind:value={actionParametersText}
+              value={actionParametersText}
               rows={12}
               class="w-full rounded-2xl border border-slate-300 bg-slate-950 px-4 py-3 font-mono text-xs text-slate-100 dark:border-slate-700"
               spellcheck="false"
+              oninput={handleActionParametersTextInput}
             ></textarea>
+            {#if actionParametersInputError}
+              <p class="mt-2 text-xs text-rose-600 dark:text-rose-300">{actionParametersInputError}</p>
+            {:else}
+              <p class="mt-2 text-xs text-slate-500">
+                Advanced override for direct JSON editing. The structured form above stays in sync with the last valid payload.
+              </p>
+            {/if}
           </div>
 
           <div>

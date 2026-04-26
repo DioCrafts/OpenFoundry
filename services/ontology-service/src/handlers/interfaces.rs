@@ -11,13 +11,75 @@ use auth_middleware::layer::AuthUser;
 
 use crate::{
     AppState,
-    domain::type_system::{validate_property_type, validate_property_value},
+    domain::{
+        project_access::{
+            OntologyResourceKind, ensure_resource_manage_access, ensure_resource_view_access,
+            list_accessible_projects, load_resource_owner_id, load_resource_project_id,
+            load_resource_project_map, resource_is_visible,
+        },
+        type_system::{validate_property_type, validate_property_value},
+    },
     models::interface::{
         CreateInterfacePropertyRequest, CreateInterfaceRequest, InterfaceProperty,
         ListInterfacesQuery, ListInterfacesResponse, ObjectTypeInterfaceBinding, OntologyInterface,
         UpdateInterfacePropertyRequest, UpdateInterfaceRequest,
     },
 };
+
+async fn ensure_interface_view_access(
+    state: &AppState,
+    claims: &auth_middleware::Claims,
+    interface_id: Uuid,
+) -> Result<(), String> {
+    let project_id =
+        load_resource_project_id(&state.db, OntologyResourceKind::Interface, interface_id)
+            .await
+            .map_err(|error| format!("failed to load interface binding: {error}"))?;
+    ensure_resource_view_access(&state.db, claims, project_id).await
+}
+
+async fn ensure_interface_manage_access(
+    state: &AppState,
+    claims: &auth_middleware::Claims,
+    interface_id: Uuid,
+) -> Result<(), String> {
+    let owner_id = load_resource_owner_id(&state.db, OntologyResourceKind::Interface, interface_id)
+        .await?
+        .ok_or_else(|| "interface not found".to_string())?;
+    let project_id =
+        load_resource_project_id(&state.db, OntologyResourceKind::Interface, interface_id)
+            .await
+            .map_err(|error| format!("failed to load interface binding: {error}"))?;
+    ensure_resource_manage_access(&state.db, claims, owner_id, project_id).await
+}
+
+async fn ensure_object_type_manage_access(
+    state: &AppState,
+    claims: &auth_middleware::Claims,
+    object_type_id: Uuid,
+) -> Result<(), String> {
+    let owner_id =
+        load_resource_owner_id(&state.db, OntologyResourceKind::ObjectType, object_type_id)
+            .await?
+            .ok_or_else(|| "object type not found".to_string())?;
+    let project_id =
+        load_resource_project_id(&state.db, OntologyResourceKind::ObjectType, object_type_id)
+            .await
+            .map_err(|error| format!("failed to load object type binding: {error}"))?;
+    ensure_resource_manage_access(&state.db, claims, owner_id, project_id).await
+}
+
+async fn ensure_object_type_view_access(
+    state: &AppState,
+    claims: &auth_middleware::Claims,
+    object_type_id: Uuid,
+) -> Result<(), String> {
+    let project_id =
+        load_resource_project_id(&state.db, OntologyResourceKind::ObjectType, object_type_id)
+            .await
+            .map_err(|error| format!("failed to load object type binding: {error}"))?;
+    ensure_resource_view_access(&state.db, claims, project_id).await
+}
 
 pub async fn create_interface(
     AuthUser(claims): AuthUser,
@@ -56,7 +118,7 @@ pub async fn create_interface(
 }
 
 pub async fn list_interfaces(
-    _user: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<AppState>,
     Query(params): Query<ListInterfacesQuery>,
 ) -> impl IntoResponse {
@@ -86,13 +148,50 @@ pub async fn list_interfaces(
     .fetch_all(&state.db)
     .await
     {
-        Ok(data) => Json(ListInterfacesResponse {
+        Ok(data) => {
+            let accessible_projects = match list_accessible_projects(&state.db, &claims).await {
+                Ok(accessible_projects) => accessible_projects,
+                Err(error) => {
+                    tracing::error!("list interfaces project access failed: {error}");
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                }
+            };
+            let project_map = match load_resource_project_map(
+                &state.db,
+                OntologyResourceKind::Interface,
+                &data.iter().map(|interface| interface.id).collect::<Vec<_>>(),
+            )
+            .await
+            {
+                Ok(project_map) => project_map,
+                Err(error) => {
+                    tracing::error!("list interfaces bindings failed: {error}");
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                }
+            };
+            let filtered = data
+                .into_iter()
+                .filter(|interface| {
+                    resource_is_visible(
+                        &claims,
+                        project_map.get(&interface.id).copied(),
+                        &accessible_projects,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let total = filtered.len() as i64;
+            let data = filtered
+                .into_iter()
+                .take(per_page as usize)
+                .collect::<Vec<_>>();
+            Json(ListInterfacesResponse {
             data,
             total,
             page,
             per_page,
         })
-        .into_response(),
+        .into_response()
+        }
         Err(error) => {
             tracing::error!("list interfaces failed: {error}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -101,7 +200,7 @@ pub async fn list_interfaces(
 }
 
 pub async fn get_interface(
-    _user: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<AppState>,
     Path(interface_id): Path<Uuid>,
 ) -> impl IntoResponse {
@@ -110,7 +209,16 @@ pub async fn get_interface(
         .fetch_optional(&state.db)
         .await
     {
-        Ok(Some(interface)) => Json(json!(interface)).into_response(),
+        Ok(Some(interface)) => {
+            if let Err(error) = ensure_interface_view_access(&state, &claims, interface_id).await {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({ "error": error })),
+                )
+                    .into_response();
+            }
+            Json(json!(interface)).into_response()
+        }
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => {
             tracing::error!("get interface failed: {error}");
@@ -120,11 +228,18 @@ pub async fn get_interface(
 }
 
 pub async fn update_interface(
-    _user: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<AppState>,
     Path(interface_id): Path<Uuid>,
     Json(body): Json<UpdateInterfaceRequest>,
 ) -> impl IntoResponse {
+    if let Err(error) = ensure_interface_manage_access(&state, &claims, interface_id).await {
+        return if error == "interface not found" {
+            StatusCode::NOT_FOUND.into_response()
+        } else {
+            (StatusCode::FORBIDDEN, Json(json!({ "error": error }))).into_response()
+        };
+    }
     match sqlx::query_as::<_, OntologyInterface>(
         r#"UPDATE ontology_interfaces
            SET display_name = COALESCE($2, display_name),
@@ -149,10 +264,17 @@ pub async fn update_interface(
 }
 
 pub async fn delete_interface(
-    _user: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<AppState>,
     Path(interface_id): Path<Uuid>,
 ) -> impl IntoResponse {
+    if let Err(error) = ensure_interface_manage_access(&state, &claims, interface_id).await {
+        return if error == "interface not found" {
+            StatusCode::NOT_FOUND.into_response()
+        } else {
+            (StatusCode::FORBIDDEN, Json(json!({ "error": error }))).into_response()
+        };
+    }
     match sqlx::query("DELETE FROM ontology_interfaces WHERE id = $1")
         .bind(interface_id)
         .execute(&state.db)
@@ -168,10 +290,17 @@ pub async fn delete_interface(
 }
 
 pub async fn list_interface_properties(
-    _user: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<AppState>,
     Path(interface_id): Path<Uuid>,
 ) -> impl IntoResponse {
+    if let Err(error) = ensure_interface_view_access(&state, &claims, interface_id).await {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": error })),
+        )
+            .into_response();
+    }
     match sqlx::query_as::<_, InterfaceProperty>(
         r#"SELECT * FROM interface_properties
            WHERE interface_id = $1
@@ -190,11 +319,18 @@ pub async fn list_interface_properties(
 }
 
 pub async fn create_interface_property(
-    _user: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<AppState>,
     Path(interface_id): Path<Uuid>,
     Json(body): Json<CreateInterfacePropertyRequest>,
 ) -> impl IntoResponse {
+    if let Err(error) = ensure_interface_manage_access(&state, &claims, interface_id).await {
+        return if error == "interface not found" {
+            StatusCode::NOT_FOUND.into_response()
+        } else {
+            (StatusCode::FORBIDDEN, Json(json!({ "error": error }))).into_response()
+        };
+    }
     if body.name.trim().is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -244,7 +380,7 @@ pub async fn create_interface_property(
 }
 
 pub async fn update_interface_property(
-    _user: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<AppState>,
     Path((_interface_id, property_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<UpdateInterfacePropertyRequest>,
@@ -263,6 +399,15 @@ pub async fn update_interface_property(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
+
+    if let Err(error) = ensure_interface_manage_access(&state, &claims, existing.interface_id).await
+    {
+        return if error == "interface not found" {
+            StatusCode::NOT_FOUND.into_response()
+        } else {
+            (StatusCode::FORBIDDEN, Json(json!({ "error": error }))).into_response()
+        };
+    }
 
     let next_default = body.default_value.or(existing.default_value.clone());
     if let Some(default_value) = &next_default {
@@ -305,10 +450,31 @@ pub async fn update_interface_property(
 }
 
 pub async fn delete_interface_property(
-    _user: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<AppState>,
     Path((_interface_id, property_id)): Path<(Uuid, Uuid)>,
 ) -> impl IntoResponse {
+    let interface_id = match sqlx::query_scalar::<_, Uuid>(
+        "SELECT interface_id FROM interface_properties WHERE id = $1",
+    )
+    .bind(property_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(interface_id)) => interface_id,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => {
+            tracing::error!("delete interface property lookup failed: {error}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    if let Err(error) = ensure_interface_manage_access(&state, &claims, interface_id).await {
+        return if error == "interface not found" {
+            StatusCode::NOT_FOUND.into_response()
+        } else {
+            (StatusCode::FORBIDDEN, Json(json!({ "error": error }))).into_response()
+        };
+    }
     match sqlx::query("DELETE FROM interface_properties WHERE id = $1")
         .bind(property_id)
         .execute(&state.db)
@@ -324,10 +490,22 @@ pub async fn delete_interface_property(
 }
 
 pub async fn attach_interface_to_type(
-    _user: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<AppState>,
     Path((type_id, interface_id)): Path<(Uuid, Uuid)>,
 ) -> impl IntoResponse {
+    for access_result in [
+        ensure_object_type_manage_access(&state, &claims, type_id).await,
+        ensure_interface_manage_access(&state, &claims, interface_id).await,
+    ] {
+        if let Err(error) = access_result {
+            return if error == "object type not found" || error == "interface not found" {
+                StatusCode::NOT_FOUND.into_response()
+            } else {
+                (StatusCode::FORBIDDEN, Json(json!({ "error": error }))).into_response()
+            };
+        }
+    }
     match sqlx::query_as::<_, ObjectTypeInterfaceBinding>(
         r#"INSERT INTO object_type_interfaces (object_type_id, interface_id)
            VALUES ($1, $2)
@@ -354,10 +532,17 @@ pub async fn attach_interface_to_type(
 }
 
 pub async fn list_type_interfaces(
-    _user: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<AppState>,
     Path(type_id): Path<Uuid>,
 ) -> impl IntoResponse {
+    if let Err(error) = ensure_object_type_view_access(&state, &claims, type_id).await {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": error })),
+        )
+            .into_response();
+    }
     match sqlx::query_as::<_, OntologyInterface>(
         r#"SELECT i.*
            FROM ontology_interfaces i
@@ -378,10 +563,22 @@ pub async fn list_type_interfaces(
 }
 
 pub async fn detach_interface_from_type(
-    _user: AuthUser,
+    AuthUser(claims): AuthUser,
     State(state): State<AppState>,
     Path((type_id, interface_id)): Path<(Uuid, Uuid)>,
 ) -> impl IntoResponse {
+    for access_result in [
+        ensure_object_type_manage_access(&state, &claims, type_id).await,
+        ensure_interface_manage_access(&state, &claims, interface_id).await,
+    ] {
+        if let Err(error) = access_result {
+            return if error == "object type not found" || error == "interface not found" {
+                StatusCode::NOT_FOUND.into_response()
+            } else {
+                (StatusCode::FORBIDDEN, Json(json!({ "error": error }))).into_response()
+            };
+        }
+    }
     match sqlx::query(
         "DELETE FROM object_type_interfaces WHERE object_type_id = $1 AND interface_id = $2",
     )

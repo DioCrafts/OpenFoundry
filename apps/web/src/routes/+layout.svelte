@@ -18,16 +18,18 @@
 </script>
 
 {#if isAuthPage}
-  <div class="min-h-full flex items-center justify-center bg-gray-50 dark:bg-gray-950">
+  <div class="of-shell flex min-h-full items-center justify-center">
     {@render children()}
   </div>
 {:else}
-  <div class="h-full flex">
+  <div class="of-shell flex h-full">
     <Sidebar />
-    <div class="flex-1 flex flex-col min-w-0">
+    <div class="flex min-w-0 flex-1 flex-col">
       <TopBar />
-      <main class="flex-1 overflow-auto p-6">
-        {@render children()}
+      <main class="of-scrollbar flex-1 overflow-auto">
+        <div class="of-page">
+          {@render children()}
+        </div>
       </main>
     </div>
   </div>

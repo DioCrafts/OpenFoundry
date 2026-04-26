@@ -1,10 +1,11 @@
 <script lang="ts">
+  import Glyph from '$components/ui/Glyph.svelte';
   import {
     deleteObjectType,
     listObjectTypes,
     searchOntology,
     type ObjectType,
-    type SearchResult,
+    type SearchResult
   } from '$lib/api/ontology';
 
   let types = $state<ObjectType[]>([]);
@@ -18,11 +19,17 @@
   let semanticLoading = $state(false);
   let semanticError = $state('');
   let searchResults = $state<SearchResult[]>([]);
+  let activeTab = $state<'overview' | 'objects' | 'types' | 'artifacts'>('overview');
+
+  const demoArtifacts = [
+    { name: 'Passenger Exploration', type: 'Exploration', icon: 'artifact' as const },
+    { name: 'Airport Ops List', type: 'List', icon: 'list' as const }
+  ];
 
   async function load() {
     loading = true;
     try {
-      const res = await listObjectTypes({ page, per_page: 20, search: search || undefined });
+      const res = await listObjectTypes({ page, per_page: 24, search: search || undefined });
       types = res.data;
       total = res.total;
     } catch (error) {
@@ -46,10 +53,11 @@
       const response = await searchOntology({
         query,
         kind: semanticKind === 'all' ? undefined : semanticKind,
-        limit: 20,
-        semantic: true,
+        limit: 24,
+        semantic: true
       });
       searchResults = response.data;
+      activeTab = 'overview';
     } catch (error) {
       semanticError = error instanceof Error ? error.message : 'Failed to run ontology search';
     } finally {
@@ -66,274 +74,333 @@
   function resultBadgeClass(kind: string) {
     switch (kind) {
       case 'object_instance':
-        return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300';
+        return 'of-status-success';
       case 'action_type':
-        return 'bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300';
+        return 'of-status-info';
       case 'interface':
-        return 'bg-teal-50 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300';
+        return 'bg-[#e7f5f3] text-[#0f766e]';
       case 'link_type':
-        return 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300';
+        return 'of-status-warning';
       default:
-        return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+        return 'bg-[#eef2f7] text-[var(--text-muted)]';
     }
   }
+
+  function objectTypeGlyph(typeItem: ObjectType) {
+    const key = (typeItem.name + typeItem.display_name).toLowerCase();
+    if (key.includes('route') || key.includes('link')) return 'link';
+    if (key.includes('customer') || key.includes('employee') || key.includes('person')) return 'object';
+    if (key.includes('dataset') || key.includes('table')) return 'database';
+    return 'cube';
+  }
+
+  function shouldShowGroup(group: string) {
+    if (activeTab === 'overview') return true;
+    if (activeTab === 'objects') return group === 'object instance';
+    if (activeTab === 'types') return group === 'object type';
+    return group !== 'object instance' && group !== 'object type';
+  }
+
+  const groupedResults = $derived.by(() => {
+    const groups = new Map<string, SearchResult[]>();
+    for (const result of searchResults) {
+      const label = result.kind.replaceAll('_', ' ');
+      if (!groups.has(label)) groups.set(label, []);
+      groups.get(label)!.push(result);
+    }
+    return Array.from(groups.entries());
+  });
+
+  const objectCount = $derived(searchResults.filter((item) => item.kind === 'object_instance').length);
+  const typeCount = $derived(searchResults.filter((item) => item.kind === 'object_type').length);
+  const artifactCount = $derived(
+    searchResults.filter((item) => ['action_type', 'interface', 'link_type'].includes(item.kind)).length
+  );
 
   $effect(() => {
     load();
   });
 </script>
 
-<div class="space-y-6">
-  <section class="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-    <div class="flex flex-wrap items-center justify-between gap-4">
+<div class="space-y-5">
+  <section class="of-hero-strip">
+    <div class="flex flex-wrap items-start justify-between gap-5">
       <div>
-        <p class="text-xs uppercase tracking-[0.22em] text-slate-500">Ontology</p>
-        <h1 class="mt-1 text-3xl font-semibold tracking-tight text-slate-950 dark:text-slate-50">Ontology Explorer</h1>
-        <p class="mt-2 max-w-3xl text-sm text-slate-500">
-          Browse semantic types, search objects semantically, and jump into schema or object neighborhoods.
-        </p>
+        <div class="of-heading-xl">Explore your data</div>
+        <div class="mt-2 max-w-3xl text-[15px] text-[var(--text-muted)]">
+          Select an object type, search across ontology entities, and jump into graph, schema or artifacts
+          using the same enterprise visual language.
+        </div>
       </div>
-      <div class="flex flex-wrap gap-2">
-        <a
-          href="/ontology/graph"
-          class="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-        >
-          Graph View
+      <div class="flex gap-2">
+        <a href="/ontology/graph" class="of-btn">
+          <Glyph name="graph" size={16} />
+          <span>Graph</span>
         </a>
-        <a
-          href="/ontology/object-sets"
-          class="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-        >
-          Object Sets
-        </a>
-        <a
-          href="/ontology/types"
-          class="rounded-full bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
-        >
-          New Type
+        <a href="/ontology/types" class="of-btn of-btn-primary">
+          <Glyph name="plus" size={16} />
+          <span>Create type</span>
         </a>
       </div>
     </div>
+
+    <form
+      class="mt-5 space-y-4"
+      onsubmit={(event) => {
+        event.preventDefault();
+        runSemanticSearch();
+      }}
+    >
+      <div class="of-search-shell">
+        <button type="button" class="of-search-filter">
+          <span>{semanticKind === 'all' ? 'All' : semanticKind.replaceAll('_', ' ')}</span>
+          <Glyph name="chevron-down" size={14} />
+        </button>
+        <div class="of-search-input-wrap">
+          <Glyph name="search" size={18} />
+          <input
+            bind:value={semanticQuery}
+            class="of-search-input"
+            placeholder="Search object types and properties..."
+          />
+        </div>
+        <button type="button" class="px-4 text-sm text-[var(--text-muted)]" onclick={() => {
+          semanticQuery = '';
+          searchResults = [];
+          semanticError = '';
+        }}>
+          Clear
+        </button>
+      </div>
+
+      <div class="of-tabbar">
+        <button type="button" class={`of-tab ${activeTab === 'overview' ? 'of-tab-active' : ''}`} onclick={() => activeTab = 'overview'}>
+          All <span class="of-badge ml-2">{searchResults.length || total}</span>
+        </button>
+        <button type="button" class={`of-tab ${activeTab === 'objects' ? 'of-tab-active' : ''}`} onclick={() => activeTab = 'objects'}>
+          Objects <span class="of-badge ml-2">{objectCount}</span>
+        </button>
+        <button type="button" class={`of-tab ${activeTab === 'types' ? 'of-tab-active' : ''}`} onclick={() => activeTab = 'types'}>
+          Object types <span class="of-badge ml-2">{typeCount || total}</span>
+        </button>
+        <button type="button" class={`of-tab ${activeTab === 'artifacts' ? 'of-tab-active' : ''}`} onclick={() => activeTab = 'artifacts'}>
+          Artifacts <span class="of-badge ml-2">{artifactCount || demoArtifacts.length}</span>
+        </button>
+      </div>
+    </form>
   </section>
 
-  <section class="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-    <div class="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div class="flex items-center justify-between gap-4">
+  {#if semanticError}
+    <div class="of-inline-note">{semanticError}</div>
+  {/if}
+
+  <section class="of-content-grid of-content-grid-2">
+    <aside class="of-panel overflow-hidden">
+      <div class="border-b border-[var(--border-subtle)] bg-[#f7faff] px-4 py-3">
+        <div class="flex items-center justify-between">
+          <div class="text-[15px] font-semibold text-[var(--text-strong)]">All results</div>
+          <span class="of-badge">{searchResults.length || total}</span>
+        </div>
+      </div>
+
+      <div class="space-y-5 p-4">
         <div>
-          <h2 class="text-lg font-semibold text-slate-950 dark:text-slate-50">Types</h2>
-          <p class="mt-1 text-sm text-slate-500">The semantic backbone of your platform.</p>
-        </div>
-        <span class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-          {total} registered
-        </span>
-      </div>
-
-      <div class="mt-4 flex gap-4">
-        <input
-          type="text"
-          placeholder="Search object types..."
-          bind:value={search}
-          oninput={() => {
-            page = 1;
-            load();
-          }}
-          class="flex-1 rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-        />
-      </div>
-
-      {#if loading}
-        <div class="mt-6 rounded-2xl border border-dashed border-slate-300 px-4 py-12 text-center text-sm text-slate-500 dark:border-slate-700">
-          Loading ontology types...
-        </div>
-      {:else if types.length === 0}
-        <div class="mt-6 rounded-2xl border border-dashed border-slate-300 px-4 py-12 text-center text-sm text-slate-500 dark:border-slate-700">
-          No object types found. Create your first type to start building the ontology.
-        </div>
-      {:else}
-        <div class="mt-6 grid gap-4 md:grid-cols-2">
-          {#each types as t (t.id)}
-            <article class="rounded-[1.5rem] border border-slate-200 p-4 transition-shadow hover:shadow-md dark:border-slate-800">
-              <div class="flex items-start justify-between gap-3">
-                <div class="flex items-center gap-3">
-                  {#if t.icon}
-                    <span class="text-2xl">{t.icon}</span>
-                  {:else}
-                    <span
-                      class="flex h-10 w-10 items-center justify-center rounded-2xl text-sm font-semibold text-white"
-                      style={`background-color: ${t.color || '#0f766e'}`}
-                    >
-                      {t.name.charAt(0).toUpperCase()}
-                    </span>
-                  {/if}
-                  <div>
-                    <h3 class="font-medium text-slate-950 dark:text-slate-50">{t.display_name}</h3>
-                    <p class="text-xs font-mono text-slate-500">{t.name}</p>
-                  </div>
-                </div>
-                <button
-                  onclick={() => handleDelete(t.id)}
-                  class="text-sm font-medium text-rose-600 hover:text-rose-700"
-                >
-                  Delete
-                </button>
-              </div>
-
-              {#if t.description}
-                <p class="mt-3 text-sm text-slate-500">{t.description}</p>
-              {/if}
-
-              <div class="mt-4 flex flex-wrap gap-2">
-                <a href="/ontology/{t.id}" class="text-sm font-medium text-teal-700 hover:underline dark:text-teal-300">
-                  Open detail
-                </a>
-                <a href="/ontology/graph?root_type_id={t.id}" class="text-sm font-medium text-slate-600 hover:underline dark:text-slate-300">
-                  Focus graph
-                </a>
-              </div>
-            </article>
-          {/each}
-        </div>
-
-        {#if total > 20}
-          <div class="mt-6 flex justify-center gap-4">
-            <button
-              disabled={page <= 1}
-              onclick={() => {
-                page--;
-                load();
-              }}
-              class="rounded-full border border-slate-300 px-4 py-2 text-sm disabled:opacity-50 dark:border-slate-700"
-            >
-              Previous
-            </button>
-            <span class="py-2 text-sm text-slate-500">Page {page}</span>
-            <button
-              disabled={page * 20 >= total}
-              onclick={() => {
-                page++;
-                load();
-              }}
-              class="rounded-full border border-slate-300 px-4 py-2 text-sm disabled:opacity-50 dark:border-slate-700"
-            >
-              Next
-            </button>
+          <div class="of-heading-sm">Object type filters</div>
+          <div class="mt-3 space-y-2">
+            {#each types.slice(0, 4) as typeItem (typeItem.id)}
+              <button
+                type="button"
+                class="flex w-full items-center justify-between rounded-[4px] border border-transparent px-2 py-2 text-left hover:bg-[var(--bg-hover)]"
+                onclick={() => {
+                  search = typeItem.display_name;
+                  page = 1;
+                  load();
+                }}
+              >
+                <span class="flex items-center gap-2 text-sm text-[var(--text-default)]">
+                  <span class="of-icon-box h-6 w-6 bg-[#efe5d4] text-[#9a6c2f]">
+                    <Glyph name={objectTypeGlyph(typeItem)} size={13} />
+                  </span>
+                  <span class="truncate">{typeItem.display_name}</span>
+                </span>
+                <span class="of-badge">1</span>
+              </button>
+            {/each}
           </div>
-        {/if}
-      {/if}
-    </div>
+        </div>
 
-    <div class="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div>
-        <h2 class="text-lg font-semibold text-slate-950 dark:text-slate-50">Semantic Search</h2>
-        <p class="mt-1 text-sm text-slate-500">
-          Search across types, interfaces, actions, links, and object instances using mixed fulltext and semantic ranking.
-        </p>
+        <div class="of-divider"></div>
+
+        <div>
+          <div class="of-heading-sm">Object type groups</div>
+          <div class="mt-3 space-y-2 text-sm">
+            <div class="flex items-center justify-between rounded-[4px] px-2 py-2 hover:bg-[var(--bg-hover)]">
+              <span>Favorites</span>
+              <span class="of-badge">{Math.min(6, total)}</span>
+            </div>
+            <div class="flex items-center justify-between rounded-[4px] px-2 py-2 hover:bg-[var(--bg-hover)]">
+              <span>Operations</span>
+              <span class="of-badge">{Math.min(4, total)}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="of-divider"></div>
+
+        <div>
+          <div class="of-heading-sm">Artifacts</div>
+          <div class="mt-3 space-y-2 text-sm">
+            <div class="flex items-center justify-between rounded-[4px] px-2 py-2 hover:bg-[var(--bg-hover)]">
+              <span>Explorations &amp; Lists</span>
+              <span class="of-badge">{demoArtifacts.length}</span>
+            </div>
+            <div class="flex items-center justify-between rounded-[4px] px-2 py-2 text-[var(--text-soft)]">
+              <span>Modules</span>
+              <span class="of-badge">0</span>
+            </div>
+          </div>
+        </div>
       </div>
+    </aside>
 
-      <form
-        class="mt-4 space-y-3"
-        onsubmit={(event) => {
-          event.preventDefault();
-          runSemanticSearch();
-        }}
-      >
-        <div class="grid gap-3 md:grid-cols-[1fr_auto]">
-          <input
-            type="text"
-            bind:value={semanticQuery}
-            placeholder="e.g. fraud review, customer health, analyst escalation"
-            class="rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-          />
-          <select
-            bind:value={semanticKind}
-            class="rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-          >
-            <option value="all">All kinds</option>
-            <option value="object_type">Object types</option>
-            <option value="object_instance">Object instances</option>
-            <option value="interface">Interfaces</option>
-            <option value="action_type">Action types</option>
-            <option value="link_type">Link types</option>
-          </select>
-        </div>
-        <div class="flex flex-wrap items-center gap-3">
-          <button
-            type="submit"
-            disabled={semanticLoading}
-            class="rounded-full bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50"
-          >
-            {semanticLoading ? 'Searching...' : 'Search ontology'}
-          </button>
-          <button
-            type="button"
-            class="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-            onclick={() => {
-              semanticQuery = '';
-              searchResults = [];
-              semanticError = '';
-            }}
-          >
-            Clear
-          </button>
-        </div>
-      </form>
-
-      {#if semanticError}
-        <div class="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
-          {semanticError}
-        </div>
-      {/if}
-
-      {#if searchResults.length === 0}
-        <div class="mt-6 rounded-2xl border border-dashed border-slate-300 px-4 py-12 text-center text-sm text-slate-500 dark:border-slate-700">
-          {#if semanticQuery.trim()}
-            No ontology matches yet for that query.
-          {:else}
-            Search results will appear here.
-          {/if}
-        </div>
-      {:else}
-        <div class="mt-6 space-y-3">
-          {#each searchResults as result (result.kind + ':' + result.id)}
-            <article class="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
-              <div class="flex flex-wrap items-start justify-between gap-3">
-                <div class="space-y-2">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class={`rounded-full px-2.5 py-1 text-xs font-medium ${resultBadgeClass(result.kind)}`}>
-                      {result.kind.replaceAll('_', ' ')}
-                    </span>
-                    <span class="text-xs text-slate-500">score {result.score.toFixed(2)}</span>
-                  </div>
+    <div class="space-y-4">
+      {#if activeTab === 'artifacts'}
+        <section class="of-panel px-5 py-4">
+          <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
+            <div class="of-kicker">Artifacts</div>
+            <a href="/ontology/object-sets" class="of-link">View all artifacts</a>
+          </div>
+          <div class="mt-4 grid gap-4 md:grid-cols-2">
+            {#each demoArtifacts as artifact}
+              <article class="of-card">
+                <div class="flex items-center gap-3">
+                  <span class="of-icon-box h-10 w-10 bg-[#f0e7ff] text-[#7c4ad8]">
+                    <Glyph name={artifact.icon} size={18} />
+                  </span>
                   <div>
-                    <h3 class="font-medium text-slate-950 dark:text-slate-50">{result.title}</h3>
-                    {#if result.subtitle}
-                      <p class="mt-1 text-xs font-mono text-slate-500">{result.subtitle}</p>
-                    {/if}
+                    <div class="text-[15px] font-medium text-[var(--text-strong)]">{artifact.name}</div>
+                    <div class="text-xs text-[var(--text-muted)]">{artifact.type}</div>
                   </div>
                 </div>
-                <div class="flex flex-wrap gap-2">
-                  <a
-                    href={result.route}
-                    class="rounded-full border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    Open
-                  </a>
-                  {#if result.kind === 'object_instance'}
-                    <a
-                      href="/ontology/graph?root_object_id={result.id}"
-                      class="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300"
-                    >
-                      Neighborhood
-                    </a>
-                  {/if}
+              </article>
+            {/each}
+          </div>
+        </section>
+      {:else if semanticQuery.trim() && searchResults.length > 0}
+        {#each groupedResults as [group, items]}
+          {#if shouldShowGroup(group)}
+            <section class="of-panel px-5 py-4">
+              <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
+                <div class="of-kicker">{group}</div>
+                <a href="/ontology" class="of-link">Explore all</a>
+              </div>
+              <div class="mt-4 space-y-3">
+                {#each items as result (result.kind + ':' + result.id)}
+                  <article class="rounded-[6px] border border-[var(--border-default)] bg-[#fbfcfe] px-4 py-3">
+                    <div class="flex items-start justify-between gap-4">
+                      <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span class={`of-chip ${resultBadgeClass(result.kind)}`}>{result.kind.replaceAll('_', ' ')}</span>
+                          <span class="text-xs text-[var(--text-muted)]">score {result.score.toFixed(2)}</span>
+                        </div>
+                        <div class="mt-2 text-[15px] font-medium text-[var(--text-strong)]">{result.title}</div>
+                        {#if result.subtitle}
+                          <div class="mt-1 text-sm text-[var(--text-muted)]">{result.subtitle}</div>
+                        {/if}
+                      </div>
+                      <a href={result.route} class="of-btn text-[13px]">Open</a>
+                    </div>
+                  </article>
+                {/each}
+              </div>
+            </section>
+          {/if}
+        {/each}
+      {:else}
+        {#if activeTab === 'overview' || activeTab === 'types'}
+          <section class="of-panel px-5 py-4">
+            <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
+              <div class="of-kicker">Object types</div>
+              <a href="/ontology/types" class="of-link">Create new object type</a>
+            </div>
+
+            {#if loading}
+              <div class="px-2 py-12 text-center text-sm text-[var(--text-muted)]">Loading ontology types...</div>
+            {:else if types.length === 0}
+              <div class="px-2 py-12 text-center text-sm text-[var(--text-muted)]">
+                No object types found.
+              </div>
+            {:else}
+              <div class="mt-4 grid gap-4 xl:grid-cols-2">
+                {#each types as typeItem (typeItem.id)}
+                  <article class="of-card">
+                    <div class="flex items-start justify-between gap-3">
+                      <div class="flex min-w-0 items-start gap-3">
+                        <span
+                          class="flex h-11 w-11 shrink-0 items-center justify-center rounded-[6px] text-white"
+                          style={`background:${typeItem.color || '#4d8cf0'}`}
+                        >
+                          <Glyph name={objectTypeGlyph(typeItem)} size={18} />
+                        </span>
+                        <div class="min-w-0">
+                          <div class="flex items-center gap-2">
+                            <h3 class="truncate text-[15px] font-medium text-[var(--text-strong)]">
+                              {typeItem.display_name}
+                            </h3>
+                            <span class="of-badge">1</span>
+                          </div>
+                          <div class="mt-1 truncate font-mono text-xs text-[var(--text-muted)]">{typeItem.name}</div>
+                          <div class="mt-2 text-sm text-[var(--text-muted)]">
+                            {typeItem.description || 'Semantic object type available for exploration and graph traversal.'}
+                          </div>
+                        </div>
+                      </div>
+                      <button type="button" class="text-sm text-[#b42318]" onclick={() => handleDelete(typeItem.id)}>
+                        Delete
+                      </button>
+                    </div>
+                    <div class="flex flex-wrap gap-2 pt-1">
+                      <a href="/ontology/{typeItem.id}" class="of-link text-sm">Open detail</a>
+                      <span class="text-[var(--text-soft)]">•</span>
+                      <a href="/ontology/graph?root_type_id={typeItem.id}" class="of-link text-sm">Explore graph</a>
+                    </div>
+                  </article>
+                {/each}
+              </div>
+            {/if}
+          </section>
+        {/if}
+
+        {#if activeTab === 'overview' || activeTab === 'objects'}
+          <section class="of-panel px-5 py-4">
+            <div class="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
+              <div class="of-kicker">Objects</div>
+              <a href="/ontology/object-sets" class="of-link">View all objects</a>
+            </div>
+            <div class="mt-4 rounded-[6px] border border-[var(--border-default)] bg-[#fbfcfe] p-4">
+              <div class="flex items-start gap-3">
+                <span class="of-icon-box h-10 w-10 bg-[#efe5d4] text-[#9a6c2f]">
+                  <Glyph name="link" size={17} />
+                </span>
+                <div>
+                  <div class="text-[15px] font-medium text-[var(--text-strong)]">Operational runway graph</div>
+                  <div class="mt-1 text-sm text-[var(--text-muted)]">
+                    Example object section used as a landing area before users pivot into linked object sets and
+                    object views.
+                  </div>
                 </div>
               </div>
-              {#if result.snippet}
-                <p class="mt-3 text-sm text-slate-500">{result.snippet}</p>
-              {/if}
-            </article>
-          {/each}
-        </div>
+              <div class="mt-4 grid gap-3">
+                {#each types.slice(0, 2) as item (item.id)}
+                  <div class="rounded-[4px] border border-[var(--border-subtle)] bg-white px-4 py-3">
+                    <div class="text-sm font-medium text-[var(--text-strong)]">{item.display_name}</div>
+                    <div class="mt-1 text-xs text-[var(--text-muted)]">{item.description || item.name}</div>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          </section>
+        {/if}
       {/if}
     </div>
   </section>

@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::FromRow;
@@ -14,6 +15,17 @@ fn default_timeout_seconds() -> u64 {
 
 fn default_max_source_bytes() -> usize {
     64 * 1024
+}
+
+pub const DEFAULT_FUNCTION_PACKAGE_VERSION: &str = "0.1.0";
+
+pub fn default_function_package_version() -> String {
+    DEFAULT_FUNCTION_PACKAGE_VERSION.to_string()
+}
+
+pub fn parse_function_package_version(version: &str) -> Result<Version, String> {
+    Version::parse(version.trim())
+        .map_err(|error| format!("function package version must be valid semver: {error}"))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +61,7 @@ impl Default for FunctionCapabilities {
 pub struct FunctionPackageRow {
     pub id: Uuid,
     pub name: String,
+    pub version: String,
     pub display_name: String,
     pub description: String,
     pub runtime: String,
@@ -64,6 +77,7 @@ pub struct FunctionPackageRow {
 pub struct FunctionPackage {
     pub id: Uuid,
     pub name: String,
+    pub version: String,
     pub display_name: String,
     pub description: String,
     pub runtime: String,
@@ -82,6 +96,7 @@ impl TryFrom<FunctionPackageRow> for FunctionPackage {
         Ok(Self {
             id: row.id,
             name: row.name,
+            version: row.version,
             display_name: row.display_name,
             description: row.description,
             runtime: row.runtime,
@@ -99,6 +114,7 @@ impl TryFrom<FunctionPackageRow> for FunctionPackage {
 pub struct FunctionPackageSummary {
     pub id: Uuid,
     pub name: String,
+    pub version: String,
     pub display_name: String,
     pub runtime: String,
     pub entrypoint: String,
@@ -110,6 +126,7 @@ impl From<&FunctionPackage> for FunctionPackageSummary {
         Self {
             id: value.id,
             name: value.name.clone(),
+            version: value.version.clone(),
             display_name: value.display_name.clone(),
             runtime: value.runtime.clone(),
             entrypoint: value.entrypoint.clone(),
@@ -121,6 +138,7 @@ impl From<&FunctionPackage> for FunctionPackageSummary {
 #[derive(Debug, Deserialize)]
 pub struct CreateFunctionPackageRequest {
     pub name: String,
+    pub version: Option<String>,
     pub display_name: Option<String>,
     pub description: Option<String>,
     pub runtime: String,

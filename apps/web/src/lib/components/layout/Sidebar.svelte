@@ -1,59 +1,84 @@
 <script lang="ts">
   import { page } from '$app/stores';
+  import Glyph from '$components/ui/Glyph.svelte';
 
-  const nav = [
-    { href: '/',          label: 'Home',       icon: '🏠' },
-    { href: '/apps',      label: 'Apps',       icon: '🧩' },
-    { href: '/ai',        label: 'AI Platform', icon: '🛰️' },
-    { href: '/fusion',    label: 'Fusion',     icon: '🧬' },
-    { href: '/streaming', label: 'Streaming',  icon: '🌊' },
-    { href: '/reports',   label: 'Reports',    icon: '🧾' },
-    { href: '/control-panel', label: 'Control Panel', icon: '🛠️' },
-    { href: '/geospatial', label: 'Geospatial', icon: '🗺️' },
-    { href: '/audit',     label: 'Audit',      icon: '🛡️' },
-    { href: '/nexus',     label: 'Nexus',      icon: '🤝' },
-    { href: '/code-repos', label: 'Code Repos', icon: '🧱' },
-    { href: '/developers', label: 'Developers', icon: '</>' },
-    { href: '/marketplace', label: 'Marketplace', icon: '🛍️' },
-    { href: '/ml',        label: 'ML Studio',  icon: '🧠' },
-    { href: '/contour',   label: 'Contour',    icon: '🧿' },
-    { href: '/quiver',    label: 'Quiver',     icon: '📈' },
-    { href: '/dashboards', label: 'Dashboards', icon: '📊' },
-    { href: '/datasets',  label: 'Datasets',   icon: '🗄️' },
-    { href: '/workflows', label: 'Workflows',  icon: '🧭' },
-    { href: '/queries',   label: 'Queries',    icon: '🔍' },
-    { href: '/pipelines', label: 'Pipelines',  icon: '⚙️' },
-    { href: '/ontology',  label: 'Ontology',   icon: '🔗' },
-    { href: '/notebooks', label: 'Notebooks',  icon: '📓' },
-    { href: '/notepad',   label: 'Notepad',    icon: '📝' },
-    { href: '/settings',  label: 'Settings',   icon: '⚙️' },
+  const primaryNav = [
+    { href: '/', label: 'Home', icon: 'home' as const },
+    { href: '/ontology', label: 'Ontology', icon: 'ontology' as const },
+    { href: '/queries', label: 'Queries', icon: 'query' as const },
+    { href: '/datasets', label: 'Datasets', icon: 'database' as const },
+    { href: '/pipelines', label: 'Pipelines', icon: 'graph' as const },
+    { href: '/reports', label: 'Artifacts', icon: 'artifact' as const }
   ];
+
+  const secondaryNav = [
+    { href: '/history', label: 'History', icon: 'history' as const },
+    { href: '/search', label: 'Search', icon: 'search' as const },
+    { href: '/settings', label: 'Settings', icon: 'settings' as const }
+  ];
+
+  function isActive(href: string, pathname: string) {
+    return href === '/'
+      ? pathname === '/'
+      : pathname === href || pathname.startsWith(`${href}/`);
+  }
 </script>
 
-<aside class="w-60 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col">
-  <div class="p-4 border-b border-gray-200 dark:border-gray-800">
-    <a href="/" class="flex items-center gap-2 text-lg font-bold">
-      <span class="text-indigo-500">◆</span>
-      <span>OpenFoundry</span>
+<aside
+  class="of-scrollbar flex w-[72px] shrink-0 flex-col border-r border-slate-800 bg-[var(--bg-sidebar)] text-white"
+>
+  <div class="flex h-[58px] items-center justify-center border-b border-white/10">
+    <a
+      href="/"
+      class="flex h-10 w-10 items-center justify-center rounded-lg bg-white/8 text-white transition hover:bg-white/12"
+      aria-label="OpenFoundry home"
+      title="OpenFoundry"
+    >
+      <Glyph name="cube" size={20} />
     </a>
   </div>
 
-  <nav class="flex-1 p-3 space-y-1">
-    {#each nav as item}
+  <div class="flex flex-1 flex-col items-center gap-2 px-3 py-4">
+    <button type="button" class="of-sidebar-icon-btn" title="Navigation">
+      <Glyph name="menu" size={19} />
+    </button>
+
+    {#each primaryNav as item}
       <a
         href={item.href}
-        class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors
-               {$page.url.pathname === item.href || ($page.url.pathname.startsWith(item.href) && item.href !== '/')
-                 ? 'bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-medium'
-                 : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}"
+        class="of-sidebar-icon-btn"
+        data-active={isActive(item.href, $page.url.pathname)}
+        title={item.label}
+        aria-label={item.label}
       >
-        <span class="text-base">{item.icon}</span>
-        <span>{item.label}</span>
+        <Glyph name={item.icon} size={19} />
       </a>
     {/each}
-  </nav>
 
-  <div class="p-3 border-t border-gray-200 dark:border-gray-800 text-xs text-gray-400">
-    OpenFoundry v0.1.0
+    <div class="my-2 h-px w-8 bg-white/10"></div>
+
+    {#each secondaryNav as item}
+      <a
+        href={item.href}
+        class="of-sidebar-icon-btn"
+        data-active={isActive(item.href, $page.url.pathname)}
+        title={item.label}
+        aria-label={item.label}
+      >
+        <Glyph name={item.icon} size={19} />
+      </a>
+    {/each}
+  </div>
+
+  <div class="flex flex-col items-center gap-2 border-t border-white/10 px-3 py-4">
+    <a href="/help" class="of-sidebar-icon-btn" title="Help" aria-label="Help">
+      <Glyph name="help" size={18} />
+    </a>
+    <div
+      class="flex h-9 w-9 items-center justify-center rounded-full border border-white/12 bg-white/8 text-[11px] font-semibold text-white/90"
+      title="Current user"
+    >
+      OF
+    </div>
   </div>
 </aside>

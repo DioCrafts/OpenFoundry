@@ -17,8 +17,12 @@ pub struct AppState {
     pub jwt_config: JwtConfig,
     pub http_client: reqwest::Client,
     pub audit_service_url: String,
+    pub dataset_service_url: String,
     pub ontology_service_url: String,
+    pub pipeline_service_url: String,
     pub ai_service_url: String,
+    pub search_embedding_provider: String,
+    pub notification_service_url: String,
     pub node_runtime_command: String,
 }
 
@@ -56,8 +60,12 @@ async fn main() {
         jwt_config: jwt_config.clone(),
         http_client,
         audit_service_url: cfg.audit_service_url.clone(),
+        dataset_service_url: cfg.dataset_service_url.clone(),
         ontology_service_url: cfg.ontology_service_url.clone(),
+        pipeline_service_url: cfg.pipeline_service_url.clone(),
         ai_service_url: cfg.ai_service_url.clone(),
+        search_embedding_provider: cfg.search_embedding_provider.clone(),
+        notification_service_url: cfg.notification_service_url.clone(),
         node_runtime_command: cfg.node_runtime_command.clone(),
     };
 
@@ -119,6 +127,10 @@ async fn main() {
                 .post(handlers::functions::create_function_package),
         )
         .route(
+            "/api/v1/ontology/functions/authoring-surface",
+            get(handlers::functions::get_function_authoring_surface),
+        )
+        .route(
             "/api/v1/ontology/functions/{id}",
             get(handlers::functions::get_function_package)
                 .patch(handlers::functions::update_function_package)
@@ -131,6 +143,73 @@ async fn main() {
         .route(
             "/api/v1/ontology/functions/{id}/simulate",
             post(handlers::functions::simulate_function_package),
+        )
+        .route(
+            "/api/v1/ontology/functions/{id}/runs",
+            get(handlers::functions::list_function_package_runs),
+        )
+        .route(
+            "/api/v1/ontology/functions/{id}/metrics",
+            get(handlers::functions::get_function_package_metrics),
+        )
+        .route(
+            "/api/v1/ontology/funnel/health",
+            get(handlers::funnel::get_funnel_health),
+        )
+        .route(
+            "/api/v1/ontology/funnel/sources",
+            get(handlers::funnel::list_funnel_sources)
+                .post(handlers::funnel::create_funnel_source),
+        )
+        .route(
+            "/api/v1/ontology/funnel/sources/{id}",
+            get(handlers::funnel::get_funnel_source)
+                .patch(handlers::funnel::update_funnel_source)
+                .delete(handlers::funnel::delete_funnel_source),
+        )
+        .route(
+            "/api/v1/ontology/funnel/sources/{id}/health",
+            get(handlers::funnel::get_funnel_source_health),
+        )
+        .route(
+            "/api/v1/ontology/funnel/sources/{id}/run",
+            post(handlers::funnel::trigger_funnel_run),
+        )
+        .route(
+            "/api/v1/ontology/funnel/sources/{id}/runs",
+            get(handlers::funnel::list_funnel_runs),
+        )
+        .route(
+            "/api/v1/ontology/funnel/sources/{source_id}/runs/{run_id}",
+            get(handlers::funnel::get_funnel_run),
+        )
+        .route(
+            "/api/v1/ontology/projects",
+            get(handlers::projects::list_projects).post(handlers::projects::create_project),
+        )
+        .route(
+            "/api/v1/ontology/projects/{id}",
+            get(handlers::projects::get_project)
+                .patch(handlers::projects::update_project)
+                .delete(handlers::projects::delete_project),
+        )
+        .route(
+            "/api/v1/ontology/projects/{id}/memberships",
+            get(handlers::projects::list_project_memberships)
+                .post(handlers::projects::upsert_project_membership),
+        )
+        .route(
+            "/api/v1/ontology/projects/{id}/memberships/{user_id}",
+            delete(handlers::projects::delete_project_membership),
+        )
+        .route(
+            "/api/v1/ontology/projects/{id}/resources",
+            get(handlers::projects::list_project_resources)
+                .post(handlers::projects::bind_project_resource),
+        )
+        .route(
+            "/api/v1/ontology/projects/{id}/resources/{resource_kind}/{resource_id}",
+            delete(handlers::projects::unbind_project_resource),
         )
         .route(
             "/api/v1/ontology/rules",
@@ -212,12 +291,20 @@ async fn main() {
             "/api/v1/ontology/types/{type_id}/objects/query",
             post(handlers::objects::query_objects),
         )
+        .route(
+            "/api/v1/ontology/types/{type_id}/objects/knn",
+            post(handlers::objects::knn_objects),
+        )
         .route("/api/v1/ontology/types/{type_id}/objects/{obj_id}", get(handlers::objects::get_object))
         .route(
             "/api/v1/ontology/types/{type_id}/objects/{obj_id}",
             patch(handlers::objects::update_object),
         )
         .route("/api/v1/ontology/types/{type_id}/objects/{obj_id}", delete(handlers::objects::delete_object))
+        .route(
+            "/api/v1/ontology/types/{type_id}/objects/{obj_id}/inline-edit/{property_id}",
+            post(handlers::actions::execute_inline_edit),
+        )
         .route(
             "/api/v1/ontology/types/{type_id}/objects/{obj_id}/neighbors",
             get(handlers::objects::list_neighbors),

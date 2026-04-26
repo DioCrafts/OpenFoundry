@@ -42,6 +42,97 @@ pub struct ActionInputField {
     pub default_value: Option<Value>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionPropertyMapping {
+    pub property_name: String,
+    pub input_name: Option<String>,
+    pub value: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateObjectActionConfig {
+    pub property_mappings: Vec<ActionPropertyMapping>,
+    #[serde(default)]
+    pub static_patch: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct ActionFormSchema {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sections: Vec<ActionFormSection>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parameter_overrides: Vec<ActionFormParameterOverride>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ActionFormSection {
+    pub id: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    #[serde(default = "default_action_form_section_columns")]
+    pub columns: u8,
+    #[serde(default)]
+    pub collapsible: bool,
+    #[serde(default = "default_action_form_section_visible")]
+    pub visible: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parameter_names: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overrides: Vec<ActionFormSectionOverride>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ActionFormSectionOverride {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditions: Vec<ActionFormCondition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub columns: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ActionFormParameterOverride {
+    pub parameter_name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditions: Vec<ActionFormCondition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_value: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ActionFormCondition {
+    pub left: String,
+    #[serde(default = "default_action_form_condition_operator")]
+    pub operator: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub right: Option<Value>,
+}
+
+fn default_action_form_section_columns() -> u8 {
+    1
+}
+
+fn default_action_form_section_visible() -> bool {
+    true
+}
+
+fn default_action_form_condition_operator() -> String {
+    "is".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ActionAuthorizationPolicy {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -69,6 +160,7 @@ pub struct ActionTypeRow {
     pub object_type_id: Uuid,
     pub operation_kind: String,
     pub input_schema: Value,
+    pub form_schema: Value,
     pub config: Value,
     pub confirmation_required: bool,
     pub permission_key: Option<String>,
@@ -87,6 +179,7 @@ pub struct ActionType {
     pub object_type_id: Uuid,
     pub operation_kind: String,
     pub input_schema: Vec<ActionInputField>,
+    pub form_schema: ActionFormSchema,
     pub config: Value,
     pub confirmation_required: bool,
     pub permission_key: Option<String>,
@@ -108,6 +201,7 @@ impl TryFrom<ActionTypeRow> for ActionType {
             object_type_id: row.object_type_id,
             operation_kind: row.operation_kind,
             input_schema: serde_json::from_value(row.input_schema).unwrap_or_default(),
+            form_schema: serde_json::from_value(row.form_schema).unwrap_or_default(),
             config: row.config,
             confirmation_required: row.confirmation_required,
             permission_key: row.permission_key,
@@ -128,6 +222,7 @@ pub struct CreateActionTypeRequest {
     pub object_type_id: Uuid,
     pub operation_kind: String,
     pub input_schema: Option<Vec<ActionInputField>>,
+    pub form_schema: Option<ActionFormSchema>,
     pub config: Option<Value>,
     pub confirmation_required: Option<bool>,
     pub permission_key: Option<String>,
@@ -140,6 +235,7 @@ pub struct UpdateActionTypeRequest {
     pub description: Option<String>,
     pub operation_kind: Option<String>,
     pub input_schema: Option<Vec<ActionInputField>>,
+    pub form_schema: Option<ActionFormSchema>,
     pub config: Option<Value>,
     pub confirmation_required: Option<bool>,
     pub permission_key: Option<String>,

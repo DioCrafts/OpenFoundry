@@ -1,8 +1,10 @@
 pub mod access;
+pub mod function_metrics;
 pub mod function_runtime;
 pub mod graph;
 pub mod indexer;
 pub mod object_sets;
+pub mod project_access;
 pub mod rules;
 pub mod schema;
 pub mod search;

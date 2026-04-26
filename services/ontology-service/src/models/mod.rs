@@ -1,4 +1,7 @@
 pub mod action_type;
+pub mod funnel;
+pub mod function_authoring;
+pub mod function_metrics;
 pub mod function_package;
 pub mod graph;
 pub mod interface;
@@ -7,6 +10,7 @@ pub mod object_set;
 pub mod object_type;
 pub mod object_view;
 pub mod property;
+pub mod project;
 pub mod quiver;
 pub mod rule;
 pub mod search;

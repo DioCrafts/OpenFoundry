@@ -9,6 +9,7 @@ const VALID_TYPES: &[&str] = &[
     "timestamp",
     "json",
     "array",
+    "vector",
     "reference",
     "geo_point",
     "media_reference",
@@ -55,6 +56,22 @@ pub fn validate_property_value(property_type: &str, value: &Value) -> Result<(),
             }
         }
         "json" | "array" => Ok(()),
+        "vector" => {
+            let Some(values) = value.as_array() else {
+                return Err("expected numeric array value for vector".into());
+            };
+            if values.is_empty() {
+                return Err("vector value cannot be empty".into());
+            }
+            if values
+                .iter()
+                .all(|entry| entry.is_f64() || entry.is_i64() || entry.is_u64())
+            {
+                Ok(())
+            } else {
+                Err("vector requires an array of numeric values".into())
+            }
+        }
         "date" | "timestamp" => {
             if value.is_string() {
                 Ok(())
@@ -142,5 +159,11 @@ mod tests {
             validate_property_value("media_reference", &json!({ "uri": "s3://bucket/file.png" }))
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn accepts_vector_type_and_numeric_array_value() {
+        assert!(validate_property_type("vector").is_ok());
+        assert!(validate_property_value("vector", &json!([0.1, 0.2, 0.3])).is_ok());
     }
 }

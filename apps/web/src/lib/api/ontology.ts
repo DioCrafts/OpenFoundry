@@ -25,8 +25,14 @@ export interface Property {
   time_dependent: boolean;
   default_value: unknown;
   validation_rules: unknown;
+  inline_edit_config?: PropertyInlineEditConfig | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface PropertyInlineEditConfig {
+  action_type_id: string;
+  input_name?: string | null;
 }
 
 export interface SharedPropertyType {
@@ -97,6 +103,29 @@ export interface SearchResult {
   score: number;
   route: string;
   metadata: Record<string, unknown>;
+  score_breakdown?: {
+    fusion_strategy: string;
+    lexical_rank: number | null;
+    semantic_rank: number | null;
+    lexical_score: number;
+    semantic_score: number;
+    title_bonus: number;
+  } | null;
+}
+
+export type KnnMetric = 'cosine' | 'dot_product' | 'euclidean';
+
+export interface KnnObjectResult {
+  object: ObjectInstance;
+  score: number;
+  distance?: number | null;
+}
+
+export interface KnnObjectsResponse {
+  property_name: string;
+  metric: KnnMetric | string;
+  total: number;
+  data: KnnObjectResult[];
 }
 
 export interface GraphNode {
@@ -237,6 +266,46 @@ export interface ActionInputField {
   default_value?: unknown;
 }
 
+export interface ActionFormCondition {
+  left: string;
+  operator: string;
+  right?: unknown;
+}
+
+export interface ActionFormSectionOverride {
+  conditions?: ActionFormCondition[];
+  hidden?: boolean;
+  columns?: number;
+  title?: string | null;
+  description?: string | null;
+}
+
+export interface ActionFormSection {
+  id: string;
+  title?: string | null;
+  description?: string | null;
+  columns?: number;
+  collapsible?: boolean;
+  visible?: boolean;
+  parameter_names?: string[];
+  overrides?: ActionFormSectionOverride[];
+}
+
+export interface ActionFormParameterOverride {
+  parameter_name: string;
+  conditions?: ActionFormCondition[];
+  hidden?: boolean;
+  required?: boolean;
+  default_value?: unknown;
+  display_name?: string | null;
+  description?: string | null;
+}
+
+export interface ActionFormSchema {
+  sections?: ActionFormSection[];
+  parameter_overrides?: ActionFormParameterOverride[];
+}
+
 export interface ActionAuthorizationPolicy {
   required_permission_keys?: string[];
   any_role?: string[];
@@ -255,6 +324,7 @@ export interface ActionType {
   object_type_id: string;
   operation_kind: ActionOperationKind;
   input_schema: ActionInputField[];
+  form_schema: ActionFormSchema;
   config: unknown;
   confirmation_required: boolean;
   permission_key: string | null;
@@ -308,6 +378,7 @@ export interface FunctionCapabilities {
 export interface FunctionPackageSummary {
   id: string;
   name: string;
+  version: string;
   display_name: string;
   runtime: string;
   entrypoint: string;
@@ -317,6 +388,7 @@ export interface FunctionPackageSummary {
 export interface FunctionPackage {
   id: string;
   name: string;
+  version: string;
   display_name: string;
   description: string;
   runtime: string;
@@ -326,6 +398,161 @@ export interface FunctionPackage {
   owner_id: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface FunctionPackageRun {
+  id: string;
+  function_package_id: string;
+  function_package_name: string;
+  function_package_version: string;
+  runtime: string;
+  status: 'success' | 'failure' | string;
+  invocation_kind: 'simulation' | 'action' | string;
+  action_id: string | null;
+  action_name: string | null;
+  object_type_id: string | null;
+  target_object_id: string | null;
+  actor_id: string;
+  duration_ms: number;
+  error_message: string | null;
+  started_at: string;
+  completed_at: string;
+}
+
+export interface FunctionPackageMetrics {
+  package: FunctionPackageSummary;
+  total_runs: number;
+  successful_runs: number;
+  failed_runs: number;
+  simulation_runs: number;
+  action_runs: number;
+  success_rate: number;
+  avg_duration_ms: number | null;
+  p95_duration_ms: number | null;
+  max_duration_ms: number | null;
+  last_run_at: string | null;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+}
+
+export interface OntologyFunnelPropertyMapping {
+  source_field: string;
+  target_property: string;
+}
+
+export interface OntologyFunnelSource {
+  id: string;
+  name: string;
+  description: string;
+  object_type_id: string;
+  dataset_id: string;
+  pipeline_id: string | null;
+  dataset_branch: string | null;
+  dataset_version: number | null;
+  preview_limit: number;
+  default_marking: string;
+  status: string;
+  property_mappings: OntologyFunnelPropertyMapping[];
+  trigger_context: Record<string, unknown>;
+  owner_id: string;
+  last_run_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OntologyFunnelRun {
+  id: string;
+  source_id: string;
+  object_type_id: string;
+  dataset_id: string;
+  pipeline_id: string | null;
+  pipeline_run_id: string | null;
+  status: string;
+  trigger_type: string;
+  started_by: string | null;
+  rows_read: number;
+  inserted_count: number;
+  updated_count: number;
+  skipped_count: number;
+  error_count: number;
+  details: Record<string, unknown>;
+  error_message: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface OntologyFunnelSourceHealth {
+  source: OntologyFunnelSource;
+  health_status: string;
+  health_reason: string;
+  total_runs: number;
+  successful_runs: number;
+  failed_runs: number;
+  warning_runs: number;
+  success_rate: number;
+  avg_duration_ms: number | null;
+  p95_duration_ms: number | null;
+  max_duration_ms: number | null;
+  latest_run_status: string | null;
+  last_run_at: string | null;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  last_warning_at: string | null;
+  rows_read: number;
+  inserted_count: number;
+  updated_count: number;
+  skipped_count: number;
+  error_count: number;
+}
+
+export interface OntologyFunnelHealthSummary {
+  stale_after_hours: number;
+  total_sources: number;
+  active_sources: number;
+  paused_sources: number;
+  healthy_sources: number;
+  degraded_sources: number;
+  failing_sources: number;
+  stale_sources: number;
+  never_run_sources: number;
+  total_runs: number;
+  successful_runs: number;
+  failed_runs: number;
+  warning_runs: number;
+  success_rate: number;
+  rows_read: number;
+  inserted_count: number;
+  updated_count: number;
+  skipped_count: number;
+  error_count: number;
+  last_run_at: string | null;
+  sources: OntologyFunnelSourceHealth[];
+}
+
+export interface FunctionAuthoringTemplate {
+  id: string;
+  runtime: string;
+  display_name: string;
+  description: string;
+  entrypoint: string;
+  starter_source: string;
+  default_capabilities: FunctionCapabilities;
+  recommended_use_cases: string[];
+  cli_scaffold_template: string | null;
+  sdk_packages: string[];
+}
+
+export interface FunctionSdkPackageReference {
+  language: string;
+  path: string;
+  package_name: string;
+  generated_by: string;
+}
+
+export interface FunctionAuthoringSurface {
+  templates: FunctionAuthoringTemplate[];
+  sdk_packages: FunctionSdkPackageReference[];
+  cli_commands: string[];
 }
 
 export type RuleEvaluationMode = 'advisory' | 'automatic';
@@ -616,6 +843,7 @@ export interface CreateActionTypeBody {
   object_type_id: string;
   operation_kind: ActionOperationKind;
   input_schema?: ActionInputField[];
+  form_schema?: ActionFormSchema;
   config?: unknown;
   confirmation_required?: boolean;
   permission_key?: string;
@@ -627,6 +855,7 @@ export interface UpdateActionTypeBody {
   description?: string;
   operation_kind?: ActionOperationKind;
   input_schema?: ActionInputField[];
+  form_schema?: ActionFormSchema;
   config?: unknown;
   confirmation_required?: boolean;
   permission_key?: string;
@@ -677,6 +906,9 @@ export function searchOntology(body: {
   object_type_id?: string;
   limit?: number;
   semantic?: boolean;
+  hybrid_strategy?: 'rrf' | 'weighted';
+  embedding_provider?: string;
+  semantic_candidate_limit?: number;
 }) {
   return api.post<{ query: string; total: number; data: SearchResult[] }>('/ontology/search', body);
 }
@@ -870,6 +1102,7 @@ export function listFunctionPackages(params?: {
 
 export function createFunctionPackage(body: {
   name: string;
+  version?: string;
   display_name?: string;
   description?: string;
   runtime: string;
@@ -878,6 +1111,10 @@ export function createFunctionPackage(body: {
   capabilities?: Partial<FunctionCapabilities>;
 }) {
   return api.post<FunctionPackage>('/ontology/functions', body);
+}
+
+export function getFunctionAuthoringSurface() {
+  return api.get<FunctionAuthoringSurface>('/ontology/functions/authoring-surface');
 }
 
 export function validateFunctionPackage(id: string, body: {
@@ -905,6 +1142,44 @@ export function simulateFunctionPackage(id: string, body: {
     preview: Record<string, unknown>;
     result: Record<string, unknown>;
   }>(`/ontology/functions/${id}/simulate`, body);
+}
+
+export function getFunctionPackageMetrics(id: string) {
+  return api.get<FunctionPackageMetrics>(`/ontology/functions/${id}/metrics`);
+}
+
+export function listFunctionPackageRuns(id: string, params?: {
+  page?: number;
+  per_page?: number;
+  status?: string;
+  invocation_kind?: string;
+}) {
+  const qs = new URLSearchParams();
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.per_page) qs.set('per_page', String(params.per_page));
+  if (params?.status) qs.set('status', params.status);
+  if (params?.invocation_kind) qs.set('invocation_kind', params.invocation_kind);
+  return api.get<{ data: FunctionPackageRun[]; total: number; page: number; per_page: number }>(
+    `/ontology/functions/${id}/runs?${qs}`,
+  );
+}
+
+export function getOntologyFunnelHealth(params?: {
+  object_type_id?: string;
+  stale_after_hours?: number;
+}) {
+  const qs = new URLSearchParams();
+  if (params?.object_type_id) qs.set('object_type_id', params.object_type_id);
+  if (params?.stale_after_hours) qs.set('stale_after_hours', String(params.stale_after_hours));
+  return api.get<OntologyFunnelHealthSummary>(`/ontology/funnel/health?${qs}`);
+}
+
+export function getOntologyFunnelSourceHealth(id: string, params?: { stale_after_hours?: number }) {
+  const qs = new URLSearchParams();
+  if (params?.stale_after_hours) qs.set('stale_after_hours', String(params.stale_after_hours));
+  return api.get<{ stale_after_hours: number; source_health: OntologyFunnelSourceHealth }>(
+    `/ontology/funnel/sources/${id}/health?${qs}`,
+  );
 }
 
 export function listRules(params?: {
@@ -1028,8 +1303,25 @@ export function createProperty(typeId: string, body: {
   property_type: string;
   required?: boolean;
   unique_constraint?: boolean;
+  time_dependent?: boolean;
+  default_value?: unknown;
+  validation_rules?: unknown;
+  inline_edit_config?: PropertyInlineEditConfig | null;
 }) {
   return api.post<Property>(`/ontology/types/${typeId}/properties`, body);
+}
+
+export function updateProperty(typeId: string, propertyId: string, body: {
+  display_name?: string;
+  description?: string;
+  required?: boolean;
+  unique_constraint?: boolean;
+  time_dependent?: boolean;
+  default_value?: unknown;
+  validation_rules?: unknown;
+  inline_edit_config?: PropertyInlineEditConfig | null;
+}) {
+  return api.patch<Property>(`/ontology/types/${typeId}/properties/${propertyId}`, body);
 }
 
 export function listSharedPropertyTypes(params?: {
@@ -1123,6 +1415,18 @@ export function updateObject(
   return api.patch<ObjectInstance>(`/ontology/types/${typeId}/objects/${objectId}`, body);
 }
 
+export function executeInlineEdit(
+  typeId: string,
+  objectId: string,
+  propertyId: string,
+  body: { value: unknown; justification?: string },
+) {
+  return api.post<ExecuteActionResponse>(
+    `/ontology/types/${typeId}/objects/${objectId}/inline-edit/${propertyId}`,
+    body,
+  );
+}
+
 export function queryObjects(
   typeId: string,
   body: { equals?: Record<string, unknown>; limit?: number },
@@ -1131,6 +1435,20 @@ export function queryObjects(
     `/ontology/types/${typeId}/objects/query`,
     body,
   );
+}
+
+export function knnObjects(
+  typeId: string,
+  body: {
+    property_name: string;
+    anchor_object_id?: string;
+    query_vector?: number[];
+    limit?: number;
+    metric?: KnnMetric;
+    exclude_anchor?: boolean;
+  },
+) {
+  return api.post<KnnObjectsResponse>(`/ontology/types/${typeId}/objects/knn`, body);
 }
 
 export function listNeighbors(typeId: string, objectId: string) {

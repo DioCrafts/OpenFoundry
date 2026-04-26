@@ -105,6 +105,8 @@ export default defineConfig({
             { text: "Functions by runtime", link: "/ontology-building/functions-runtime/" },
             { text: "Rules and simulation", link: "/ontology-building/rules-and-simulation" },
             { text: "Object sets and search", link: "/ontology-building/object-sets-and-search" },
+            { text: "Indexing and materialization", link: "/ontology-building/indexing-and-materialization" },
+            { text: "Object edits and conflict resolution", link: "/ontology-building/object-edits-and-conflict-resolution" },
             { text: "Object permissioning", link: "/ontology-building/object-permissioning" },
             { text: "Applications", link: "/ontology-building/applications" },
             { text: "Applications catalog", link: "/ontology-building/applications-catalog/" },

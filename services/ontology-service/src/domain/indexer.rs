@@ -296,7 +296,7 @@ pub async fn build_search_documents(
         let action_rows = if let Some(object_type_id) = object_type_filter {
             sqlx::query_as::<_, ActionTypeRow>(
                 r#"SELECT id, name, display_name, description, object_type_id, operation_kind, input_schema,
-                          config, confirmation_required, permission_key, authorization_policy,
+                          form_schema, config, confirmation_required, permission_key, authorization_policy,
                           owner_id, created_at, updated_at
                    FROM action_types
                    WHERE object_type_id = $1
@@ -308,7 +308,7 @@ pub async fn build_search_documents(
         } else {
             sqlx::query_as::<_, ActionTypeRow>(
                 r#"SELECT id, name, display_name, description, object_type_id, operation_kind, input_schema,
-                          config, confirmation_required, permission_key, authorization_policy,
+                          form_schema, config, confirmation_required, permission_key, authorization_policy,
                           owner_id, created_at, updated_at
                    FROM action_types
                    ORDER BY created_at DESC"#,

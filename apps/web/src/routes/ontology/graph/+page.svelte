@@ -2,11 +2,12 @@
   import { onMount } from 'svelte';
   import { page as pageStore } from '$app/stores';
   import { get } from 'svelte/store';
+  import Glyph from '$components/ui/Glyph.svelte';
   import {
     getOntologyGraph,
     listObjectTypes,
     type GraphResponse,
-    type ObjectType,
+    type ObjectType
   } from '$lib/api/ontology';
 
   let container = $state<HTMLDivElement | undefined>(undefined);
@@ -18,6 +19,7 @@
   let rootObjectId = $state('');
   let rootTypeId = $state('');
   let depth = $state(2);
+  let mode = $state<'schema' | 'object'>('schema');
 
   let cytoscapeModule: typeof import('cytoscape') | null = null;
   let graphInstance: import('cytoscape').Core | null = null;
@@ -27,10 +29,10 @@
     error = '';
     try {
       graph = await getOntologyGraph({
-        root_object_id: rootObjectId || undefined,
-        root_type_id: rootObjectId ? undefined : rootTypeId || undefined,
+        root_object_id: mode === 'object' ? rootObjectId || undefined : undefined,
+        root_type_id: mode === 'schema' ? rootTypeId || undefined : undefined,
         depth,
-        limit: 60,
+        limit: 60
       });
     } catch (cause) {
       error = cause instanceof Error ? cause.message : 'Failed to load ontology graph';
@@ -67,11 +69,10 @@
         data: {
           id: node.id,
           label: node.label,
-          secondaryLabel: node.secondary_label,
-          color: node.color || (node.kind === 'interface' ? '#0f766e' : '#0f172a'),
+          color: node.color || '#4d8cf0',
           route: node.route,
-          kind: node.kind,
-        },
+          kind: node.kind
+        }
       })),
       ...graph.edges.map((edge) => ({
         data: {
@@ -79,9 +80,9 @@
           source: edge.source,
           target: edge.target,
           label: edge.label,
-          kind: edge.kind,
-        },
-      })),
+          kind: edge.kind
+        }
+      }))
     ];
 
     graphInstance = cytoscapeModule({
@@ -93,38 +94,41 @@
           style: {
             'background-color': 'data(color)',
             label: 'data(label)',
-            color: '#e2e8f0',
+            color: '#334155',
             'text-wrap': 'wrap',
             'text-max-width': '120px',
             'font-size': 11,
-            'text-valign': 'bottom',
-            'text-margin-y': 8,
-            width: 44,
-            height: 44,
-            'border-width': 2,
-            'border-color': '#0f172a',
-          },
+            'font-family': 'Helvetica Neue, Arial, sans-serif',
+            'text-valign': 'center',
+            'text-halign': 'center',
+            width: 26,
+            height: 26,
+            shape: 'round-rectangle',
+            padding: '16px',
+            'border-width': 1,
+            'border-color': '#d7dee9'
+          }
         },
         {
           selector: 'edge',
           style: {
-            width: 2,
-            'line-color': '#64748b',
-            'target-arrow-color': '#64748b',
+            width: 1.6,
+            'line-color': '#9fb0c8',
+            'target-arrow-color': '#9fb0c8',
             'target-arrow-shape': 'triangle',
             'curve-style': 'bezier',
             label: 'data(label)',
-            'font-size': 10,
-            color: '#94a3b8',
-            'text-rotation': 'autorotate',
-          },
-        },
+            'font-size': 9,
+            color: '#64748b',
+            'text-rotation': 'autorotate'
+          }
+        }
       ],
       layout: {
         name: graph.mode === 'object' ? 'breadthfirst' : 'cose',
         animate: true,
-        padding: 24,
-      },
+        padding: 32
+      }
     });
 
     graphInstance.on('tap', 'node', (event) => {
@@ -135,21 +139,8 @@
     });
   }
 
-  function applyMode(mode: 'schema' | 'object') {
-    if (mode === 'schema') {
-      rootObjectId = '';
-    } else {
-      rootTypeId = '';
-    }
-    loadGraph();
-  }
-
   function countEntries(entries: Record<string, number> | undefined) {
     return Object.entries(entries ?? {}).sort((left, right) => right[1] - left[1]);
-  }
-
-  function formatScope(scope: string | undefined) {
-    return (scope ?? 'local').replaceAll('_', ' ');
   }
 
   onMount(async () => {
@@ -157,6 +148,7 @@
     rootObjectId = page.url.searchParams.get('root_object_id') ?? '';
     rootTypeId = page.url.searchParams.get('root_type_id') ?? '';
     depth = Number(page.url.searchParams.get('depth') ?? '2') || 2;
+    mode = rootObjectId ? 'object' : 'schema';
 
     await Promise.all([loadReferenceData(), loadGraph()]);
   });
@@ -166,39 +158,30 @@
   });
 </script>
 
-<div class="space-y-6">
-  <section class="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-    <div class="flex flex-wrap items-center justify-between gap-4">
+<div class="space-y-5">
+  <section class="of-hero-strip">
+    <div class="flex flex-wrap items-start justify-between gap-4">
       <div>
-        <p class="text-xs uppercase tracking-[0.22em] text-slate-500">Vertex</p>
-        <h1 class="mt-1 text-3xl font-semibold tracking-tight text-slate-950 dark:text-slate-50">
-          Ontology Graph
-        </h1>
-        <p class="mt-2 max-w-3xl text-sm text-slate-500">
-          Explore either the schema graph or a live object neighborhood built from link instances.
-        </p>
+        <div class="of-heading-xl">Ontology graph</div>
+        <div class="mt-2 max-w-3xl text-[15px] text-[var(--text-muted)]">
+          Switch between schema-level topology and a live object neighborhood while keeping the same
+          compact explorer chrome.
+        </div>
       </div>
-      <a
-        href="/ontology"
-        class="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-      >
-        Back to explorer
+      <a href="/ontology" class="of-btn">
+        <Glyph name="graph" size={16} />
+        <span>Back to explorer</span>
       </a>
     </div>
   </section>
 
-  <section class="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-    <div class="grid gap-4 lg:grid-cols-[1.1fr_1.1fr_0.55fr_auto]">
-      <div>
-        <label class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200" for="root-type-id">
-          Focus schema by type
+  <section class="of-panel p-5">
+    <div class="flex flex-wrap items-end gap-4">
+      <div class="min-w-[220px] flex-1">
+        <label class="mb-1 block text-sm font-medium text-[var(--text-default)]" for="root-type-id">
+          Object type
         </label>
-        <select
-          id="root-type-id"
-          bind:value={rootTypeId}
-          disabled={!!rootObjectId}
-          class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-        >
+        <select id="root-type-id" bind:value={rootTypeId} disabled={mode === 'object'} class="of-select">
           <option value="">All types</option>
           {#each types as typeItem (typeItem.id)}
             <option value={typeItem.id}>{typeItem.display_name}</option>
@@ -206,159 +189,111 @@
         </select>
       </div>
 
-      <div>
-        <label class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200" for="root-object-id">
-          Focus object neighborhood
+      <div class="min-w-[260px] flex-[1.2]">
+        <label class="mb-1 block text-sm font-medium text-[var(--text-default)]" for="root-object-id">
+          Root object
         </label>
         <input
           id="root-object-id"
           bind:value={rootObjectId}
           placeholder="Paste object UUID to inspect neighbors"
-          class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+          class="of-input"
         />
       </div>
 
-      <div>
-        <label class="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-200" for="graph-depth">
-          Depth
-        </label>
-        <input
-          id="graph-depth"
-          type="number"
-          bind:value={depth}
-          min="1"
-          max="4"
-          class="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-        />
+      <div class="w-[130px]">
+        <label class="mb-1 block text-sm font-medium text-[var(--text-default)]" for="graph-depth">Depth</label>
+        <input id="graph-depth" type="number" bind:value={depth} min="1" max="4" class="of-input" />
       </div>
 
-      <div class="flex items-end gap-2">
-        <button
-          type="button"
-          onclick={() => applyMode(rootObjectId ? 'object' : 'schema')}
-          class="rounded-full bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700"
-        >
-          Load graph
+      <div class="flex gap-2">
+        <div class="of-pill-toggle">
+          <button type="button" data-active={mode === 'schema'} onclick={() => mode = 'schema'}>List</button>
+          <button type="button" data-active={mode === 'object'} onclick={() => mode = 'object'}>Graph</button>
+        </div>
+        <button class="of-btn of-btn-primary" type="button" onclick={loadGraph}>
+          <Glyph name="run" size={15} />
+          <span>Load</span>
         </button>
       </div>
     </div>
 
-    <div class="mt-4 flex flex-wrap gap-2 text-sm">
-      <button
-        type="button"
-        onclick={() => applyMode('schema')}
-        class="rounded-full border border-slate-300 px-3 py-1.5 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-      >
-        Schema mode
-      </button>
-      <button
-        type="button"
-        onclick={() => applyMode('object')}
-        class="rounded-full border border-slate-300 px-3 py-1.5 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-      >
-        Object mode
-      </button>
-    </div>
-
     {#if graph}
-      <div class="mt-6 grid gap-3 md:grid-cols-4">
-        <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
-          <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Scope</div>
-          <div class="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
-            {formatScope(graph.summary.scope)}
-          </div>
-        </div>
-        <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
-          <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Max Hops</div>
-          <div class="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
-            {graph.summary.max_hops_reached}
-          </div>
-        </div>
-        <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
-          <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Sensitive Objects</div>
-          <div class="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
-            {graph.summary.sensitive_objects}
-          </div>
-        </div>
-        <div class="rounded-2xl bg-slate-100 px-4 py-3 dark:bg-slate-800/70">
-          <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Boundary Crossings</div>
-          <div class="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
-            {graph.summary.boundary_crossings}
-          </div>
-        </div>
+      <div class="mt-4 flex flex-wrap gap-2">
+        <span class="of-chip">Nodes {graph.total_nodes}</span>
+        <span class="of-chip">Edges {graph.total_edges}</span>
+        <span class="of-chip">Depth {graph.summary.max_hops_reached}</span>
+        <span class="of-chip">Sensitive {graph.summary.sensitive_objects}</span>
       </div>
-
-      {#if countEntries(graph.summary.object_types).length > 0}
-        <div class="mt-4">
-          <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Types in scope</p>
-          <div class="mt-2 flex flex-wrap gap-2">
-            {#each countEntries(graph.summary.object_types) as [label, count]}
-              <span class="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                {label} · {count}
-              </span>
-            {/each}
-          </div>
-        </div>
-      {/if}
-
-      {#if graph.summary.sensitive_markings.length > 0}
-        <div class="mt-4">
-          <p class="text-xs uppercase tracking-[0.2em] text-slate-500">Sensitive markings</p>
-          <div class="mt-2 flex flex-wrap gap-2">
-            {#each graph.summary.sensitive_markings as marking}
-              <span class="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
-                {marking}
-              </span>
-            {/each}
-          </div>
-        </div>
-      {/if}
     {/if}
   </section>
 
   {#if error}
-    <div class="rounded-[1.75rem] border border-rose-200 bg-rose-50 px-6 py-4 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
-      {error}
-    </div>
+    <div class="of-inline-note">{error}</div>
   {/if}
 
-  <section class="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-    <div class="flex flex-wrap items-center justify-between gap-4">
+  <section class="of-panel overflow-hidden">
+    <div class="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-4">
       <div>
-        <h2 class="text-lg font-semibold text-slate-950 dark:text-slate-50">Graph canvas</h2>
-        <p class="mt-1 text-sm text-slate-500">
+        <div class="of-heading-sm">Graph canvas</div>
+        <div class="mt-1 text-sm text-[var(--text-muted)]">
           {#if graph}
-            Mode: <span class="font-medium text-slate-700 dark:text-slate-300">{graph.mode}</span>
-            · {graph.total_nodes} nodes · {graph.total_edges} edges
+            {graph.mode} · {graph.total_nodes} nodes · {graph.total_edges} edges
           {:else}
             Load a schema or object graph to begin.
           {/if}
-        </p>
+        </div>
       </div>
-      {#if graph?.root_object_id}
-        <span class="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
-          root object {graph.root_object_id}
-        </span>
-      {/if}
+      <div class="of-pill-toggle">
+        <button type="button" data-active={mode === 'schema'} onclick={() => mode = 'schema'}>Schema</button>
+        <button type="button" data-active={mode === 'object'} onclick={() => mode = 'object'}>Object</button>
+      </div>
     </div>
 
     {#if loading}
-      <div class="mt-6 rounded-2xl border border-dashed border-slate-300 px-4 py-16 text-center text-sm text-slate-500 dark:border-slate-700">
-        Loading graph...
-      </div>
+      <div class="px-4 py-16 text-center text-sm text-[var(--text-muted)]">Loading graph...</div>
     {:else if !graph || graph.nodes.length === 0}
-      <div class="mt-6 rounded-2xl border border-dashed border-slate-300 px-4 py-16 text-center text-sm text-slate-500 dark:border-slate-700">
+      <div class="px-4 py-16 text-center text-sm text-[var(--text-muted)]">
         No graph data available for the current selection.
       </div>
     {:else}
-      <div
-        bind:this={container}
-        class="mt-6 w-full rounded-[1.5rem] border border-slate-200 dark:border-slate-800"
-        style="height: 680px; background: radial-gradient(circle at top, #1e293b, #020617 68%);"
-      ></div>
-      <p class="mt-3 text-xs text-slate-500">
-        Click nodes to navigate. Type nodes open their detail page; object nodes jump to the anchored object card.
-      </p>
+      <div class="relative bg-[#eef3f8]">
+        <div class="absolute left-5 top-5 z-10 flex flex-col gap-2">
+          <button class="of-btn h-9 w-9 px-0" type="button" aria-label="Zoom in">
+            <Glyph name="plus" size={16} />
+          </button>
+          <button class="of-btn h-9 w-9 px-0" type="button" aria-label="Search">
+            <Glyph name="search" size={16} />
+          </button>
+          <button class="of-btn h-9 w-9 px-0" type="button" aria-label="Reset">
+            <Glyph name="history" size={16} />
+          </button>
+        </div>
+
+        <div class="absolute right-5 top-5 z-10 rounded-[6px] border border-[var(--border-default)] bg-white px-4 py-3">
+          <label class="flex items-center gap-2 text-sm text-[var(--text-default)]">
+            <input type="checkbox" />
+            <span>Object type</span>
+          </label>
+          <label class="mt-2 flex items-center gap-2 text-sm text-[var(--text-default)]">
+            <input type="checkbox" checked />
+            <span>Object type group</span>
+          </label>
+        </div>
+
+        <div bind:this={container} style="height: 720px;"></div>
+      </div>
+
+      {#if countEntries(graph.summary.object_types).length > 0}
+        <div class="border-t border-[var(--border-subtle)] px-5 py-4">
+          <div class="of-heading-sm">Types in scope</div>
+          <div class="mt-3 flex flex-wrap gap-2">
+            {#each countEntries(graph.summary.object_types) as [label, count]}
+              <span class="of-chip">{label} · {count}</span>
+            {/each}
+          </div>
+        </div>
+      {/if}
     {/if}
   </section>
 </div>

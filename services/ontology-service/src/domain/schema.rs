@@ -69,7 +69,8 @@ pub async fn load_effective_properties(
 
     let direct = sqlx::query_as::<_, Property>(
         r#"SELECT id, object_type_id, name, display_name, description, property_type, required,
-                  unique_constraint, time_dependent, default_value, validation_rules, created_at, updated_at
+                  unique_constraint, time_dependent, default_value, validation_rules,
+                  inline_edit_config, created_at, updated_at
            FROM properties
            WHERE object_type_id = $1
            ORDER BY created_at ASC"#,
