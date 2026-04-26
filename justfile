@@ -211,6 +211,22 @@ fe-install:
 fe-dev:
     cd apps/web && pnpm dev
 
+# Install documentation website dependencies
+docs-install:
+    cd docs && npm ci
+
+# Run documentation website locally
+docs-dev:
+    cd docs && npm run docs:dev
+
+# Build documentation website
+docs-build:
+    cd docs && npm run docs:build
+
+# Preview built documentation website
+docs-preview:
+    cd docs && npm run docs:preview
+
 # Start infra, backend services, and frontend together for manual local verification
 dev-stack:
     ./infra/scripts/dev-stack.sh
