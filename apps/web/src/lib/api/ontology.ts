@@ -1210,6 +1210,16 @@ export function createRule(body: {
   return api.post<OntologyRule>('/ontology/rules', body);
 }
 
+export function updateRule(id: string, body: {
+  display_name?: string;
+  description?: string;
+  evaluation_mode?: RuleEvaluationMode;
+  trigger_spec?: RuleTriggerSpec;
+  effect_spec?: RuleEffectSpec;
+}) {
+  return api.patch<OntologyRule>(`/ontology/rules/${id}`, body);
+}
+
 export function simulateRule(id: string, body: {
   object_id: string;
   properties_patch?: Record<string, unknown>;

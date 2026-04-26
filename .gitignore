@@ -71,3 +71,6 @@ temp/
 # - apps/web/static/generated/openapi/openfoundry.json
 # - apps/web/static/generated/terraform/openfoundry-provider.json
 # - infra/terraform/providers/openfoundry/provider.schema.json
+
+# Local imported docs snapshot
+docs_original_palantir_foundry/

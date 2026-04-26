@@ -63,6 +63,26 @@
         <h2 class="font-semibold">Ontology</h2>
         <p class="text-sm text-gray-500 mt-1">Define object types and relationships</p>
       </a>
+      <a href="/object-explorer" class="block p-6 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 hover:border-indigo-300 transition-colors">
+        <div class="text-2xl mb-2">🧭</div>
+        <h2 class="font-semibold">Object Explorer</h2>
+        <p class="text-sm text-gray-500 mt-1">Search ontology objects, pivot across links, compare lists, and reopen saved explorations</p>
+      </a>
+      <a href="/dynamic-scheduling" class="block p-6 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 hover:border-indigo-300 transition-colors">
+        <div class="text-2xl mb-2">🗓️</div>
+        <h2 class="font-semibold">Dynamic Scheduling</h2>
+        <p class="text-sm text-gray-500 mt-1">Run a dedicated scheduling board with queue pressure, validation rules, and staged moves</p>
+      </a>
+      <a href="/foundry-rules" class="block p-6 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 hover:border-indigo-300 transition-colors">
+        <div class="text-2xl mb-2">⚖️</div>
+        <h2 class="font-semibold">Foundry Rules</h2>
+        <p class="text-sm text-gray-500 mt-1">Author low-code rules, run workflow deployments, operate schedules, and generate custom rule pipelines</p>
+      </a>
+      <a href="/machinery" class="block p-6 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 hover:border-indigo-300 transition-colors">
+        <div class="text-2xl mb-2">🏭</div>
+        <h2 class="font-semibold">Machinery</h2>
+        <p class="text-sm text-gray-500 mt-1">Model processes, mine operational behavior, and monitor live interventions across workflows and queues</p>
+      </a>
       <a href="/notebooks" class="block p-6 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 hover:border-indigo-300 transition-colors">
         <div class="text-2xl mb-2">📓</div>
         <h2 class="font-semibold">Notebooks</h2>
